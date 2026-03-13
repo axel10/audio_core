@@ -46,18 +46,19 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
       fftSize: 1024,
       analysisFrequencyHz: 30,
       visualOptions: const VisualizerOptimizationOptions(
-        smoothingCoefficient: 0.55,
-        gravityCoefficient: 8,
-        // logarithmicScale: 6,
-        normalizationFloorDb: -100,
-        aggregationMode: FftAggregationMode.rms,
+        smoothingCoefficient: 0.35,
+        gravityCoefficient: 10,
+        logarithmicScale: 4,
+        normalizationFloorDb: -85,
+        aggregationMode: FftAggregationMode.peak,
         frequencyGroups: 64,
         targetFrameRate: 60,
-        groupContrastExponent: 3,
+        groupContrastExponent: 1.6,
+        overallMultiplier: 1.2,
       ),
     );
     _controller.initialize();
-    _sub = _controller.rawFftStream.listen((frame) {
+    _sub = _controller.optimizedFftStream.listen((frame) {
       if (!mounted) {
         return;
       }

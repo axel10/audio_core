@@ -103,6 +103,7 @@ class FftProcessor {
   late List<double> _interpFrom;
   late List<double> _interpTo;
   int _interpMicros = 0;
+  double _normalizationRef = 1.0;
 
   List<double> get latestRawFft => _latestRawFft;
   List<double> get latestOptimizedFft => _latestOptimizedFft;
@@ -180,6 +181,7 @@ class FftProcessor {
     _interpFrom = List<double>.filled(_options.frequencyGroups, 0.0);
     _interpTo = List<double>.filled(_options.frequencyGroups, 0.0);
     _interpMicros = 0;
+    _normalizationRef = 1.0;
   }
 
   List<double> _groupBins(
@@ -257,7 +259,15 @@ class FftProcessor {
     }
     if (framePeak <= 1e-9) return out;
 
-    final ref = (fftSize / 2.0).clamp(1.0, double.infinity);
+    // Rust side already emits window-normalized magnitudes. Use a slowly
+    // decaying adaptive reference instead of a fixed FFT-size denominator.
+    if (framePeak >= _normalizationRef) {
+      _normalizationRef = framePeak;
+    } else {
+      _normalizationRef = math.max(framePeak, _normalizationRef * 0.985);
+    }
+
+    final ref = _normalizationRef.clamp(1e-6, double.infinity);
     final noiseFloorDb = normalizationFloorDb.clamp(-120.0, -10.0);
     final invRange = 1.0 / -noiseFloorDb;
 
