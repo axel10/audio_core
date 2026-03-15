@@ -6,12 +6,15 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `append_from_path`, `clear_fft`, `compute_fft`, `controller`, `ensure_audio_output`, `extract_waveform_from_path`, `fold_packet_peaks_to_chunks`, `new`, `new`, `playback_position`, `push_mono_sample`, `with_player`
+// These functions are ignored because they are not marked as `pub`: `append_from_path`, `clear_fft`, `compute_fft`, `controller`, `ensure_audio_output`, `extract_waveform_from_path`, `fold_packet_peaks_to_chunks`, `new`, `new`, `playback_position`, `push_mono_sample`, `push_state`, `trigger_state_push`, `with_player`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FftSource`, `PlayerController`, `WaveformChunk`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `channels`, `clone`, `current_span_len`, `fmt`, `next`, `sample_rate`, `total_duration`, `try_seek`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `channels`, `clone`, `clone`, `current_span_len`, `fmt`, `fmt`, `next`, `sample_rate`, `total_duration`, `try_seek`
 
 String greet({required String name}) =>
     RustLib.instance.api.crateApiSimpleGreet(name: name);
+
+Stream<PlaybackState> subscribePlaybackState() =>
+    RustLib.instance.api.crateApiSimpleSubscribePlaybackState();
 
 Future<void> loadAudioFile({required String path}) =>
     RustLib.instance.api.crateApiSimpleLoadAudioFile(path: path);
@@ -61,3 +64,38 @@ Future<Float32List> extractWaveformForPath({
   expectedChunks: expectedChunks,
   sampleStride: sampleStride,
 );
+
+class PlaybackState {
+  final PlatformInt64 positionMs;
+  final PlatformInt64 durationMs;
+  final bool isPlaying;
+  final double volume;
+  final String? path;
+
+  const PlaybackState({
+    required this.positionMs,
+    required this.durationMs,
+    required this.isPlaying,
+    required this.volume,
+    this.path,
+  });
+
+  @override
+  int get hashCode =>
+      positionMs.hashCode ^
+      durationMs.hashCode ^
+      isPlaying.hashCode ^
+      volume.hashCode ^
+      path.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PlaybackState &&
+          runtimeType == other.runtimeType &&
+          positionMs == other.positionMs &&
+          durationMs == other.durationMs &&
+          isPlaying == other.isPlaying &&
+          volume == other.volume &&
+          path == other.path;
+}

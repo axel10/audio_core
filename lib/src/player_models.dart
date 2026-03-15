@@ -55,7 +55,26 @@ class Playlist {
   }
 }
 
+/// Playback mode for the playlist.
+enum PlaylistMode {
+  /// 单曲播放：播放完当前歌曲后停止。
+  single,
+
+  /// 单曲循环：不断重复当前歌曲。
+  singleLoop,
+
+  /// 队列播放：顺序播放当前队列，播完最后一首后停止。
+  queue,
+
+  /// 队列循环：顺序播放当前队列，播完最后一首后回到第一首继续。
+  queueLoop,
+
+  /// 自动队列循环：播完当前队列后，自动加载并播放下一个播放列表。
+  autoQueueLoop,
+}
+
 /// Repeat behavior used by playlist playback.
+/// @deprecated Use [PlaylistMode] instead.
 enum RepeatMode { off, one, all }
 
 /// Reason for a track transition.
@@ -94,6 +113,7 @@ class PlayerControllerState {
     required this.playlists,
     required this.shuffleEnabled,
     required this.repeatMode,
+    required this.playlistMode,
     this.activePlaylist,
     this.currentIndex,
     this.track,
@@ -118,7 +138,11 @@ class PlayerControllerState {
   final bool shuffleEnabled;
 
   /// Active repeat mode.
+  /// @deprecated Use [playlistMode] instead.
   final RepeatMode repeatMode;
+
+  /// Active playlist mode.
+  final PlaylistMode playlistMode;
 
   /// Currently active playlist, or `null` if none selected.
   final Playlist? activePlaylist;

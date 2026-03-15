@@ -40,13 +40,12 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
     this.fftSize = 1024,
     this.analysisFrequencyHz = 30.0,
     VisualizerOptimizationOptions visualOptions =
-    const VisualizerOptimizationOptions(),
-  })
-      : assert(fftSize > 0),
-        assert(analysisFrequencyHz > 0),
-        assert(visualOptions.frequencyGroups > 0),
-        assert(visualOptions.targetFrameRate > 0),
-        assert(visualOptions.groupContrastExponent > 0) {
+        const VisualizerOptimizationOptions(),
+  }) : assert(fftSize > 0),
+       assert(analysisFrequencyHz > 0),
+       assert(visualOptions.frequencyGroups > 0),
+       assert(visualOptions.targetFrameRate > 0),
+       assert(visualOptions.groupContrastExponent > 0) {
     _fftProcessor = FftProcessor(fftSize: fftSize, options: visualOptions);
   }
 
@@ -61,6 +60,7 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
 
   Timer? _analysisTick;
   Timer? _renderTick;
+  StreamSubscription<PlaybackState>? _playbackStateSubscription;
   bool _initialized = false;
   int _lastAnalysisMicros = 0;
   bool _fftEnabled = true;
@@ -70,6 +70,8 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
   Duration _duration = Duration.zero;
   Duration _position = Duration.zero;
   bool _isPlaying = false;
+  Duration _positionAnchor = Duration.zero;
+  int _positionAnchorMicros = 0;
 
   double _volume = 1.0;
   PlayerState _playerState = PlayerState.idle;
@@ -77,9 +79,9 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
   late final FftProcessor _fftProcessor;
 
   final StreamController<FftFrame> _rawFftController =
-  StreamController<FftFrame>.broadcast();
+      StreamController<FftFrame>.broadcast();
   final StreamController<FftFrame> _optimizedFftController =
-  StreamController<FftFrame>.broadcast();
+      StreamController<FftFrame>.broadcast();
 
   /// Whether the current platform is Android.
   bool get isAndroid => Platform.isAndroid;
@@ -134,10 +136,9 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
   Duration get _analysisInterval =>
       Duration(microseconds: (1000000.0 / analysisFrequencyHz).round());
 
-  Duration get _renderInterval =>
-      Duration(
-        microseconds: (1000000.0 / visualOptions.targetFrameRate).round(),
-      );
+  Duration get _renderInterval => Duration(
+    microseconds: (1000000.0 / visualOptions.targetFrameRate).round(),
+  );
 
   /// Requests required runtime permissions on Android.
   ///
@@ -166,6 +167,15 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
       return;
     }
 
+    _playbackStateSubscription = subscribePlaybackState().listen(
+      _applyPlaybackStateSnapshot,
+      onError: (Object error, StackTrace stackTrace) {
+        _error = 'Playback subscription failed: $error';
+        _playerState = PlayerState.error;
+        _emitPlaylistState();
+        notifyListeners();
+      },
+    );
     _analysisTick = Timer.periodic(_analysisInterval, (_) => _onAnalysisTick());
     _renderTick = Timer.periodic(_renderInterval, (_) => _onRenderTick());
     _initialized = true;
@@ -209,6 +219,7 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
     _position = Duration.zero;
     _duration = Duration(milliseconds: durationMs.toInt());
     _isPlaying = false;
+    _resetLocalPositionAnchor();
     _playerState = PlayerState.ready;
     _resetFftState();
     if (!_playlistInternalLoad) {
@@ -258,6 +269,7 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
     try {
       await playAudio();
       _isPlaying = true;
+      _syncLocalPositionAnchor();
       _playerState = PlayerState.playing;
     } catch (e) {
       _error = 'Play failed: $e';
@@ -273,6 +285,7 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
     try {
       await pauseAudio();
       _isPlaying = false;
+      _resetLocalPositionAnchor();
       _playerState = PlayerState.paused;
     } catch (e) {
       _error = 'Pause failed: $e';
@@ -292,6 +305,7 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
     try {
       await seekAudioMs(positionMs: ms);
       _position = Duration(milliseconds: ms);
+      _syncLocalPositionAnchor();
     } catch (e) {
       _error = 'Seek failed: $e';
     }
@@ -359,20 +373,18 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
   }
 
   /// Current raw FFT frame snapshot.
-  FftFrame getCurrentRawFftFrame() =>
-      FftFrame(
-        position: _position,
-        values: _fftProcessor.latestRawFft,
-        isPlaying: _isPlaying,
-      );
+  FftFrame getCurrentRawFftFrame() => FftFrame(
+    position: _position,
+    values: _fftProcessor.latestRawFft,
+    isPlaying: _isPlaying,
+  );
 
   /// Current optimized FFT frame snapshot.
-  FftFrame getCurrentOptimizedFftFrame() =>
-      FftFrame(
-        position: _position,
-        values: _fftProcessor.latestOptimizedFft,
-        isPlaying: _isPlaying,
-      );
+  FftFrame getCurrentOptimizedFftFrame() => FftFrame(
+    position: _position,
+    values: _fftProcessor.latestOptimizedFft,
+    isPlaying: _isPlaying,
+  );
 
   /// Clears current [error].
   void clearError({bool notify = true}) {
@@ -472,7 +484,6 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
     if (_selectedPath == null || !_fftEnabled) {
       return;
     }
-    await _pollPlaybackState();
 
     List<double> rawBins = List<double>.from(getLatestFft());
     if (rawBins.isEmpty) {
@@ -482,9 +493,7 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
       rawBins = List<double>.filled(rawBins.length, 0.0);
     }
 
-    final nowMicros = DateTime
-        .now()
-        .microsecondsSinceEpoch;
+    final nowMicros = DateTime.now().microsecondsSinceEpoch;
     final dtSec = _lastAnalysisMicros == 0
         ? _analysisInterval.inMicroseconds / 1000000.0
         : (nowMicros - _lastAnalysisMicros) / 1000000.0;
@@ -495,6 +504,12 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
   }
 
   void _onRenderTick() {
+    final didAdvancePosition = _advanceLocalPosition();
+    if (didAdvancePosition) {
+      _emitPlaylistState();
+      notifyListeners();
+    }
+
     if (_selectedPath == null || !_fftEnabled || !_needOptimizedCompute) {
       return;
     }
@@ -510,34 +525,94 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
     _renderTick = Timer.periodic(_renderInterval, (_) => _onRenderTick());
   }
 
-  Future<void> _pollPlaybackState() async {
-    final wasPlaying = _isPlaying;
-    try {
-      _position = Duration(milliseconds: getAudioPositionMs().toInt());
-      final newDurationMs = getAudioDurationMs().toInt();
-      if (newDurationMs > 0) {
-        _duration = Duration(milliseconds: newDurationMs);
-      }
-      _isPlaying = isAudioPlaying();
-
-      if (_isPlaying) {
-        _playerState = PlayerState.playing;
-      } else if (_selectedPath != null &&
-          _position.inMilliseconds >= (_duration.inMilliseconds - 250)) {
-        _playerState = PlayerState.completed;
-      } else if (_selectedPath != null) {
-        _playerState = PlayerState.paused;
-      }
-
-      _emitPlaylistState();
-      notifyListeners();
-      await _handleAutoTransitionIfNeeded(wasPlaying: wasPlaying);
-    } catch (e) {
-      _error = 'Playback poll failed: $e';
-      _playerState = PlayerState.error;
-      _emitPlaylistState();
-      notifyListeners();
+  bool _advanceLocalPosition() {
+    if (!_isPlaying || _selectedPath == null) {
+      return false;
     }
+
+    final anchorMicros = _positionAnchorMicros;
+    if (anchorMicros <= 0) {
+      _syncLocalPositionAnchor();
+      return false;
+    }
+
+    final nowMicros = DateTime.now().microsecondsSinceEpoch;
+    final elapsedMicros = nowMicros - anchorMicros;
+    if (elapsedMicros <= 0) {
+      return false;
+    }
+
+    final nextPosition = _clampPosition(
+      _positionAnchor + Duration(microseconds: elapsedMicros),
+    );
+    if (nextPosition == _position) {
+      return false;
+    }
+
+    _position = nextPosition;
+    if (_duration > Duration.zero &&
+        _position.inMilliseconds >= (_duration.inMilliseconds - 250)) {
+      _isPlaying = false;
+      _resetLocalPositionAnchor();
+      _playerState = PlayerState.completed;
+      unawaited(_handleAutoTransitionIfNeeded(wasPlaying: true));
+    }
+    return true;
+  }
+
+  void _applyPlaybackStateSnapshot(PlaybackState state) {
+    final wasPlaying = _isPlaying;
+    final nextDuration = state.durationMs > 0
+        ? Duration(milliseconds: state.durationMs.toInt())
+        : _duration;
+    final nextPosition = _clampPosition(
+      Duration(milliseconds: state.positionMs.toInt()),
+      duration: nextDuration,
+    );
+
+    _selectedPath = state.path ?? _selectedPath;
+    _duration = nextDuration;
+    _position = nextPosition;
+    _isPlaying = state.isPlaying;
+    _volume = state.volume.clamp(0.0, 1.0);
+
+    if (_isPlaying) {
+      _playerState = PlayerState.playing;
+      _syncLocalPositionAnchor();
+    } else if (_selectedPath != null &&
+        _duration > Duration.zero &&
+        _position.inMilliseconds >= (_duration.inMilliseconds - 250)) {
+      _playerState = PlayerState.completed;
+      _resetLocalPositionAnchor();
+    } else if (_selectedPath != null) {
+      _playerState = PlayerState.paused;
+      _resetLocalPositionAnchor();
+    }
+
+    _emitPlaylistState();
+    notifyListeners();
+    unawaited(_handleAutoTransitionIfNeeded(wasPlaying: wasPlaying));
+  }
+
+  Duration _clampPosition(Duration value, {Duration? duration}) {
+    final maxDuration = duration ?? _duration;
+    if (maxDuration <= Duration.zero) {
+      return value < Duration.zero ? Duration.zero : value;
+    }
+    if (value < Duration.zero) {
+      return Duration.zero;
+    }
+    return value > maxDuration ? maxDuration : value;
+  }
+
+  void _syncLocalPositionAnchor() {
+    _positionAnchor = _position;
+    _positionAnchorMicros = DateTime.now().microsecondsSinceEpoch;
+  }
+
+  void _resetLocalPositionAnchor() {
+    _positionAnchor = _position;
+    _positionAnchorMicros = 0;
   }
 
   void _emitRawFftFrame() {
@@ -576,6 +651,7 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
   void dispose() {
     _analysisTick?.cancel();
     _renderTick?.cancel();
+    _playbackStateSubscription?.cancel();
     unawaited(disposeAudio());
     _rawFftController.close();
     _optimizedFftController.close();
@@ -598,7 +674,7 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
 
   // Playback settings
   bool _shuffleEnabled = false;
-  RepeatMode _repeatMode = RepeatMode.off;
+  PlaylistMode _playlistMode = PlaylistMode.queue;
   math.Random _shuffleRandom = math.Random();
 
   // Internal state tracking
@@ -608,15 +684,14 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
 
   // State notifiers
   final StreamController<PlayerControllerState> _playlistStateController =
-  StreamController<PlayerControllerState>.broadcast();
+      StreamController<PlayerControllerState>.broadcast();
   late final ValueNotifier<PlayerControllerState> _playlistStateNotifier =
-  ValueNotifier<PlayerControllerState>(_buildControllerState());
+      ValueNotifier<PlayerControllerState>(_buildControllerState());
 
   /// All user-visible playlists (excludes internal __default__).
-  List<Playlist> get playlists =>
-      List<Playlist>.unmodifiable(
-        _playlists.where((p) => p.id != _defaultPlaylistId).toList(),
-      );
+  List<Playlist> get playlists => List<Playlist>.unmodifiable(
+    _playlists.where((p) => p.id != _defaultPlaylistId).toList(),
+  );
 
   /// Queue playlist backed by internal id `__default__`.
   Playlist? get queue => getPlaylistById(_defaultPlaylistId);
@@ -643,18 +718,26 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
   int? get currentIndex => _currentIndex;
 
   /// Currently selected track, or `null` if no active playlist or nothing selected.
-  AudioTrack? get currentTrack =>
-      _currentIndex == null
-          ? null
-          : (_currentIndex! < _activePlaylistTracks.length
-          ? _activePlaylistTracks[_currentIndex!]
-          : null);
+  AudioTrack? get currentTrack => _currentIndex == null
+      ? null
+      : (_currentIndex! < _activePlaylistTracks.length
+            ? _activePlaylistTracks[_currentIndex!]
+            : null);
 
   /// Whether shuffle playback order is enabled.
   bool get shuffleEnabled => _shuffleEnabled;
 
   /// Active repeat mode.
-  RepeatMode get repeatMode => _repeatMode;
+  /// @deprecated Use [playlistMode] instead.
+  RepeatMode get repeatMode => _playlistMode == PlaylistMode.singleLoop
+      ? RepeatMode.one
+      : (_playlistMode == PlaylistMode.queueLoop ||
+                _playlistMode == PlaylistMode.autoQueueLoop
+            ? RepeatMode.all
+            : RepeatMode.off);
+
+  /// Active playlist mode.
+  PlaylistMode get playlistMode => _playlistMode;
 
   /// Current playlist state snapshot.
   PlayerControllerState get playlistState => _buildControllerState();
@@ -670,11 +753,12 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
   // === Playlist Collection Management ===
 
   /// Creates a new playlist and optionally sets it as active.
-  Future<void> createPlaylist(String id,
-      String name, {
-        List<AudioTrack> items = const <AudioTrack>[],
-        bool setAsActive = false,
-      }) async {
+  Future<void> createPlaylist(
+    String id,
+    String name, {
+    List<AudioTrack> items = const <AudioTrack>[],
+    bool setAsActive = false,
+  }) async {
     if (id == _defaultPlaylistId) {
       throw StateError('Cannot create playlist with reserved id "$id"');
     }
@@ -701,7 +785,8 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
   }
 
   /// Updates a playlist's name and/or items.
-  Future<void> updatePlaylist(String id, {
+  Future<void> updatePlaylist(
+    String id, {
     String? name,
     List<AudioTrack>? items,
   }) async {
@@ -766,7 +851,8 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
 
   /// Sets the active playlist by id.
   /// Optionally starts playback at [startIndex] and with [autoPlay].
-  Future<void> setActivePlaylistById(String id, {
+  Future<void> setActivePlaylistById(
+    String id, {
     int startIndex = 0,
     bool autoPlay = false,
   }) async {
@@ -877,8 +963,7 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
     final currentQueue = queue!;
     await updatePlaylist(
       _defaultPlaylistId,
-      items: List<AudioTrack>.from(currentQueue.items)
-        ..addAll(tracks),
+      items: List<AudioTrack>.from(currentQueue.items)..addAll(tracks),
     );
   }
 
@@ -1010,8 +1095,7 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
     }
     final currentQueue = queue!;
     _assertValidIndex(index, currentQueue.items, 'index');
-    final updated = List<AudioTrack>.from(currentQueue.items)
-      ..removeAt(index);
+    final updated = List<AudioTrack>.from(currentQueue.items)..removeAt(index);
     await updatePlaylist(_defaultPlaylistId, items: updated);
   }
 
@@ -1077,7 +1161,8 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
       await playAt(0);
       return true;
     }
-    if (_repeatMode == RepeatMode.one && reason != PlaybackReason.user) {
+    if (_playlistMode == PlaylistMode.singleLoop &&
+        reason != PlaybackReason.user) {
       await seek(Duration.zero);
       await play();
       return true;
@@ -1124,8 +1209,26 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
   }
 
   /// Sets repeat mode.
+  /// @deprecated Use [setPlaylistMode] instead.
   Future<void> setRepeatMode(RepeatMode mode) async {
-    _repeatMode = mode;
+    switch (mode) {
+      case RepeatMode.off:
+        _playlistMode = PlaylistMode.queue;
+        break;
+      case RepeatMode.one:
+        _playlistMode = PlaylistMode.singleLoop;
+        break;
+      case RepeatMode.all:
+        _playlistMode = PlaylistMode.queueLoop;
+        break;
+    }
+    _emitPlaylistState();
+    notifyListeners();
+  }
+
+  /// Sets the active playlist mode.
+  Future<void> setPlaylistMode(PlaylistMode mode) async {
+    _playlistMode = mode;
     _emitPlaylistState();
     notifyListeners();
   }
@@ -1265,9 +1368,7 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
         return;
       }
     }
-    final fileName = path
-        .split(RegExp(r'[\\/]'))
-        .last;
+    final fileName = path.split(RegExp(r'[\\/]')).last;
     _activePlaylistTracks
       ..clear()
       ..add(
@@ -1327,7 +1428,8 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
     if (candidate >= 0 && candidate < _playOrder.length) {
       return _playOrder[candidate];
     }
-    if (_repeatMode == RepeatMode.all) {
+    if (_playlistMode == PlaylistMode.queueLoop ||
+        _playlistMode == PlaylistMode.autoQueueLoop) {
       return next ? _playOrder.first : _playOrder.last;
     }
     return null;
@@ -1346,7 +1448,8 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
       currentState: _playerState,
       playlists: List<Playlist>.unmodifiable(visiblePlaylists),
       shuffleEnabled: _shuffleEnabled,
-      repeatMode: _repeatMode,
+      repeatMode: repeatMode,
+      playlistMode: _playlistMode,
       activePlaylist: activePlaylist,
       currentIndex: _currentIndex,
       track: currentTrack,
@@ -1364,9 +1467,7 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
 
   void _suppressAutoAdvanceFor(Duration duration) {
     _autoAdvanceSuppressedUntilMicros =
-        DateTime
-            .now()
-            .microsecondsSinceEpoch + duration.inMicroseconds;
+        DateTime.now().microsecondsSinceEpoch + duration.inMicroseconds;
   }
 
   Future<void> _handleAutoTransitionIfNeeded({required bool wasPlaying}) async {
@@ -1376,27 +1477,57 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
     if (_selectedPath == null || _activePlaylistTracks.isEmpty) {
       return;
     }
-    final now = DateTime
-        .now()
-        .microsecondsSinceEpoch;
+    final now = DateTime.now().microsecondsSinceEpoch;
     if (now < _autoAdvanceSuppressedUntilMicros) {
       return;
     }
     final reachedEnd =
         _duration.inMilliseconds > 0 &&
-            _position.inMilliseconds >= (_duration.inMilliseconds - 250);
+        _position.inMilliseconds >= (_duration.inMilliseconds - 250);
     if (!wasPlaying || _isPlaying || !reachedEnd) {
       return;
     }
     _autoTransitionInFlight = true;
     try {
-      if (_repeatMode == RepeatMode.one) {
+      if (_playlistMode == PlaylistMode.single) {
+        _isPlaying = false;
+        notifyListeners();
+        return;
+      }
+
+      if (_playlistMode == PlaylistMode.singleLoop) {
         await seek(Duration.zero);
         await play();
         return;
       }
+
       final moved = await playNext(reason: PlaybackReason.ended);
       if (!moved) {
+        if (_playlistMode == PlaylistMode.autoQueueLoop &&
+            _playlists.length > 1) {
+          // Advance to next playlist
+          final currentIdx = _playlists.indexWhere(
+            (p) => p.id == _activePlaylistId,
+          );
+          if (currentIdx >= 0) {
+            // Skip __default__ if it's the next one and not empty, or just handle visible
+            final visiblePlaylists = _playlists
+                .where((p) => p.id != _defaultPlaylistId)
+                .toList();
+            if (visiblePlaylists.isNotEmpty) {
+              final activeVisibleIdx = visiblePlaylists.indexWhere(
+                (p) => p.id == _activePlaylistId,
+              );
+              final nextVisibleIdx =
+                  (activeVisibleIdx + 1) % visiblePlaylists.length;
+              await setActivePlaylistById(
+                visiblePlaylists[nextVisibleIdx].id,
+                autoPlay: true,
+              );
+              return;
+            }
+          }
+        }
         _isPlaying = false;
         notifyListeners();
       }
@@ -1409,5 +1540,4 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
     _playlistStateController.close();
     _playlistStateNotifier.dispose();
   }
-
 }

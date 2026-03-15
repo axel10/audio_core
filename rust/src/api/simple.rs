@@ -1,8 +1,10 @@
-use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
+use crate::frb_generated::StreamSink;
 use realfft::{num_complex::Complex, RealFftPlanner, RealToComplex};
+use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use std::fs::File;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::thread;
 use std::time::Duration;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
@@ -14,11 +16,21 @@ use symphonia::core::probe::Hint;
 
 const FFT_SIZE: usize = 1024;
 const RAW_FFT_BINS: usize = FFT_SIZE / 2;
+const PLAYBACK_STATE_PUSH_INTERVAL: Duration = Duration::from_millis(500);
 
 static PLAYER_CONTROLLER: OnceLock<Mutex<PlayerController>> = OnceLock::new();
 
 fn controller() -> &'static Mutex<PlayerController> {
     PLAYER_CONTROLLER.get_or_init(|| Mutex::new(PlayerController::new()))
+}
+
+#[derive(Debug, Clone)]
+pub struct PlaybackState {
+    pub position_ms: i64,
+    pub duration_ms: i64,
+    pub is_playing: bool,
+    pub volume: f32,
+    pub path: Option<String>,
 }
 
 struct PlayerController {
@@ -157,11 +169,43 @@ impl PlayerController {
         if !self.loaded_duration.is_zero() {
             pos = pos.min(self.loaded_duration);
         }
-        if player.empty() && !self.loaded_duration.is_zero() {
-            return self.loaded_duration;
-        }
         pos
     }
+
+    fn playback_state(&self) -> PlaybackState {
+        let is_playing = self
+            .player
+            .as_ref()
+            .map(|player| !player.is_paused() && !player.empty())
+            .unwrap_or(false);
+
+        PlaybackState {
+            position_ms: self.playback_position().as_millis().min(i64::MAX as u128) as i64,
+            duration_ms: self.loaded_duration.as_millis().min(i64::MAX as u128) as i64,
+            is_playing,
+            volume: self.volume,
+            path: self.loaded_path.clone(),
+        }
+    }
+}
+
+fn push_state() -> PlaybackState {
+    controller()
+        .lock()
+        .map(|c| c.playback_state())
+        .unwrap_or(PlaybackState {
+            position_ms: 0,
+            duration_ms: 0,
+            is_playing: false,
+            volume: 1.0,
+            path: None,
+        })
+}
+
+fn trigger_state_push(
+    sink: &StreamSink<PlaybackState, flutter_rust_bridge::for_generated::SseCodec>,
+) -> bool {
+    sink.add(push_state()).is_ok()
 }
 
 struct FftSource<S>
@@ -304,8 +348,7 @@ where
         self.frame_accum = 0.0;
         self.frame_pos = 0;
         self.input_buffer.fill(0.0);
-        self.output_buffer
-            .fill(Complex { re: 0.0, im: 0.0 });
+        self.output_buffer.fill(Complex { re: 0.0, im: 0.0 });
         self.inner.try_seek(pos)
     }
 }
@@ -329,6 +372,23 @@ pub fn load_audio_file(path: String) -> Result<(), String> {
         .lock()
         .map_err(|_| "player lock poisoned".to_string())?;
     c.append_from_path(&path, Duration::ZERO, false)
+}
+
+pub fn subscribe_playback_state(
+    sink: StreamSink<PlaybackState, flutter_rust_bridge::for_generated::SseCodec>,
+) {
+    thread::spawn(move || {
+        if !trigger_state_push(&sink) {
+            return;
+        }
+
+        loop {
+            thread::sleep(PLAYBACK_STATE_PUSH_INTERVAL);
+            if !trigger_state_push(&sink) {
+                break;
+            }
+        }
+    });
 }
 
 pub fn play_audio() -> Result<(), String> {
@@ -639,8 +699,7 @@ pub fn extract_loaded_waveform(
         let c = controller()
             .lock()
             .map_err(|_| "player lock poisoned".to_string())?;
-        c
-            .loaded_path
+        c.loaded_path
             .clone()
             .ok_or_else(|| "No loaded audio file to extract waveform from".to_string())?
     };
@@ -653,7 +712,9 @@ pub fn extract_loaded_waveform(
             .lock()
             .map_err(|_| "player lock poisoned".to_string())?;
         if c.loaded_path.as_deref() != Some(path.as_str()) {
-            return Err("loaded audio changed during waveform extraction, please retry".to_string());
+            return Err(
+                "loaded audio changed during waveform extraction, please retry".to_string(),
+            );
         }
     }
 

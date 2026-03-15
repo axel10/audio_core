@@ -168,6 +168,21 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                           : null,
                       child: const Icon(Icons.skip_next),
                     ),
+                    const SizedBox(width: 12),
+                    DropdownButton<PlaylistMode>(
+                      value: _controller.playlistMode,
+                      items: PlaylistMode.values.map((mode) {
+                        return DropdownMenuItem(
+                          value: mode,
+                          child: Text(mode.name.toUpperCase()),
+                        );
+                      }).toList(),
+                      onChanged: (mode) {
+                        if (mode != null) {
+                          _controller.setPlaylistMode(mode);
+                        }
+                      },
+                    ),
                   ],
                 ),
                 const SizedBox(height: 12),
