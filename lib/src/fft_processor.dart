@@ -269,13 +269,14 @@ class FftProcessor {
 
     final ref = _normalizationRef.clamp(1e-6, double.infinity);
     final noiseFloorDb = normalizationFloorDb.clamp(-120.0, -10.0);
-    final invRange = 1.0 / -noiseFloorDb;
+    final floorRatio = math.pow(10.0, noiseFloorDb / 20.0).toDouble();
 
     for (var i = 0; i < grouped.length; i++) {
       final ratio = (grouped[i] + 1e-9) / ref;
-      final dbRelative = 20.0 * math.log(ratio) / math.ln10;
-      var normalized = (dbRelative - noiseFloorDb) * invRange;
-      normalized = normalized.clamp(0.0, 1.0);
+      // Use a soft floor instead of a hard dB cutoff so weak high-frequency
+      // content stays visible and the optimized spectrum keeps the raw shape.
+      final gatedRatio = ratio / (ratio + floorRatio);
+      var normalized = ratio.clamp(0.0, 1.0) * gatedRatio;
       if (logScale > 1.0) {
         final k = logScale - 1.0;
         normalized = math.log(1.0 + normalized * k) / math.log(1.0 + k);
