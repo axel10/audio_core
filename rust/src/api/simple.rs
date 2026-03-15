@@ -80,6 +80,7 @@ struct PlayerController {
     incoming_deck: Option<PlaybackDeck>,
     volume: f32,
     transition_generation: u64,
+    cached_path: Option<String>,
     cached_pcm: Option<Arc<Vec<f32>>>,
     cached_channels: usize,
     cached_sample_rate: u32,
@@ -94,6 +95,7 @@ impl PlayerController {
             incoming_deck: None,
             volume: 1.0,
             transition_generation: 0,
+            cached_path: None,
             cached_pcm: None,
             cached_channels: 0,
             cached_sample_rate: 0,
@@ -159,17 +161,22 @@ impl PlayerController {
     }
 
     fn invalidate_waveform_cache(&mut self) {
+        self.cached_path = None;
         self.cached_pcm = None;
         self.cached_channels = 0;
         self.cached_sample_rate = 0;
     }
 
     fn warm_waveform_cache_for_public_path(&mut self) {
-        self.invalidate_waveform_cache();
-
         let Some(path) = self.public_path().map(str::to_string) else {
             return;
         };
+
+        if self.cached_path.as_deref() == Some(path.as_str()) && self.cached_pcm.is_some() {
+            return;
+        }
+
+        self.invalidate_waveform_cache();
 
         thread::spawn(move || {
             if let Ok(file) = File::open(&path) {
@@ -179,6 +186,7 @@ impl PlayerController {
                     let pcm: Vec<f32> = source.collect();
                     if let Ok(mut c) = controller().lock() {
                         if c.public_path() == Some(path.as_str()) {
+                            c.cached_path = Some(path.clone());
                             c.cached_pcm = Some(Arc::new(pcm));
                             c.cached_channels = channels;
                             c.cached_sample_rate = sample_rate;
@@ -242,6 +250,7 @@ impl PlayerController {
         start_offset: Duration,
         auto_play: bool,
     ) -> Result<(), String> {
+        let previous_public_path = self.public_path().map(str::to_string);
         let deck = self.open_deck_from_path(path, start_offset, auto_play, 1.0)?;
 
         self.transition_generation = self.transition_generation.wrapping_add(1);
@@ -251,11 +260,18 @@ impl PlayerController {
         if let Some(current) = self.current_deck.replace(deck) {
             current.clear();
         }
-        self.warm_waveform_cache_for_public_path();
+        if previous_public_path.as_deref() != Some(path) {
+            self.warm_waveform_cache_for_public_path();
+        }
         Ok(())
     }
 
     fn settle_to_public_deck(&mut self) {
+        if self.incoming_deck.is_none() {
+            return;
+        }
+
+        let previous_public_path = self.public_path().map(str::to_string);
         self.transition_generation = self.transition_generation.wrapping_add(1);
         if let Some(mut incoming) = self.incoming_deck.take() {
             incoming.gain = 1.0;
@@ -265,7 +281,9 @@ impl PlayerController {
             }
             self.current_deck = Some(incoming);
         }
-        self.warm_waveform_cache_for_public_path();
+        if previous_public_path.as_deref() != self.public_path() {
+            self.warm_waveform_cache_for_public_path();
+        }
     }
 
     fn playback_state(&self) -> PlaybackState {
@@ -740,6 +758,7 @@ pub fn dispose_audio() -> Result<(), String> {
     }
     c.active_output_device_name = None;
     c.sink = None;
+    c.cached_path = None;
     c.cached_pcm = None;
     c.cached_channels = 0;
     c.cached_sample_rate = 0;
