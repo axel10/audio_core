@@ -99,6 +99,7 @@ name = "audio_visualizer_player"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cpal",
  "crossbeam-channel",
  "flutter_rust_bridge",
  "realfft",

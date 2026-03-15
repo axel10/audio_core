@@ -15,6 +15,7 @@ rodio = { version = "0.22.1", default-features = true, features = ["symphonia-al
 symphonia = { version = "0.5.5", features = ["all"] }
 
 realfft = { path = "realfft" }
+cpal = "0.17.3"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
