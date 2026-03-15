@@ -1497,8 +1497,7 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
     _autoTransitionInFlight = true;
     try {
       if (_playlistMode == PlaylistMode.single) {
-        _isPlaying = false;
-        notifyListeners();
+        await _loadCurrentTrack(autoPlay: false, position: Duration.zero);
         return;
       }
 
