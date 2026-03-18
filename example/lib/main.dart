@@ -36,8 +36,10 @@ class VisualizerDemoPage extends StatefulWidget {
 
 class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
   late final AudioVisualizerPlayerController _controller;
-  StreamSubscription<FftFrame>? _sub;
-  List<double> _bands = const [];
+  StreamSubscription<FftFrame>? _subSmooth;
+  StreamSubscription<FftFrame>? _subResponsive;
+  List<double> _bandsSmooth = const [];
+  List<double> _bandsResponsive = const [];
 
   List<double> _waveform = [];
   final int _waveformChunks = 500;
@@ -64,12 +66,56 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
       ),
     );
     _controller.initialize();
-    _sub = _controller.optimizedFftStream.listen((frame) {
-      if (!mounted) {
-        return;
-      }
+
+    // 创建平滑风格输出流 - 高平滑、低响应速度
+    final smoothOutput = _controller.createVisualizerOutput(
+      const VisualizerOutputConfig(
+        id: 'smooth',
+        label: 'Smooth',
+        options: VisualizerOptimizationOptions(
+          smoothingCoefficient: 0.75,
+          gravityCoefficient: 0.5,
+          logarithmicScale: 2.5,
+          normalizationFloorDb: -70,
+          aggregationMode: FftAggregationMode.peak,
+          frequencyGroups: 32,
+          targetFrameRate: 60,
+          groupContrastExponent: 1.5,
+        ),
+      ),
+    );
+
+    // 创建响应风格输出流 - 低平滑、快响应速度
+    final responsiveOutput = _controller.createVisualizerOutput(
+      const VisualizerOutputConfig(
+        id: 'responsive',
+        label: 'Responsive',
+        options: VisualizerOptimizationOptions(
+          smoothingCoefficient: 0.2,
+          gravityCoefficient: 3.0,
+          logarithmicScale: 1.5,
+          normalizationFloorDb: -85,
+          aggregationMode: FftAggregationMode.peak,
+          frequencyGroups: 64,
+          targetFrameRate: 60,
+          groupContrastExponent: 1.2,
+        ),
+      ),
+    );
+
+    // 订阅平滑风格流
+    _subSmooth = smoothOutput.fftStream.listen((frame) {
+      if (!mounted) return;
       setState(() {
-        _bands = frame.values;
+        _bandsSmooth = frame.values;
+      });
+    });
+
+    // 订阅响应风格流
+    _subResponsive = responsiveOutput.fftStream.listen((frame) {
+      if (!mounted) return;
+      setState(() {
+        _bandsResponsive = frame.values;
       });
     });
   }
@@ -121,7 +167,8 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
 
   @override
   void dispose() {
-    _sub?.cancel();
+    _subSmooth?.cancel();
+    _subResponsive?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -282,19 +329,94 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                   ),
                 ),
                 const SizedBox(height: 16),
+                // 双频谱可视化展示
                 Expanded(
                   child: AudioDropRegion(
                     controller: _controller,
-                    child: Container(
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: Colors.black,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: CustomPaint(
-                        painter: DemoSpectrumPainter(_bands),
-                        child: const SizedBox.expand(),
-                      ),
+                    child: Row(
+                      children: [
+                        // 平滑风格可视化
+                        Expanded(
+                          child: Column(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.purple.withOpacity(0.3),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  'Smooth Style',
+                                  style: TextStyle(
+                                    color: Colors.purple,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Expanded(
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.black,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: CustomPaint(
+                                    painter: DemoSpectrumPainter(
+                                      _bandsSmooth,
+                                      color: Colors.purple,
+                                    ),
+                                    child: const SizedBox.expand(),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        // 响应风格可视化
+                        Expanded(
+                          child: Column(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.withOpacity(0.3),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  'Responsive Style',
+                                  style: TextStyle(
+                                    color: Colors.orange,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Expanded(
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.black,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: CustomPaint(
+                                    painter: DemoSpectrumPainter(
+                                      _bandsResponsive,
+                                      color: Colors.orange,
+                                    ),
+                                    child: const SizedBox.expand(),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -358,9 +480,10 @@ class WaveformPainter extends CustomPainter {
 }
 
 class DemoSpectrumPainter extends CustomPainter {
-  DemoSpectrumPainter(this.bands);
+  DemoSpectrumPainter(this.bands, {this.color});
 
   final List<double> bands;
+  final Color? color;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -378,9 +501,10 @@ class DemoSpectrumPainter extends CustomPainter {
     final barWidth = ((size.width - (bands.length + 1) * gap) / bands.length)
         .clamp(1.0, 20.0);
 
-    final bodyPaint = Paint()..color = const Color(0xFF2AD4FF);
+    final bodyColor = color ?? const Color(0xFF2AD4FF);
+    final bodyPaint = Paint()..color = bodyColor;
     final glowPaint = Paint()
-      ..color = const Color(0x802AD4FF)
+      ..color = bodyColor.withOpacity(0.5)
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
     final baseline = size.height - safeBottom;
 
@@ -403,7 +527,7 @@ class DemoSpectrumPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant DemoSpectrumPainter oldDelegate) {
-    return oldDelegate.bands != bands;
+    return oldDelegate.bands != bands || oldDelegate.color != color;
   }
 }
 

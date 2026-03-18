@@ -5,31 +5,14 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'fft_frame.dart';
 import 'fft_processor.dart';
 import 'player_models.dart';
 import 'rust/api/simple.dart';
 import 'rust/frb_generated.dart';
-
-/// A single FFT frame emitted by the player.
-///
-/// Contains the playback [position], FFT [values], and whether the player
-/// was [isPlaying] when this frame was produced.
-class FftFrame {
-  const FftFrame({
-    required this.position,
-    required this.values,
-    required this.isPlaying,
-  });
-
-  /// Playback position associated with this frame.
-  final Duration position;
-
-  /// FFT magnitudes for this frame.
-  final List<double> values;
-
-  /// Whether playback was active when this frame was sampled.
-  final bool isPlaying;
-}
+import 'visualizer_output_config.dart';
+import 'visualizer_output_stream.dart';
+import 'visualizer_output_manager.dart';
 
 /// High-level controller for audio playback, playlist management, and FFT data.
 ///
@@ -52,6 +35,16 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
     _fftProcessor = FftProcessor(fftSize: fftSize, options: visualOptions);
     _fadeDuration = fadeDuration;
     _fadeMode = fadeMode;
+    _initVisualizerOutputManager();
+  }
+
+  void _initVisualizerOutputManager() {
+    visualizerOutputManager = VisualizerOutputManager(
+      fftSourceProvider: () {
+        final bins = getLatestFft();
+        return bins.isEmpty ? <double>[] : List<double>.from(bins);
+      },
+    );
   }
 
   /// FFT size requested from native analysis.
@@ -87,6 +80,9 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
   PlayerState _playerState = PlayerState.idle;
 
   late final FftProcessor _fftProcessor;
+
+  /// Manager for multiple visualizer output streams with independent configurations.
+  late final VisualizerOutputManager visualizerOutputManager;
 
   final StreamController<FftFrame> _rawFftController =
       StreamController<FftFrame>.broadcast();
@@ -137,6 +133,32 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
 
   /// Stream of smoothed/grouped FFT frames for visualization.
   Stream<FftFrame> get optimizedFftStream => _optimizedFftController.stream;
+
+  /// Convenience property to get the default output stream.
+  VisualizerOutputStream? get defaultVisualizerOutput =>
+      visualizerOutputManager.defaultOutput;
+
+  /// Creates a new visualizer output stream with independent configuration.
+  ///
+  /// [config] - Configuration for the new output stream.
+  /// Returns the created VisualizerOutputStream.
+  /// Throws [StateError] if an output with the same ID already exists.
+  VisualizerOutputStream createVisualizerOutput(VisualizerOutputConfig config) {
+    return visualizerOutputManager.createOutput(config);
+  }
+
+  /// Gets a visualizer output stream by ID, or null if not found.
+  VisualizerOutputStream? getVisualizerOutput(String id) {
+    return visualizerOutputManager.getOutput(id);
+  }
+
+  /// Removes a visualizer output stream by ID.
+  void removeVisualizerOutput(String id) {
+    visualizerOutputManager.removeOutput(id);
+  }
+
+  /// All visualizer output stream IDs.
+  List<String> get visualizerOutputIds => visualizerOutputManager.outputIds;
 
   /// Whether FFT computation and data emission is enabled.
   bool get fftEnabled => _fftEnabled;
@@ -194,6 +216,7 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
     );
     _analysisTick = Timer.periodic(_analysisInterval, (_) => _onAnalysisTick());
     _renderTick = Timer.periodic(_renderInterval, (_) => _onRenderTick());
+    visualizerOutputManager.startAll();
     _initialized = true;
     notifyListeners();
   }
@@ -723,6 +746,7 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
 
   void _resetFftState() {
     _fftProcessor.resetState();
+    visualizerOutputManager.resetAll();
     _lastAnalysisMicros = 0;
   }
 
@@ -776,6 +800,7 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
     unawaited(disposeAudio());
     _rawFftController.close();
     _optimizedFftController.close();
+    visualizerOutputManager.dispose();
     _disposePlaylistState();
     super.dispose();
   }
