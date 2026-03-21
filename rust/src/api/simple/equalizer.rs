@@ -152,6 +152,31 @@ impl BiquadCoefficients {
             a2: ((a + 1.0) + (a - 1.0) * cos_w0 - two_sqrt_a_alpha) / a0,
         }
     }
+
+    fn magnitude_at(&self, freq_hz: f32, sample_rate: u32) -> f32 {
+        if freq_hz <= 0.0 || sample_rate == 0 {
+            return 1.0;
+        }
+
+        let w = 2.0 * PI * freq_hz / sample_rate as f32;
+        let cos_w = w.cos();
+        let sin_w = w.sin();
+        let cos_2w = (2.0 * w).cos();
+        let sin_2w = (2.0 * w).sin();
+
+        let num_re = self.b0 + self.b1 * cos_w + self.b2 * cos_2w;
+        let num_im = -self.b1 * sin_w - self.b2 * sin_2w;
+        let den_re = 1.0 + self.a1 * cos_w + self.a2 * cos_2w;
+        let den_im = -self.a1 * sin_w - self.a2 * sin_2w;
+
+        let numerator = num_re.mul_add(num_re, num_im * num_im);
+        let denominator = den_re.mul_add(den_re, den_im * den_im);
+        if denominator <= f32::EPSILON {
+            return 1.0;
+        }
+
+        (numerator / denominator).sqrt()
+    }
 }
 
 #[derive(Clone)]
@@ -170,13 +195,13 @@ impl Biquad {
         }
     }
 
-    fn identity() -> Self {
-        Self::new(BiquadCoefficients::identity())
-    }
-
     fn reset(&mut self) {
         self.z1 = 0.0;
         self.z2 = 0.0;
+    }
+
+    fn update_coeffs(&mut self, coeffs: BiquadCoefficients) {
+        self.coeffs = coeffs;
     }
 
     fn process(&mut self, input: f32) -> f32 {
@@ -197,45 +222,9 @@ struct EqualizerChain {
 
 impl EqualizerChain {
     fn from_config(config: &EqualizerConfig, sample_rate: u32) -> Self {
-        let config = config.clone().sanitized();
-        if !config.enabled {
-            return Self::identity();
-        }
-
-        let band_count = config.band_count as usize;
-        let mut bands = Vec::with_capacity(band_count);
-        for band_index in 0..band_count {
-            let freq = band_center_frequency(band_index, band_count);
-            let gain_db = config.band_gains_db.get(band_index).copied().unwrap_or(0.0);
-            if gain_db.abs() <= EPSILON_GAIN_DB {
-                bands.push(Biquad::identity());
-            } else {
-                bands.push(Biquad::new(BiquadCoefficients::peaking(
-                    sample_rate,
-                    freq,
-                    1.0,
-                    gain_db,
-                )));
-            }
-        }
-
-        let bass_boost = if config.bass_boost_db.abs() > EPSILON_GAIN_DB {
-            Some(Biquad::new(BiquadCoefficients::low_shelf(
-                sample_rate,
-                config.bass_boost_frequency_hz,
-                config.bass_boost_q,
-                config.bass_boost_db,
-            )))
-        } else {
-            None
-        };
-
-        Self {
-            enabled: true,
-            preamp_gain: db_to_gain(config.preamp_db),
-            bass_boost,
-            bands,
-        }
+        let mut chain = Self::identity();
+        chain.update_from_config(config, sample_rate);
+        chain
     }
 
     fn identity() -> Self {
@@ -256,6 +245,44 @@ impl EqualizerChain {
         }
     }
 
+    fn update_from_config(&mut self, config: &EqualizerConfig, sample_rate: u32) {
+        let config = config.clone().sanitized();
+        if !config.enabled {
+            *self = Self::identity();
+            return;
+        }
+
+        self.enabled = true;
+        self.preamp_gain = db_to_gain(config.preamp_db) / estimate_peak_gain(&config, sample_rate);
+        self.bass_boost = if config.bass_boost_db.abs() > EPSILON_GAIN_DB {
+            Some(Biquad::new(BiquadCoefficients::low_shelf(
+                sample_rate,
+                config.bass_boost_frequency_hz,
+                config.bass_boost_q,
+                config.bass_boost_db,
+            )))
+        } else {
+            None
+        };
+
+        let band_count = config.band_count as usize;
+        if self.bands.len() != band_count {
+            self.bands = Vec::with_capacity(band_count);
+            for band_index in 0..band_count {
+                let coeffs = band_coefficients(&config, sample_rate, band_index, band_count);
+                self.bands.push(Biquad::new(coeffs));
+            }
+            return;
+        }
+
+        for band_index in 0..band_count {
+            let coeffs = band_coefficients(&config, sample_rate, band_index, band_count);
+            if let Some(band) = self.bands.get_mut(band_index) {
+                band.update_coeffs(coeffs);
+            }
+        }
+    }
+
     fn process_sample(&mut self, mut sample: f32) -> f32 {
         if !self.enabled {
             return sample;
@@ -269,6 +296,73 @@ impl EqualizerChain {
             sample = band.process(sample);
         }
         sample
+    }
+}
+
+fn band_coefficients(
+    config: &EqualizerConfig,
+    sample_rate: u32,
+    band_index: usize,
+    band_count: usize,
+) -> BiquadCoefficients {
+    let freq = band_center_frequency(band_index, band_count);
+    let gain_db = config.band_gains_db.get(band_index).copied().unwrap_or(0.0);
+    if gain_db.abs() <= EPSILON_GAIN_DB {
+        BiquadCoefficients::identity()
+    } else {
+        BiquadCoefficients::peaking(sample_rate, freq, 1.0, gain_db)
+    }
+}
+
+fn estimate_peak_gain(config: &EqualizerConfig, sample_rate: u32) -> f32 {
+    if sample_rate == 0 {
+        return 1.0;
+    }
+
+    let band_count = config.band_count.clamp(0, MAX_EQ_BANDS as i32) as usize;
+    let mut filters = Vec::with_capacity(band_count + 1);
+
+    if config.bass_boost_db.abs() > EPSILON_GAIN_DB {
+        filters.push(BiquadCoefficients::low_shelf(
+            sample_rate,
+            config.bass_boost_frequency_hz,
+            config.bass_boost_q,
+            config.bass_boost_db,
+        ));
+    }
+
+    for band_index in 0..band_count {
+        filters.push(band_coefficients(
+            config,
+            sample_rate,
+            band_index,
+            band_count,
+        ));
+    }
+
+    if filters.is_empty() {
+        return 1.0;
+    }
+
+    let min_hz = 20.0_f32;
+    let nyquist_hz = (sample_rate as f32 / 2.0).max(min_hz);
+    let max_hz = (nyquist_hz * 0.98).max(min_hz);
+    let sweep_ratio = max_hz / min_hz;
+    let mut peak_gain = 1.0_f32;
+
+    for step in 0..256 {
+        let t = step as f32 / 255.0;
+        let freq_hz = min_hz * sweep_ratio.powf(t);
+        let response_gain = filters.iter().fold(1.0_f32, |acc, coeffs| {
+            acc * coeffs.magnitude_at(freq_hz, sample_rate)
+        });
+        peak_gain = peak_gain.max(response_gain);
+    }
+
+    if peak_gain > 1.000_1 {
+        peak_gain * 1.05
+    } else {
+        1.0
     }
 }
 
@@ -317,9 +411,9 @@ where
         }
 
         let config = self.shared.current_config();
-        self.chains = (0..self.channels)
-            .map(|_| EqualizerChain::from_config(&config, self.sample_rate))
-            .collect();
+        for chain in &mut self.chains {
+            chain.update_from_config(&config, self.sample_rate);
+        }
         self.current_version = version;
     }
 
