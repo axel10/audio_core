@@ -15,6 +15,7 @@ import 'fft_processor.dart';
 
 export 'player_controller.dart';
 export 'playlist_controller.dart';
+export 'random_playback_models.dart';
 export 'visualizer_controller.dart';
 export 'player_models.dart';
 export 'playlist_models.dart';
@@ -88,7 +89,7 @@ class AudioVisualizerPlayerController extends ChangeNotifier {
     volume: player.volume,
     currentState: player.currentState,
     playlists: playlist.playlists,
-    shuffleEnabled: playlist.shuffleEnabled,
+    randomPolicy: playlist.randomPolicy,
     playlistMode: playlist.mode,
     activePlaylist: playlist.activePlaylist,
     currentIndex: playlist.currentIndex,

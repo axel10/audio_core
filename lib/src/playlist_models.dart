@@ -7,7 +7,7 @@ class AudioTrack {
     this.artist,
     this.album,
     this.duration,
-    this.extras = const <String, Object?>{},
+    this.metadata = const <String, Object?>{},
   });
 
   /// Stable unique track id.
@@ -28,8 +28,18 @@ class AudioTrack {
   /// Optional known duration.
   final Duration? duration;
 
-  /// Optional custom metadata.
-  final Map<String, Object?> extras;
+  /// Optional custom metadata for user-defined strategies.
+  final Map<String, Object?> metadata;
+
+  /// Alias for legacy callers.
+  @Deprecated('Use metadata instead.')
+  Map<String, Object?> get extras => metadata;
+
+  /// Returns a typed metadata value if it exists and matches [T].
+  T? metadataValue<T>(String key) {
+    final value = metadata[key];
+    return value is T ? value : null;
+  }
 }
 
 /// A collection of audio tracks with metadata.
@@ -51,6 +61,29 @@ class Playlist {
       id: id ?? this.id,
       name: name ?? this.name,
       items: items ?? this.items,
+    );
+  }
+}
+
+extension AudioTrackCopy on AudioTrack {
+  /// Creates a copy with optionally replaced fields.
+  AudioTrack copyWith({
+    String? id,
+    String? uri,
+    String? title,
+    String? artist,
+    String? album,
+    Duration? duration,
+    Map<String, Object?>? metadata,
+  }) {
+    return AudioTrack(
+      id: id ?? this.id,
+      uri: uri ?? this.uri,
+      title: title ?? this.title,
+      artist: artist ?? this.artist,
+      album: album ?? this.album,
+      duration: duration ?? this.duration,
+      metadata: metadata ?? this.metadata,
     );
   }
 }

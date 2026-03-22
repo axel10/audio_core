@@ -1,4 +1,5 @@
 import 'playlist_models.dart';
+import 'random_playback_models.dart';
 
 /// Track transition mode.
 enum FadeMode {
@@ -41,7 +42,7 @@ class PlayerControllerState {
     required this.volume,
     required this.currentState,
     required this.playlists,
-    required this.shuffleEnabled,
+    this.randomPolicy,
     required this.playlistMode,
     this.activePlaylist,
     this.currentIndex,
@@ -63,8 +64,8 @@ class PlayerControllerState {
   /// All available playlists.
   final List<Playlist> playlists;
 
-  /// Whether shuffle order is enabled.
-  final bool shuffleEnabled;
+  /// Active random policy, or `null` when playback is sequential.
+  final RandomPolicy? randomPolicy;
 
   /// Active playlist mode.
   final PlaylistMode playlistMode;
@@ -78,6 +79,9 @@ class PlayerControllerState {
   /// Currently active track, if any.
   final AudioTrack? track;
 
+  /// Whether shuffle/random playback is enabled.
+  bool get shuffleEnabled => randomPolicy != null;
+
   /// Alias for compatibility with old tests/UI
   AudioTrack? get currentTrack => track;
 
@@ -86,6 +90,6 @@ class PlayerControllerState {
 
   @override
   String toString() {
-    return 'PlayerControllerState(position: $position, duration: $duration, volume: $volume, currentState: $currentState, track: ${track?.title})';
+    return 'PlayerControllerState(position: $position, duration: $duration, volume: $volume, currentState: $currentState, track: ${track?.title}, randomPolicy: ${randomPolicy?.key})';
   }
 }
