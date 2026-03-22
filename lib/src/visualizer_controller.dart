@@ -61,19 +61,19 @@ class VisualizerController extends ChangeNotifier {
     if (_fftEnabled == enabled) return;
     _fftEnabled = enabled;
     if (!_fftEnabled) resetState();
-    _notify();
+    notifyListeners();
   }
 
   void updateOptions(VisualizerOptimizationOptions options) {
     _fftProcessor.updateOptions(options);
-    _notify();
+    notifyListeners();
   }
 
   void resetState() {
     _fftProcessor.resetState();
     visualizerOutputManager.resetAll();
     _lastAnalysisMicros = 0;
-    _notify();
+    notifyListeners();
   }
 
   @internal
@@ -128,8 +128,9 @@ class VisualizerController extends ChangeNotifier {
     super.dispose();
   }
 
-  void _notify() {
-    notifyListeners();
+  @override
+  void notifyListeners() {
+    super.notifyListeners();
     _parent.notifyListeners();
   }
 

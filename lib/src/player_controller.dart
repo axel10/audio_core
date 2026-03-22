@@ -90,7 +90,7 @@ class PlayerController extends ChangeNotifier {
     }
 
     _playerState = PlayerState.buffering;
-    _notify();
+    notifyListeners();
 
     try {
       await loadAudioFile(path: path);
@@ -105,7 +105,7 @@ class PlayerController extends ChangeNotifier {
     } catch (e) {
       setError('Load failed: $e');
     }
-    _notify();
+    notifyListeners();
   }
 
   Future<void> play() async {
@@ -127,7 +127,7 @@ class PlayerController extends ChangeNotifier {
     } catch (e) {
       setError('Play failed: $e');
     }
-    _notify();
+    notifyListeners();
   }
 
   Future<void> pause() async {
@@ -139,7 +139,7 @@ class PlayerController extends ChangeNotifier {
     } catch (e) {
       setError('Pause failed: $e');
     }
-    _notify();
+    notifyListeners();
   }
 
   Future<void> togglePlayPause() async {
@@ -161,7 +161,7 @@ class PlayerController extends ChangeNotifier {
     } catch (e) {
       setError('Seek failed: $e');
     }
-    _notify();
+    notifyListeners();
   }
 
   Future<void> setVolume(double volume) async {
@@ -169,13 +169,13 @@ class PlayerController extends ChangeNotifier {
     if (!_trackFadeTransitionActive) {
       await applyNativeVolume(_volume);
     }
-    _notify();
+    notifyListeners();
   }
 
   void setFadeConfig({Duration? duration, FadeMode? mode}) {
     if (duration != null) _fadeDuration = duration;
     if (mode != null) _fadeMode = mode;
-    _notify();
+    notifyListeners();
   }
 
   @internal
@@ -216,7 +216,7 @@ class PlayerController extends ChangeNotifier {
   @internal
   void setFadeActive(bool active) {
     _trackFadeTransitionActive = active;
-    _notify();
+    notifyListeners();
   }
 
   Future<void> stopPlayback() async {
@@ -225,7 +225,7 @@ class PlayerController extends ChangeNotifier {
     _duration = Duration.zero;
     _isPlaying = false;
     _playerState = PlayerState.idle;
-    _notify();
+    notifyListeners();
   }
 
   // --- External Sync Interface ---
@@ -250,14 +250,14 @@ class PlayerController extends ChangeNotifier {
       _playerState = PlayerState.paused;
     }
     
-    _notify();
+    notifyListeners();
   }
 
   @internal
   void setError(String? message) {
     _error = message;
     if (message != null) _playerState = PlayerState.error;
-    _notify();
+    notifyListeners();
   }
 
   @internal
@@ -267,11 +267,12 @@ class PlayerController extends ChangeNotifier {
       _isPlaying = false;
       _playerState = PlayerState.completed;
     }
-    _notify();
+    notifyListeners();
   }
 
-  void _notify() {
-    notifyListeners();
+  @override
+  void notifyListeners() {
+    super.notifyListeners();
     _parent.notifyListeners();
   }
 }

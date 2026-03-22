@@ -26,7 +26,7 @@ class EqualizerController extends ChangeNotifier {
   Future<void> initialize() async {
     try {
       _config = await getAudioEqualizerConfig();
-      _notify();
+      notifyListeners();
     } catch (e) {
       debugPrint('Equalizer fallback to default: $e');
     }
@@ -37,7 +37,7 @@ class EqualizerController extends ChangeNotifier {
     try {
       await setAudioEqualizerConfig(config: normalized);
       _config = normalized;
-      _notify();
+      notifyListeners();
     } catch (e) {
       debugPrint('Equalizer update failed: $e');
       rethrow;
@@ -109,8 +109,9 @@ class EqualizerController extends ChangeNotifier {
     );
   }
 
-  void _notify() {
-    notifyListeners();
+  @override
+  void notifyListeners() {
+    super.notifyListeners();
     _parent.notifyListeners();
   }
 }
