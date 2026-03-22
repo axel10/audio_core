@@ -25,6 +25,7 @@ class RandomLabTabState extends State<RandomLabTab> {
   final List<AudioTrack> _libraryTracks = <AudioTrack>[];
   String? _selectedPlaylistId;
   RandomPreset _randomPreset = RandomPreset.off;
+  RandomStrategyKind _selectedStrategy = RandomStrategyKind.fisherYates;
   static const String _demoPlaylistId = 'demo_random_lab';
 
   @override
@@ -107,62 +108,47 @@ class RandomLabTabState extends State<RandomLabTab> {
     setState(() {
       _randomPreset = preset;
     });
+    _updateRandomPolicy();
+  }
 
+  void _updateRandomPolicy() {
+    final preset = _randomPreset;
     if (preset == RandomPreset.off) {
       widget.controller.playlist.clearShuffle();
       return;
     }
 
-    if (preset == RandomPreset.shuffleAll) {
-      widget.controller.playlist.setShuffle(
-        scope: RandomScope.all(),
-        strategy: RandomStrategy.fisherYates(),
-        avoidRecent: 2,
-        historySize: 200,
-      );
-      return;
-    }
-
-    if (preset == RandomPreset.activePlaylist) {
-      widget.controller.playlist.setShuffle(
-        scope: RandomScope.activePlaylist(),
-        strategy: RandomStrategy.fisherYates(),
-        avoidRecent: 2,
-        historySize: 200,
-      );
-      return;
-    }
-
-    if (preset == RandomPreset.queueOnly) {
-      widget.controller.playlist.setShuffle(
-        scope: RandomScope.playlist(
-          widget.controller.playlist.queuePlaylistId,
-        ),
-        strategy: RandomStrategy.fisherYates(),
-        avoidRecent: 2,
-        historySize: 200,
-      );
-      return;
-    }
-
-    if (preset == RandomPreset.likedOnly) {
-      widget.controller.playlist.setShuffle(
-        scope: RandomScope.filtered(
+    RandomScope scope;
+    switch (preset) {
+      case RandomPreset.shuffleAll:
+        scope = RandomScope.all();
+        break;
+      case RandomPreset.activePlaylist:
+        scope = RandomScope.activePlaylist();
+        break;
+      case RandomPreset.queueOnly:
+        scope =
+            RandomScope.playlist(widget.controller.playlist.queuePlaylistId);
+        break;
+      case RandomPreset.likedOnly:
+        scope = RandomScope.filtered(
           id: 'liked-only',
-          predicate: (track, index, context) =>
-              track.metadataValue<bool>('isLike') == true,
-        ),
-        strategy: RandomStrategy.fisherYates(),
-        avoidRecent: 1,
-        historySize: 200,
-      );
-      return;
+          predicate:
+              (track, index, context) =>
+                  track.metadataValue<bool>('isLike') == true,
+        );
+        break;
+      case RandomPreset.playCountWeighted:
+        scope = RandomScope.activePlaylist();
+        break;
+      default:
+        scope = RandomScope.all();
     }
 
-    // 高级接口也可以直接换成 setRandomPolicy(...) 来做更复杂的规则。
-    widget.controller.playlist.setShuffle(
-      scope: RandomScope.activePlaylist(),
-      strategy: RandomStrategy.custom(
+    RandomStrategy strategy;
+    if (preset == RandomPreset.playCountWeighted) {
+      // If the preset itself implies a specific complex strategy, we use it.
+      strategy = RandomStrategy.custom(
         id: 'inverse-playcount',
         select: (random, candidates, context) {
           var totalWeight = 0.0;
@@ -189,10 +175,38 @@ class RandomLabTabState extends State<RandomLabTab> {
           }
           return candidates.last;
         },
-      ),
+      );
+    } else {
+      strategy = _getStrategyForKind(_selectedStrategy);
+    }
+
+    widget.controller.playlist.setShuffle(
+      scope: scope,
+      strategy: strategy,
       avoidRecent: 2,
       historySize: 200,
     );
+  }
+
+  RandomStrategy _getStrategyForKind(RandomStrategyKind kind) {
+    switch (kind) {
+      case RandomStrategyKind.random:
+        return RandomStrategy.random();
+      case RandomStrategyKind.sequential:
+        return RandomStrategy.sequential();
+      case RandomStrategyKind.fisherYates:
+        return RandomStrategy.fisherYates();
+      case RandomStrategyKind.weighted:
+        return RandomStrategy.weighted(
+          id: 'playcount-weighted',
+          weightOf:
+              (track, index, context) =>
+                  1.0 / (1 + (track.metadataValue<int>('playCount') ?? 0)),
+        );
+      case RandomStrategyKind.custom:
+        // Use random for demo custom strategy if not specific.
+        return RandomStrategy.random();
+    }
   }
 
   Playlist? get _selectedPlaylist {
@@ -250,6 +264,7 @@ class RandomLabTabState extends State<RandomLabTab> {
       children: [
         DropdownButton<RandomPreset>(
           value: _randomPreset,
+          hint: const Text('Preset Scope'),
           items: const [
             DropdownMenuItem(
               value: RandomPreset.off,
@@ -281,6 +296,41 @@ class RandomLabTabState extends State<RandomLabTab> {
               unawaited(_applyRandomPreset(preset));
             }
           },
+        ),
+        if (_randomPreset != RandomPreset.off)
+          DropdownButton<RandomStrategyKind>(
+            value: _selectedStrategy,
+            hint: const Text('Strategy'),
+            items: RandomStrategyKind.values.map((kind) {
+              return DropdownMenuItem(
+                value: kind,
+                child: Text('Strategy: ${kind.name}'),
+              );
+            }).toList(),
+            onChanged: (kind) {
+              if (kind != null) {
+                setState(() {
+                  _selectedStrategy = kind;
+                });
+                _updateRandomPolicy();
+              }
+            },
+          ),
+        IconButton(
+          onPressed:
+              widget.controller.player.currentPath == null
+                  ? null
+                  : () => widget.controller.player.togglePlayPause(),
+          icon: Icon(
+            widget.controller.player.isPlaying
+                ? Icons.pause_circle_filled
+                : Icons.play_circle_filled,
+            size: 40,
+            color:
+                widget.controller.player.currentPath == null
+                    ? Theme.of(context).disabledColor
+                    : Theme.of(context).colorScheme.primary,
+          ),
         ),
         ElevatedButton.icon(
           onPressed: widget.controller.playlist.randomHistory.isEmpty

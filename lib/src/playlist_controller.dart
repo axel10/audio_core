@@ -383,6 +383,7 @@ class PlaylistController extends ChangeNotifier {
         next: next,
         playlistId: _activePlaylistId,
         tracks: _activePlaylistTracks,
+        currentTrack: currentTrack,
         loop: _playlistMode == PlaylistMode.queueLoop || _playlistMode == PlaylistMode.autoQueueLoop,
         peek: peek,
       );

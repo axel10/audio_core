@@ -119,7 +119,7 @@ class RandomPlaybackManager {
     // Sync deck if needed
     if (policy.strategy.kind == RandomStrategyKind.fisherYates ||
         policy.strategy.kind == RandomStrategyKind.sequential) {
-      final context = _buildContext_internal(playlistId, tracks);
+      final context = _buildContext_internal(playlistId, tracks, currentTrack: currentTrack);
       final candidates = policy.scope.resolve(context);
       _syncDeck(context, candidates);
     }
@@ -130,13 +130,14 @@ class RandomPlaybackManager {
     required bool next,
     required String? playlistId,
     required List<AudioTrack> tracks,
+    required AudioTrack? currentTrack,
     required bool loop,
     bool peek = false,
   }) {
     final policy = _policy;
     if (policy == null || tracks.isEmpty) return null;
 
-    final context = _buildContext_internal(playlistId, tracks);
+    final context = _buildContext_internal(playlistId, tracks, currentTrack: currentTrack);
 
     // 1. Deck-based strategies (Sequential, Fisher-Yates)
     if (policy.strategy.kind == RandomStrategyKind.sequential ||
@@ -153,7 +154,7 @@ class RandomPlaybackManager {
           if (!peek) _deckCursor = target;
           return _deck[target];
         }
-        if (loop) {
+        if (cursor == null || loop) {
           if (!peek) _deckCursor = 0;
           return _deck[0];
         }
@@ -163,7 +164,7 @@ class RandomPlaybackManager {
           if (!peek) _deckCursor = target;
           return _deck[target];
         }
-        if (loop) {
+        if (cursor == null || loop) {
           final target = _deck.length - 1;
           if (!peek) _deckCursor = target;
           return _deck[target];
@@ -234,14 +235,21 @@ class RandomPlaybackManager {
 
   RandomSelectionContext _buildContext_internal(
     String? playlistId,
-    List<AudioTrack> tracks,
-  ) {
+    List<AudioTrack> tracks, {
+    AudioTrack? currentTrack,
+  }) {
+    int? currentIndex;
+    if (currentTrack != null) {
+      currentIndex = tracks.indexWhere((t) => t.id == currentTrack.id);
+      if (currentIndex < 0) currentIndex = null;
+    } else if (_deckCursor != null && _deckCursor! < _deck.length) {
+      currentIndex = _deck[_deckCursor!];
+    }
+
     return RandomSelectionContext(
       playlistId: playlistId,
       tracks: tracks,
-      currentIndex: _deckCursor != null && _deckCursor! < _deck.length
-          ? _deck[_deckCursor!]
-          : null, // This is tricky, usually we'd pass the actual current index
+      currentIndex: currentIndex,
       history: _history,
       policyKey: _policy?.key ?? '',
     );
@@ -252,6 +260,7 @@ class RandomPlaybackManager {
         .map((i) => context.trackAt(i)?.id ?? '$i')
         .join('|');
     if (_deckSignature == signature && _deck.length == candidates.length) {
+      _deckCursor = _findCurrentDeckCursor(context.tracks, context.currentIndex);
       return;
     }
 
