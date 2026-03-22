@@ -24,7 +24,7 @@ class RandomSelectionContext {
   /// 当前随机播放历史，用于前进/后退。
   final List<RandomHistoryEntry> history;
 
-  /// 当前随机策略的唯一标识。
+  /// 当前随机策略的 unique 标识。
   final String policyKey;
 
   /// 按索引获取歌曲，越界时返回 `null`。
@@ -51,8 +51,11 @@ abstract class RandomScope {
   /// 根据当前上下文生成可选候选项索引列表。
   List<int> resolve(RandomSelectionContext context);
 
-  /// 在当前列表内随机抽取所有歌曲。
+  /// 在整个当前列表内随机抽取。
   factory RandomScope.all() => const _AllRandomScope();
+
+  /// 在当前播放列表内随机抽取。
+  factory RandomScope.activePlaylist() => const _ActivePlaylistRandomScope();
 
   /// 只在指定播放列表内随机抽取。
   factory RandomScope.playlist(String playlistId) =>
@@ -80,12 +83,33 @@ abstract class RandomScope {
   }) => _PredicateRandomScope(id, predicate);
 }
 
+/// Category of the random selection strategy.
+enum RandomStrategyKind {
+  /// Picks randomly from candidates.
+  random,
+
+  /// Picks candidates in their original order.
+  sequential,
+
+  /// Shuffles once and plays through the shuffled order.
+  fisherYates,
+
+  /// Uses weights to bias selection.
+  weighted,
+
+  /// Uses a caller-provided callback.
+  custom,
+}
+
 /// Describes how a random candidate is selected from the scope.
 abstract class RandomStrategy {
   const RandomStrategy();
 
   /// 该策略的稳定标识，用于调试和历史记录。
   String get key;
+
+  /// The category of this strategy.
+  RandomStrategyKind get kind;
 
   /// 从候选项中选出最终播放的索引。
   int select(
@@ -95,7 +119,13 @@ abstract class RandomStrategy {
   );
 
   /// 采用等概率方式随机选取。
-  factory RandomStrategy.uniform() => const _UniformRandomStrategy();
+  factory RandomStrategy.random() => const _RandomRandomStrategy();
+
+  /// 按原有顺序选取（不随机）。
+  factory RandomStrategy.sequential() => const _SequentialRandomStrategy();
+
+  /// 一次性洗牌，按洗牌序列播放。
+  factory RandomStrategy.fisherYates() => const _FisherYatesRandomStrategy();
 
   /// 按自定义权重随机选取。
   factory RandomStrategy.weighted({
@@ -109,7 +139,7 @@ abstract class RandomStrategy {
   }) => _WeightedRandomStrategy(id, weightOf);
 
   /// 由调用方完全决定最终选项。
-  factory RandomStrategy.callback({
+  factory RandomStrategy.custom({
     required String id,
     required int Function(
       math.Random random,
@@ -122,7 +152,7 @@ abstract class RandomStrategy {
 
 /// How much random history should be retained.
 class RandomHistoryPolicy {
-  const RandomHistoryPolicy({this.maxEntries = 128, this.recentWindow = 1})
+  const RandomHistoryPolicy({this.maxEntries = 128, this.recentWindow = 2})
     : assert(maxEntries >= 0),
       assert(recentWindow >= 0);
 
@@ -174,7 +204,7 @@ class RandomPolicy {
     this.label,
   });
 
-  /// 负责筛选候选项的范围。
+  /// 负责筛选候选项的范围集。
   final RandomScope scope;
 
   /// 负责从候选项中挑选最终结果的策略。
@@ -193,52 +223,67 @@ class RandomPolicy {
   String get key =>
       '${label ?? 'custom'}|${scope.key}|${strategy.key}|${history.key}|seed:${seed ?? 'none'}';
 
-  /// 对整个当前列表做等概率随机。
-  factory RandomPolicy.uniformAll({
+  /// 对整个播放列表做等概率随机。
+  factory RandomPolicy.randomAll({
     int? seed,
-    int recentWindow = 1,
-    int maxEntries = 128,
+    int recentWindow = 2,
+    int maxEntries = 200,
     String? label,
   }) {
     return RandomPolicy(
       scope: RandomScope.all(),
-      strategy: RandomStrategy.uniform(),
+      strategy: RandomStrategy.random(),
       history: RandomHistoryPolicy(
         maxEntries: maxEntries,
         recentWindow: recentWindow,
       ),
       seed: seed,
-      label: label ?? 'uniformAll',
+      label: label ?? 'randomAll',
+    );
+  }
+
+  /// 洗牌模式：对整个播放列表洗牌并按序播放（Fisher-Yates）。
+  factory RandomPolicy.shuffleAll({
+    int? seed,
+    int maxEntries = 200,
+    String? label,
+  }) {
+    return RandomPolicy(
+      scope: RandomScope.all(),
+      strategy: RandomStrategy.fisherYates(),
+      history: RandomHistoryPolicy(maxEntries: maxEntries, recentWindow: 0),
+      seed: seed,
+      label: label ?? 'shuffleAll',
     );
   }
 
   /// 只在指定播放列表内做等概率随机。
-  factory RandomPolicy.uniformPlaylist(
+  factory RandomPolicy.randomPlaylist(
     String playlistId, {
     int? seed,
-    int recentWindow = 1,
-    int maxEntries = 128,
+    int recentWindow = 2,
+    int maxEntries = 200,
     String? label,
   }) {
     return RandomPolicy(
       scope: RandomScope.playlist(playlistId),
-      strategy: RandomStrategy.uniform(),
+      strategy: RandomStrategy.random(),
       history: RandomHistoryPolicy(
         maxEntries: maxEntries,
         recentWindow: recentWindow,
       ),
       seed: seed,
-      label: label ?? 'uniformPlaylist',
+      label: label ?? 'randomPlaylist',
     );
   }
 
   /// 只在指定索引区间内做等概率随机。
-  factory RandomPolicy.uniformRange({
+  factory RandomPolicy.randomRange({
     required int startInclusive,
     required int endExclusive,
     int? seed,
-    int recentWindow = 1,
-    int maxEntries = 128,
+    int recentWindow = 2,
+    int maxEntries = 200,
     String? label,
   }) {
     return RandomPolicy(
@@ -246,83 +291,64 @@ class RandomPolicy {
         startInclusive: startInclusive,
         endExclusive: endExclusive,
       ),
-      strategy: RandomStrategy.uniform(),
+      strategy: RandomStrategy.random(),
       history: RandomHistoryPolicy(
         maxEntries: maxEntries,
         recentWindow: recentWindow,
       ),
       seed: seed,
-      label: label ?? 'uniformRange',
+      label: label ?? 'randomRange',
     );
   }
 
   /// 只在指定歌曲 id 集合内做等概率随机。
-  factory RandomPolicy.uniformTrackIds(
+  factory RandomPolicy.randomTrackIds(
     Set<String> trackIds, {
     int? seed,
-    int recentWindow = 1,
-    int maxEntries = 128,
+    int recentWindow = 2,
+    int maxEntries = 200,
     String? label,
   }) {
     return RandomPolicy(
       scope: RandomScope.trackIds(trackIds),
-      strategy: RandomStrategy.uniform(),
+      strategy: RandomStrategy.random(),
       history: RandomHistoryPolicy(
         maxEntries: maxEntries,
         recentWindow: recentWindow,
       ),
       seed: seed,
-      label: label ?? 'uniformTrackIds',
-    );
-  }
-
-  /// 通过过滤条件创建随机策略。
-  factory RandomPolicy.filtered({
-    required String id,
-    required bool Function(
-      AudioTrack track,
-      int index,
-      RandomSelectionContext context,
-    )
-    predicate,
-    int? seed,
-    int recentWindow = 1,
-    int maxEntries = 128,
-    String? label,
-  }) {
-    return RandomPolicy(
-      scope: RandomScope.filtered(id: id, predicate: predicate),
-      strategy: RandomStrategy.uniform(),
-      history: RandomHistoryPolicy(
-        maxEntries: maxEntries,
-        recentWindow: recentWindow,
-      ),
-      seed: seed,
-      label: label ?? 'filtered:$id',
+      label: label ?? 'randomTrackIds',
     );
   }
 }
 
+// --- Scope Implementations ---
+
 class _AllRandomScope extends RandomScope {
   const _AllRandomScope();
-
   @override
   String get key => 'all';
+  @override
+  List<int> resolve(RandomSelectionContext context) =>
+      List<int>.generate(context.tracks.length, (index) => index);
+}
 
+class _ActivePlaylistRandomScope extends RandomScope {
+  const _ActivePlaylistRandomScope();
+  @override
+  String get key => 'activePlaylist';
   @override
   List<int> resolve(RandomSelectionContext context) {
+    if (context.playlistId == null) return const <int>[];
     return List<int>.generate(context.tracks.length, (index) => index);
   }
 }
 
 class _PlaylistRandomScope extends RandomScope {
   const _PlaylistRandomScope(this.playlistId);
-
   final String playlistId;
-
   @override
   String get key => 'playlist:$playlistId';
-
   @override
   List<int> resolve(RandomSelectionContext context) {
     if (context.playlistId != playlistId) return const <int>[];
@@ -332,13 +358,10 @@ class _PlaylistRandomScope extends RandomScope {
 
 class _RangeRandomScope extends RandomScope {
   const _RangeRandomScope(this.startInclusive, this.endExclusive);
-
   final int startInclusive;
   final int endExclusive;
-
   @override
   String get key => 'range:$startInclusive:$endExclusive';
-
   @override
   List<int> resolve(RandomSelectionContext context) {
     if (context.tracks.isEmpty) return const <int>[];
@@ -351,12 +374,9 @@ class _RangeRandomScope extends RandomScope {
 
 class _TrackIdsRandomScope extends RandomScope {
   const _TrackIdsRandomScope(this.trackIds);
-
   final Set<String> trackIds;
-
   @override
   String get key => 'trackIds:${trackIds.length}';
-
   @override
   List<int> resolve(RandomSelectionContext context) {
     final candidates = <int>[];
@@ -371,7 +391,6 @@ class _TrackIdsRandomScope extends RandomScope {
 
 class _PredicateRandomScope extends RandomScope {
   const _PredicateRandomScope(this.id, this.predicate);
-
   final String id;
   final bool Function(
     AudioTrack track,
@@ -379,10 +398,8 @@ class _PredicateRandomScope extends RandomScope {
     RandomSelectionContext context,
   )
   predicate;
-
   @override
   String get key => 'filtered:$id';
-
   @override
   List<int> resolve(RandomSelectionContext context) {
     final candidates = <int>[];
@@ -396,28 +413,52 @@ class _PredicateRandomScope extends RandomScope {
   }
 }
 
-class _UniformRandomStrategy extends RandomStrategy {
-  const _UniformRandomStrategy();
+// --- Strategy Implementations ---
 
+class _RandomRandomStrategy extends RandomStrategy {
+  const _RandomRandomStrategy();
   @override
-  String get key => 'uniform';
-
+  String get key => 'random';
+  @override
+  RandomStrategyKind get kind => RandomStrategyKind.random;
   @override
   int select(
     math.Random random,
     List<int> candidates,
     RandomSelectionContext context,
-  ) {
-    if (candidates.isEmpty) {
-      throw StateError('No random candidates available.');
-    }
-    return candidates[random.nextInt(candidates.length)];
-  }
+  ) => candidates[random.nextInt(candidates.length)];
+}
+
+class _SequentialRandomStrategy extends RandomStrategy {
+  const _SequentialRandomStrategy();
+  @override
+  String get key => 'sequential';
+  @override
+  RandomStrategyKind get kind => RandomStrategyKind.sequential;
+  @override
+  int select(
+    math.Random random,
+    List<int> candidates,
+    RandomSelectionContext context,
+  ) => candidates.first;
+}
+
+class _FisherYatesRandomStrategy extends RandomStrategy {
+  const _FisherYatesRandomStrategy();
+  @override
+  String get key => 'fisherYates';
+  @override
+  RandomStrategyKind get kind => RandomStrategyKind.fisherYates;
+  @override
+  int select(
+    math.Random random,
+    List<int> candidates,
+    RandomSelectionContext context,
+  ) => candidates.first; // Controller will handle the shuffled deck.
 }
 
 class _WeightedRandomStrategy extends RandomStrategy {
   const _WeightedRandomStrategy(this.id, this.weightOf);
-
   final String id;
   final double Function(
     AudioTrack track,
@@ -425,20 +466,16 @@ class _WeightedRandomStrategy extends RandomStrategy {
     RandomSelectionContext context,
   )
   weightOf;
-
   @override
   String get key => 'weighted:$id';
-
+  @override
+  RandomStrategyKind get kind => RandomStrategyKind.weighted;
   @override
   int select(
     math.Random random,
     List<int> candidates,
     RandomSelectionContext context,
   ) {
-    if (candidates.isEmpty) {
-      throw StateError('No random candidates available.');
-    }
-
     var totalWeight = 0.0;
     final weights = <double>[];
     for (final index in candidates) {
@@ -448,18 +485,12 @@ class _WeightedRandomStrategy extends RandomStrategy {
       weights.add(normalized);
       totalWeight += normalized;
     }
-
-    if (totalWeight <= 0.0) {
-      return candidates[random.nextInt(candidates.length)];
-    }
-
+    if (totalWeight <= 0.0) return candidates[random.nextInt(candidates.length)];
     final target = random.nextDouble() * totalWeight;
     var cursor = 0.0;
     for (var i = 0; i < candidates.length; i++) {
       cursor += weights[i];
-      if (target <= cursor) {
-        return candidates[i];
-      }
+      if (target <= cursor) return candidates[i];
     }
     return candidates.last;
   }
@@ -467,7 +498,6 @@ class _WeightedRandomStrategy extends RandomStrategy {
 
 class _CallbackRandomStrategy extends RandomStrategy {
   const _CallbackRandomStrategy(this.id, this.selectCallback);
-
   final String id;
   final int Function(
     math.Random random,
@@ -475,28 +505,14 @@ class _CallbackRandomStrategy extends RandomStrategy {
     RandomSelectionContext context,
   )
   selectCallback;
-
   @override
   String get key => 'callback:$id';
-
+  @override
+  RandomStrategyKind get kind => RandomStrategyKind.custom;
   @override
   int select(
     math.Random random,
     List<int> candidates,
     RandomSelectionContext context,
-  ) {
-    if (candidates.isEmpty) {
-      throw StateError('No random candidates available.');
-    }
-    final selected = selectCallback(random, candidates, context);
-    if (selected < 0 || selected >= context.tracks.length) {
-      throw StateError('Custom random strategy returned an invalid index.');
-    }
-    if (!candidates.contains(selected)) {
-      throw StateError(
-        'Custom random strategy returned a non-candidate index.',
-      );
-    }
-    return selected;
-  }
+  ) => selectCallback(random, candidates, context);
 }

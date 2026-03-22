@@ -15,10 +15,7 @@ enum RandomPreset {
 class RandomLabTab extends StatefulWidget {
   final AudioVisualizerPlayerController controller;
 
-  const RandomLabTab({
-    super.key,
-    required this.controller,
-  });
+  const RandomLabTab({super.key, required this.controller});
 
   @override
   State<RandomLabTab> createState() => RandomLabTabState();
@@ -71,7 +68,9 @@ class RandomLabTabState extends State<RandomLabTab> {
   }
 
   void _syncTrackInLibrary(AudioTrack updatedTrack) {
-    final idx = _libraryTracks.indexWhere((track) => track.id == updatedTrack.id);
+    final idx = _libraryTracks.indexWhere(
+      (track) => track.id == updatedTrack.id,
+    );
     if (idx >= 0) {
       _libraryTracks[idx] = updatedTrack;
     } else {
@@ -82,10 +81,7 @@ class RandomLabTabState extends State<RandomLabTab> {
   Future<void> _toggleLike(AudioTrack track) async {
     final liked = track.metadataValue<bool>('isLike') ?? false;
     final updated = track.copyWith(
-      metadata: <String, Object?>{
-        ...track.metadata,
-        'isLike': !liked,
-      },
+      metadata: <String, Object?>{...track.metadata, 'isLike': !liked},
     );
     setState(() {
       _syncTrackInLibrary(updated);
@@ -113,77 +109,89 @@ class RandomLabTabState extends State<RandomLabTab> {
     });
 
     if (preset == RandomPreset.off) {
-      widget.controller.playlist.setRandomPolicy(null);
+      widget.controller.playlist.clearShuffle();
       return;
     }
 
     if (preset == RandomPreset.shuffleAll) {
-      widget.controller.playlist.setRandomPolicy(
-        RandomPolicy.uniformAll(
-          recentWindow: 2,
-          maxEntries: 200,
-          label: 'shuffle-all',
-        ),
+      widget.controller.playlist.setShuffle(
+        scope: RandomScope.all(),
+        strategy: RandomStrategy.fisherYates(),
+        avoidRecent: 2,
+        historySize: 200,
       );
       return;
     }
 
     if (preset == RandomPreset.activePlaylist) {
-      final playlistId =
-          widget.controller.playlist.activePlaylistId ??
-          widget.controller.playlist.queuePlaylistId;
-      widget.controller.playlist.setRandomPolicy(
-        RandomPolicy.uniformPlaylist(
-          playlistId,
-          recentWindow: 2,
-          maxEntries: 200,
-          label: 'active-playlist',
-        ),
+      widget.controller.playlist.setShuffle(
+        scope: RandomScope.activePlaylist(),
+        strategy: RandomStrategy.fisherYates(),
+        avoidRecent: 2,
+        historySize: 200,
       );
       return;
     }
 
     if (preset == RandomPreset.queueOnly) {
-      widget.controller.playlist.setRandomPolicy(
-        RandomPolicy.uniformPlaylist(
+      widget.controller.playlist.setShuffle(
+        scope: RandomScope.playlist(
           widget.controller.playlist.queuePlaylistId,
-          recentWindow: 2,
-          maxEntries: 200,
-          label: 'queue-only',
         ),
+        strategy: RandomStrategy.fisherYates(),
+        avoidRecent: 2,
+        historySize: 200,
       );
       return;
     }
 
     if (preset == RandomPreset.likedOnly) {
-      widget.controller.playlist.setRandomPolicy(
-        RandomPolicy.filtered(
+      widget.controller.playlist.setShuffle(
+        scope: RandomScope.filtered(
           id: 'liked-only',
           predicate: (track, index, context) =>
               track.metadataValue<bool>('isLike') == true,
-          recentWindow: 1,
-          maxEntries: 200,
         ),
+        strategy: RandomStrategy.fisherYates(),
+        avoidRecent: 1,
+        historySize: 200,
       );
       return;
     }
 
-    widget.controller.playlist.setRandomPolicy(
-      RandomPolicy(
-        scope: RandomScope.all(),
-        strategy: RandomStrategy.weighted(
-          id: 'inverse-playcount',
-          weightOf: (track, index, context) {
-            final playCount = track.metadataValue<int>('playCount') ?? 0;
-            return 1.0 / (1 + playCount);
-          },
-        ),
-        history: const RandomHistoryPolicy(
-          maxEntries: 200,
-          recentWindow: 2,
-        ),
-        label: 'playcount-weighted',
+    // 高级接口也可以直接换成 setRandomPolicy(...) 来做更复杂的规则。
+    widget.controller.playlist.setShuffle(
+      scope: RandomScope.activePlaylist(),
+      strategy: RandomStrategy.custom(
+        id: 'inverse-playcount',
+        select: (random, candidates, context) {
+          var totalWeight = 0.0;
+          final weights = <double>[];
+          for (final index in candidates) {
+            final track = context.trackAt(index);
+            final playCount = track?.metadataValue<int>('playCount') ?? 0;
+            final weight = 1.0 / (1 + playCount);
+            weights.add(weight);
+            totalWeight += weight;
+          }
+
+          if (totalWeight <= 0.0) {
+            return candidates[random.nextInt(candidates.length)];
+          }
+
+          final target = random.nextDouble() * totalWeight;
+          var cursor = 0.0;
+          for (var i = 0; i < candidates.length; i++) {
+            cursor += weights[i];
+            if (target <= cursor) {
+              return candidates[i];
+            }
+          }
+          return candidates.last;
+        },
       ),
+      avoidRecent: 2,
+      historySize: 200,
     );
   }
 
@@ -234,7 +242,7 @@ class RandomLabTabState extends State<RandomLabTab> {
   }
 
   Widget _buildRandomHeader() {
-    final randomPolicy = widget.controller.playlist.randomPolicy;
+    final shuffleStrategy = widget.controller.playlist.randomPolicy?.strategy;
     return Wrap(
       spacing: 12,
       runSpacing: 12,
@@ -278,7 +286,7 @@ class RandomLabTabState extends State<RandomLabTab> {
           onPressed: widget.controller.playlist.randomHistory.isEmpty
               ? null
               : () {
-                  widget.controller.playlist.clearRandomHistory();
+                  widget.controller.playlist.clearShuffleHistory();
                 },
           icon: const Icon(Icons.history_toggle_off),
           label: const Text('Clear History'),
@@ -298,7 +306,7 @@ class RandomLabTabState extends State<RandomLabTab> {
           label: const Text('Next'),
         ),
         Text(
-          'Policy: ${randomPolicy?.label ?? randomPolicy?.key ?? 'off'}',
+          'Shuffle: ${shuffleStrategy?.key ?? 'off'}',
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         Text(
@@ -314,9 +322,7 @@ class RandomLabTabState extends State<RandomLabTab> {
       title: 'Library',
       subtitle: 'Imported tracks you can drag into the queue or playlists.',
       child: _libraryTracks.isEmpty
-          ? _emptyPanel(
-              'Import audio files to populate the library.',
-            )
+          ? _emptyPanel('Import audio files to populate the library.')
           : ListView.separated(
               itemCount: _libraryTracks.length,
               separatorBuilder: (_, _) => const SizedBox(height: 8),
@@ -333,8 +339,9 @@ class RandomLabTabState extends State<RandomLabTab> {
   }
 
   Widget _buildQueuePanel() {
-    final queuePlaylist =
-        widget.controller.playlist.playlistById(widget.controller.playlist.queuePlaylistId);
+    final queuePlaylist = widget.controller.playlist.playlistById(
+      widget.controller.playlist.queuePlaylistId,
+    );
     final tracks = queuePlaylist?.items ?? const <AudioTrack>[];
     return DragTarget<AudioTrack>(
       onAcceptWithDetails: (details) async {
@@ -370,7 +377,9 @@ class RandomLabTabState extends State<RandomLabTab> {
   Widget _buildSelectedPlaylistPanel() {
     final playlists = widget.controller.playlist.playlists;
     final selectedPlaylist = _selectedPlaylist;
-    final selectedId = _selectedPlaylistId ?? (playlists.isNotEmpty ? playlists.first.id : null);
+    final selectedId =
+        _selectedPlaylistId ??
+        (playlists.isNotEmpty ? playlists.first.id : null);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -429,9 +438,11 @@ class RandomLabTabState extends State<RandomLabTab> {
               return _buildTrackPanel(
                 title: 'Playlist',
                 subtitle:
-                    selectedPlaylist?.name ?? 'Pick a playlist and drop tracks here.',
+                    selectedPlaylist?.name ??
+                    'Pick a playlist and drop tracks here.',
                 highlight: candidate.isNotEmpty,
-                child: selectedPlaylist == null || selectedPlaylist.items.isEmpty
+                child:
+                    selectedPlaylist == null || selectedPlaylist.items.isEmpty
                     ? _emptyPanel(
                         'Drop tracks here to build the selected playlist.',
                       )
@@ -463,9 +474,9 @@ class RandomLabTabState extends State<RandomLabTab> {
     return Container(
       decoration: BoxDecoration(
         color: highlight
-            ? Theme.of(context).colorScheme.primaryContainer.withValues(
-                alpha: 0.45,
-              )
+            ? Theme.of(
+                context,
+              ).colorScheme.primaryContainer.withValues(alpha: 0.45)
             : Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
@@ -480,15 +491,12 @@ class RandomLabTabState extends State<RandomLabTab> {
         children: [
           Text(
             title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 4),
-          Text(
-            subtitle,
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
+          Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
           const SizedBox(height: 12),
           Expanded(child: child),
         ],
@@ -556,10 +564,7 @@ class _TrackDraggableTile extends StatelessWidget {
               onPressed: onBumpPlayCount,
               icon: const Icon(Icons.plus_one),
             ),
-            Text(
-              '$playCount',
-              style: Theme.of(context).textTheme.labelLarge,
-            ),
+            Text('$playCount', style: Theme.of(context).textTheme.labelLarge),
           ],
         ),
       ),
@@ -568,10 +573,7 @@ class _TrackDraggableTile extends StatelessWidget {
 }
 
 class _TrackSummaryTile extends StatelessWidget {
-  const _TrackSummaryTile({
-    required this.track,
-    required this.trailing,
-  });
+  const _TrackSummaryTile({required this.track, required this.trailing});
 
   final AudioTrack track;
   final Widget trailing;
@@ -590,10 +592,7 @@ class _TrackSummaryTile extends StatelessWidget {
             CircleAvatar(
               radius: 18,
               backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-              child: Icon(
-                liked ? Icons.favorite : Icons.music_note,
-                size: 18,
-              ),
+              child: Icon(liked ? Icons.favorite : Icons.music_note, size: 18),
             ),
             const SizedBox(width: 12),
             Expanded(
