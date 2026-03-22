@@ -101,6 +101,15 @@ enum RandomStrategyKind {
   custom,
 }
 
+/// Defines what happens when a random sequence (like a shuffle deck) is exhausted.
+enum RandomExhaustionPolicy {
+  /// Reshuffle the deck and start over (default).
+  reshuffle,
+
+  /// End the sequence and stop playback.
+  stop,
+}
+
 /// Describes how a random candidate is selected from the scope.
 abstract class RandomStrategy {
   const RandomStrategy();
@@ -200,6 +209,7 @@ class RandomPolicy {
     required this.scope,
     required this.strategy,
     this.history = const RandomHistoryPolicy(),
+    this.exhaustion = RandomExhaustionPolicy.reshuffle,
     this.seed,
     this.label,
   });
@@ -212,6 +222,9 @@ class RandomPolicy {
 
   /// 随机历史保留规则。
   final RandomHistoryPolicy history;
+    
+  /// What to do when the sequence is exhausted.
+  final RandomExhaustionPolicy exhaustion;
 
   /// 可选固定随机种子，便于复现结果。
   final int? seed;
@@ -221,13 +234,14 @@ class RandomPolicy {
 
   /// 当前策略的完整标识，包含范围、策略、历史和种子。
   String get key =>
-      '${label ?? 'custom'}|${scope.key}|${strategy.key}|${history.key}|seed:${seed ?? 'none'}';
+      '${label ?? 'custom'}|${scope.key}|${strategy.key}|${history.key}|${exhaustion.name}|seed:${seed ?? 'none'}';
 
   /// 对整个播放列表做等概率随机。
   factory RandomPolicy.randomAll({
     int? seed,
     int recentWindow = 2,
     int maxEntries = 200,
+    RandomExhaustionPolicy exhaustion = RandomExhaustionPolicy.reshuffle,
     String? label,
   }) {
     return RandomPolicy(
@@ -237,6 +251,7 @@ class RandomPolicy {
         maxEntries: maxEntries,
         recentWindow: recentWindow,
       ),
+      exhaustion: exhaustion,
       seed: seed,
       label: label ?? 'randomAll',
     );
@@ -246,12 +261,14 @@ class RandomPolicy {
   factory RandomPolicy.shuffleAll({
     int? seed,
     int maxEntries = 200,
+    RandomExhaustionPolicy exhaustion = RandomExhaustionPolicy.reshuffle,
     String? label,
   }) {
     return RandomPolicy(
       scope: RandomScope.all(),
       strategy: RandomStrategy.fisherYates(),
       history: RandomHistoryPolicy(maxEntries: maxEntries, recentWindow: 0),
+      exhaustion: exhaustion,
       seed: seed,
       label: label ?? 'shuffleAll',
     );
@@ -334,6 +351,7 @@ class RandomPolicy {
     int? seed,
     int recentWindow = 2,
     int maxEntries = 200,
+    RandomExhaustionPolicy exhaustion = RandomExhaustionPolicy.reshuffle,
     String? label,
   }) {
     return RandomPolicy(
@@ -343,6 +361,7 @@ class RandomPolicy {
         maxEntries: maxEntries,
         recentWindow: recentWindow,
       ),
+      exhaustion: exhaustion,
       seed: seed,
       label: label ?? 'weightedPlayback',
     );

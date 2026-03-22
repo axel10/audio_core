@@ -54,6 +54,15 @@ class PlaylistController extends ChangeNotifier {
   String? get activePlaylistId => _activePlaylistId;
   String get queuePlaylistId => _defaultPlaylistId;
   List<RandomHistoryEntry> get randomHistory => _randomManager.history;
+  int? get historyCursor => _randomManager.historyCursor;
+  List<String> get currentDeck => _randomManager.currentDeck;
+  int? get deckCursor => _randomManager.deckCursor;
+  
+  /// Whether there is a next track available.
+  bool get hasNext => _resolveAdjacentIndex(next: true, peek: true) != null;
+
+  /// Whether there is a previous track available.
+  bool get hasPrev => _resolveAdjacentIndex(next: false, peek: true) != null;
 
   /// Returns a playlist by id, or `null` if it does not exist.
   Playlist? playlistById(String? id) {
@@ -232,7 +241,13 @@ class PlaylistController extends ChangeNotifier {
   Future<bool> playPrevious({PlaybackReason reason = PlaybackReason.user}) async {
     final oldTrack = currentTrack;
     final resolution = _resolveAdjacentIndex(next: false);
-    if (resolution == null) return false;
+    if (resolution == null) {
+      if (_randomManager.policy != null && currentTrack != null) {
+        await _parent.loadTrack(autoPlay: true, position: Duration.zero);
+        return true;
+      }
+      return false;
+    }
     _currentIndex = resolution;
     await _reconcile(
       oldTrack: oldTrack,
@@ -311,6 +326,7 @@ class PlaylistController extends ChangeNotifier {
     RandomStrategy? strategy,
     int avoidRecent = 2,
     int historySize = 200,
+    RandomExhaustionPolicy exhaustion = RandomExhaustionPolicy.reshuffle,
     int? seed,
   }) {
     final policy = RandomPolicy(
@@ -320,6 +336,7 @@ class PlaylistController extends ChangeNotifier {
         maxEntries: historySize,
         recentWindow: avoidRecent,
       ),
+      exhaustion: exhaustion,
       seed: seed,
       label: 'shuffle',
     );
@@ -339,6 +356,7 @@ class PlaylistController extends ChangeNotifier {
     RandomScope? scope,
     int avoidRecent = 2,
     int historySize = 2400,
+    RandomExhaustionPolicy exhaustion = RandomExhaustionPolicy.reshuffle,
     int? seed,
   }) {
     final policy = RandomPolicy.weighted(
@@ -347,6 +365,7 @@ class PlaylistController extends ChangeNotifier {
       scope: scope,
       recentWindow: avoidRecent,
       maxEntries: historySize,
+      exhaustion: exhaustion,
       seed: seed,
     );
     _randomManager.setPolicy(policy);

@@ -16,8 +16,8 @@ class RandomPlaybackManager {
   /// Current position in history.
   int? _historyCursor;
 
-  /// The current shuffle deck (for Fisher-Yates and Sequential).
-  final List<int> _deck = [];
+  /// The current shuffle deck (Track IDs for consistency across changes).
+  final List<String> _deck = [];
 
   /// The current position in the deck.
   int? _deckCursor;
@@ -33,7 +33,7 @@ class RandomPlaybackManager {
   RandomPolicy? get policy => _policy;
   List<RandomHistoryEntry> get history => List.unmodifiable(_history);
   int? get historyCursor => _historyCursor;
-  List<int> get currentDeck => List.unmodifiable(_deck);
+  List<String> get currentDeck => List.unmodifiable(_deck);
   int? get deckCursor => _deckCursor;
 
   // --- Calculated Getters ---
@@ -47,7 +47,7 @@ class RandomPlaybackManager {
     if (currentTrack == null || _deck.isEmpty) return null;
     final currentId = currentTrack.id;
     for (var i = 0; i < _deck.length; i++) {
-      if (tracks[_deck[i]].id == currentId) return i;
+      if (_deck[i] == currentId) return i;
     }
     return null;
   }
@@ -139,7 +139,28 @@ class RandomPlaybackManager {
 
     final context = _buildContext_internal(playlistId, tracks, currentTrack: currentTrack);
 
-    // 1. Deck-based strategies (Sequential, Fisher-Yates)
+    // 1. "Previous" logic: All random modes use history for back navigation.
+    if (!next) {
+      final hCursor = _historyCursor;
+      if (hCursor != null && hCursor > 0) {
+        final target = hCursor - 1;
+        final trackIndex = _history[target].trackIndex;
+        if (!peek) {
+          _historyCursor = target;
+          // Sync deck cursor if strategy uses deck
+          if (policy.strategy.kind == RandomStrategyKind.sequential ||
+              policy.strategy.kind == RandomStrategyKind.fisherYates) {
+            _deckCursor = _findCurrentDeckCursor(tracks, trackIndex);
+          }
+        }
+        return trackIndex;
+      }
+      // If at history start, return null (caller will handle "seek to start").
+      return null;
+    }
+
+    // 2. "Next" logic:
+    // Deck-based strategies (Sequential, Fisher-Yates)
     if (policy.strategy.kind == RandomStrategyKind.sequential ||
         policy.strategy.kind == RandomStrategyKind.fisherYates) {
       final candidates = policy.scope.resolve(context);
@@ -148,53 +169,60 @@ class RandomPlaybackManager {
       _syncDeck(context, candidates);
       var cursor = _deckCursor ?? _findCurrentDeckCursor(tracks, context.currentIndex);
 
-      if (next) {
-        if (cursor != null && cursor < _deck.length - 1) {
-          final target = cursor + 1;
+      int? resultIndex;
+      if (cursor != null && cursor < _deck.length - 1) {
+        final target = cursor + 1;
+        final trackId = _deck[target];
+        final trackIdx = tracks.indexWhere((t) => t.id == trackId);
+        if (trackIdx >= 0) {
           if (!peek) _deckCursor = target;
-          return _deck[target];
-        }
-        if (cursor == null || loop) {
-          if (!peek) _deckCursor = 0;
-          return _deck[0];
+          resultIndex = trackIdx;
         }
       } else {
-        if (cursor != null && cursor > 0) {
-          final target = cursor - 1;
-          if (!peek) _deckCursor = target;
-          return _deck[target];
+        // Reached end of deck or not in deck: restart/reshuffle
+        if (policy.exhaustion == RandomExhaustionPolicy.stop) {
+          return null;
         }
-        if (cursor == null || loop) {
-          final target = _deck.length - 1;
-          if (!peek) _deckCursor = target;
-          return _deck[target];
+        if (!peek) {
+          if (policy.strategy.kind == RandomStrategyKind.fisherYates) {
+            _deck.shuffle(_random);
+          }
+          _deckCursor = 0;
+        }
+        if (_deck.isNotEmpty) {
+          final trackId = _deck[0];
+          final trackIdx = tracks.indexWhere((t) => t.id == trackId);
+          if (trackIdx >= 0) resultIndex = trackIdx;
         }
       }
-      return null;
+
+      if (resultIndex != null && !peek) {
+        final hCursor = _historyCursor;
+        if (hCursor != null &&
+            hCursor < _history.length - 1 &&
+            _history[hCursor + 1].trackIndex == resultIndex) {
+          _historyCursor = hCursor + 1;
+        } else {
+          _appendHistory(
+            track: tracks[resultIndex],
+            playlistId: playlistId,
+            index: resultIndex,
+            policyKey: policy.key,
+            limit: policy.history.maxEntries,
+          );
+          _historyCursor = _history.length - 1;
+        }
+      }
+      return resultIndex;
     }
 
-    // 2. Random-based strategies (Random, Weighted, Custom)
+    // 3. Random-based strategies (Random, Weighted, Custom)
     final cursor = _historyCursor;
-    if (cursor != null) {
-      if (next && cursor < _history.length - 1) {
-        final target = cursor + 1;
-        if (!peek) _historyCursor = target;
-        return _history[target].trackIndex;
-      }
-      if (!next && cursor > 0) {
-        final target = cursor - 1;
-        if (!peek) _historyCursor = target;
-        return _history[target].trackIndex;
-      }
-      if (!next && loop && _history.isNotEmpty) {
-        final target = _history.length - 1;
-        if (!peek) _historyCursor = target;
-        return _history[target].trackIndex;
-      }
+    if (cursor != null && cursor < _history.length - 1) {
+      final target = cursor + 1;
+      if (!peek) _historyCursor = target;
+      return _history[target].trackIndex;
     }
-
-    // If "previous" and we hit history start, can't go back unless loop (handled above)
-    if (!next) return null;
 
     // Pick a new random candidate
     final candidates = policy.scope.resolve(context);
@@ -243,7 +271,9 @@ class RandomPlaybackManager {
       currentIndex = tracks.indexWhere((t) => t.id == currentTrack.id);
       if (currentIndex < 0) currentIndex = null;
     } else if (_deckCursor != null && _deckCursor! < _deck.length) {
-      currentIndex = _deck[_deckCursor!];
+      final id = _deck[_deckCursor!];
+      currentIndex = tracks.indexWhere((t) => t.id == id);
+      if (currentIndex < 0) currentIndex = null;
     }
 
     return RandomSelectionContext(
@@ -264,14 +294,54 @@ class RandomPlaybackManager {
       return;
     }
 
-    _deckSignature = signature;
-    _deck
-      ..clear()
-      ..addAll(candidates);
+    final oldDeck = List<String>.from(_deck);
+    final oldCursor = _deckCursor;
+    final strategyKind = _policy?.strategy.kind;
 
-    if (_policy?.strategy.kind == RandomStrategyKind.fisherYates) {
-      _deck.shuffle(_random);
+    _deckSignature = signature;
+    _deck.clear();
+
+    final candidateIds = candidates.map((i) => context.trackAt(i)?.id)
+        .whereType<String>()
+        .toList();
+
+    if (candidateIds.isEmpty) {
+      _deckCursor = null;
+      return;
     }
+
+    if (strategyKind == RandomStrategyKind.fisherYates && oldCursor != null && oldCursor < oldDeck.length) {
+      // 1. Keep the track IDs that were already played and still exist in candidates
+      final stillPlayedIds = oldDeck.sublist(0, oldCursor + 1)
+          .where((id) => candidateIds.contains(id))
+          .toList();
+      
+      // 2. All other candidate IDs are "future"
+      final playedSet = stillPlayedIds.toSet();
+      final futureIds = candidateIds.where((id) => !playedSet.contains(id)).toList();
+      futureIds.shuffle(_random);
+      
+      _deck..addAll(stillPlayedIds)..addAll(futureIds);
+    } else if (strategyKind == RandomStrategyKind.fisherYates) {
+      _deck.addAll(candidateIds);
+      _deck.shuffle(_random);
+
+      // Simple start: current track at front
+      if (context.currentIndex != null) {
+        final currentId = context.trackAt(context.currentIndex!)?.id;
+        if (currentId != null) {
+          final idxInDeck = _deck.indexOf(currentId);
+          if (idxInDeck > 0) {
+            final id = _deck.removeAt(idxInDeck);
+            _deck.insert(0, id);
+          }
+        }
+      }
+    } else {
+      // Sequential strategy
+      _deck.addAll(candidateIds);
+    }
+    
     _deckCursor = _findCurrentDeckCursor(context.tracks, context.currentIndex);
   }
 
@@ -279,7 +349,7 @@ class RandomPlaybackManager {
     if (currentIndex == null || _deck.isEmpty) return null;
     final currentId = tracks[currentIndex].id;
     for (var i = 0; i < _deck.length; i++) {
-        if (tracks[_deck[i]].id == currentId) return i;
+        if (_deck[i] == currentId) return i;
     }
     return null;
   }

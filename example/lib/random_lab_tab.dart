@@ -239,19 +239,126 @@ class RandomLabTabState extends State<RandomLabTab> {
             _buildRandomHeader(),
             const SizedBox(height: 12),
             Expanded(
-              child: Row(
-                children: [
-                  Expanded(child: _buildLibraryPanel()),
-                  const SizedBox(width: 12),
-                  Expanded(child: _buildQueuePanel()),
-                  const SizedBox(width: 12),
-                  Expanded(child: _buildSelectedPlaylistPanel()),
-                ],
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    SizedBox(width: 320, child: _buildLibraryPanel()),
+                    const SizedBox(width: 12),
+                    SizedBox(width: 320, child: _buildQueuePanel()),
+                    const SizedBox(width: 12),
+                    SizedBox(width: 320, child: _buildSelectedPlaylistPanel()),
+                    const SizedBox(width: 12),
+                    SizedBox(width: 320, child: _buildShuffleDeckPanel()),
+                    const SizedBox(width: 12),
+                    SizedBox(width: 320, child: _buildRandomHistoryPanel()),
+                  ],
+                ),
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  AudioTrack? _resolveTrack(String id) {
+    // 1. Check library
+    for (final track in _libraryTracks) {
+      if (track.id == id) return track;
+    }
+    // 2. Check active playlist items (includes Queue)
+    for (final track in widget.controller.playlist.items) {
+      if (track.id == id) return track;
+    }
+    // 3. Check all playlists
+    for (final playlist in widget.controller.playlist.playlists) {
+      for (final track in playlist.items) {
+        if (track.id == id) return track;
+      }
+    }
+    // 4. Fallback
+    return null;
+  }
+
+  Widget _buildShuffleDeckPanel() {
+    final deck = widget.controller.playlist.currentDeck;
+    final cursor = widget.controller.playlist.deckCursor;
+    final currentTrackId = widget.controller.playlist.currentTrack?.id;
+
+    return _buildTrackPanel(
+      title: 'Shuffle Deck',
+      subtitle: 'The internal sequence for random playback (Cursor: $cursor)',
+      child:
+          deck.isEmpty
+              ? _emptyPanel('Shuffle is not active or deck is empty.')
+              : ListView.separated(
+                itemCount: deck.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final id = deck[index];
+                  final track = _resolveTrack(id) ?? AudioTrack(id: id, uri: '');
+                  final isCurrentCursor = cursor == index;
+                  final isCurrentlyPlaying = id == currentTrackId;
+
+                  return _TrackSummaryTile(
+                    track: track,
+                    highlight: isCurrentlyPlaying,
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (isCurrentCursor)
+                          const Icon(Icons.play_arrow, color: Colors.green),
+                        const SizedBox(width: 4),
+                        Text('#$index', style: Theme.of(context).textTheme.labelSmall),
+                      ],
+                    ),
+                  );
+                },
+              ),
+    );
+  }
+
+  Widget _buildRandomHistoryPanel() {
+    final history = widget.controller.playlist.randomHistory;
+    final cursor = widget.controller.playlist.historyCursor;
+    final currentTrackId = widget.controller.playlist.currentTrack?.id;
+
+    return _buildTrackPanel(
+      title: 'Random History',
+      subtitle: 'Tracks recently played in random mode (Cursor: $cursor)',
+      child:
+          history.isEmpty
+              ? _emptyPanel('No random history available.')
+              : ListView.separated(
+                itemCount: history.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final entry = history[index];
+                  final track =
+                      _resolveTrack(entry.trackId) ??
+                      AudioTrack(id: entry.trackId, uri: '');
+                  final isCurrentCursor = cursor == index;
+                  final isCurrentlyPlaying = entry.trackId == currentTrackId;
+
+                  return _TrackSummaryTile(
+                    track: track,
+                    highlight: isCurrentlyPlaying,
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (isCurrentCursor)
+                          const Icon(Icons.history, color: Colors.blue),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${entry.generatedAt.hour}:${entry.generatedAt.minute}:${entry.generatedAt.second}',
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
     );
   }
 
@@ -380,6 +487,7 @@ class RandomLabTabState extends State<RandomLabTab> {
                 final track = _libraryTracks[index];
                 return _TrackDraggableTile(
                   track: track,
+                  highlight: track.id == widget.controller.playlist.currentTrack?.id,
                   onToggleLike: () => _toggleLike(track),
                   onBumpPlayCount: () => _bumpPlayCount(track),
                 );
@@ -415,6 +523,7 @@ class RandomLabTabState extends State<RandomLabTab> {
                     final track = tracks[index];
                     return _TrackSummaryTile(
                       track: track,
+                      highlight: track.id == widget.controller.playlist.currentTrack?.id,
                       trailing: const Icon(Icons.queue_music),
                     );
                   },
@@ -503,6 +612,7 @@ class RandomLabTabState extends State<RandomLabTab> {
                           final track = selectedPlaylist.items[index];
                           return _TrackSummaryTile(
                             track: track,
+                            highlight: track.id == widget.controller.playlist.currentTrack?.id,
                             trailing: const Icon(Icons.playlist_play),
                           );
                         },
@@ -570,11 +680,13 @@ class _TrackDraggableTile extends StatelessWidget {
     required this.track,
     required this.onToggleLike,
     required this.onBumpPlayCount,
+    this.highlight = false,
   });
 
   final AudioTrack track;
   final VoidCallback onToggleLike;
   final VoidCallback onBumpPlayCount;
+  final bool highlight;
 
   @override
   Widget build(BuildContext context) {
@@ -588,6 +700,7 @@ class _TrackDraggableTile extends StatelessWidget {
           constraints: const BoxConstraints(maxWidth: 280),
           child: _TrackSummaryTile(
             track: track,
+            highlight: highlight,
             trailing: const Icon(Icons.drag_indicator),
           ),
         ),
@@ -596,11 +709,13 @@ class _TrackDraggableTile extends StatelessWidget {
         opacity: 0.5,
         child: _TrackSummaryTile(
           track: track,
+          highlight: highlight,
           trailing: const Icon(Icons.drag_indicator),
         ),
       ),
       child: _TrackSummaryTile(
         track: track,
+        highlight: highlight,
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -623,26 +738,49 @@ class _TrackDraggableTile extends StatelessWidget {
 }
 
 class _TrackSummaryTile extends StatelessWidget {
-  const _TrackSummaryTile({required this.track, required this.trailing});
+  const _TrackSummaryTile({
+    required this.track,
+    required this.trailing,
+    this.highlight = false,
+  });
 
   final AudioTrack track;
   final Widget trailing;
+  final bool highlight;
 
   @override
   Widget build(BuildContext context) {
     final liked = track.metadataValue<bool>('isLike') ?? false;
     final playCount = track.metadataValue<int>('playCount') ?? 0;
     return Card(
-      elevation: 0,
-      color: Theme.of(context).colorScheme.surface,
+      elevation: highlight ? 4 : 0,
+      color: highlight
+          ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.6)
+          : Theme.of(context).colorScheme.surface,
+      shape: highlight
+          ? RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Theme.of(context).colorScheme.primary, width: 2),
+          )
+          : null,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(
           children: [
             CircleAvatar(
               radius: 18,
-              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-              child: Icon(liked ? Icons.favorite : Icons.music_note, size: 18),
+              backgroundColor:
+                  highlight
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).colorScheme.primaryContainer,
+              child: Icon(
+                liked ? Icons.favorite : Icons.music_note,
+                size: 18,
+                color:
+                    highlight
+                        ? Theme.of(context).colorScheme.onPrimary
+                        : Theme.of(context).colorScheme.onPrimaryContainer,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
