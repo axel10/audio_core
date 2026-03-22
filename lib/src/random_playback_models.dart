@@ -320,6 +320,33 @@ class RandomPolicy {
       label: label ?? 'randomTrackIds',
     );
   }
+
+  /// 按权重随机选取。
+  factory RandomPolicy.weighted({
+    required String id,
+    required double Function(
+      AudioTrack track,
+      int index,
+      RandomSelectionContext context,
+    )
+    weightOf,
+    RandomScope? scope,
+    int? seed,
+    int recentWindow = 2,
+    int maxEntries = 200,
+    String? label,
+  }) {
+    return RandomPolicy(
+      scope: scope ?? RandomScope.all(),
+      strategy: RandomStrategy.weighted(id: id, weightOf: weightOf),
+      history: RandomHistoryPolicy(
+        maxEntries: maxEntries,
+        recentWindow: recentWindow,
+      ),
+      seed: seed,
+      label: label ?? 'weightedPlayback',
+    );
+  }
 }
 
 // --- Scope Implementations ---

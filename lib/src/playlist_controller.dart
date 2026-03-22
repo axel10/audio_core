@@ -328,6 +328,32 @@ class PlaylistController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setWeightedShuffle({
+    required String id,
+    required double Function(
+      AudioTrack track,
+      int index,
+      RandomSelectionContext context,
+    )
+    weightOf,
+    RandomScope? scope,
+    int avoidRecent = 2,
+    int historySize = 2400,
+    int? seed,
+  }) {
+    final policy = RandomPolicy.weighted(
+      id: id,
+      weightOf: weightOf,
+      scope: scope,
+      recentWindow: avoidRecent,
+      maxEntries: historySize,
+      seed: seed,
+    );
+    _randomManager.setPolicy(policy);
+    _reconcileRandom();
+    notifyListeners();
+  }
+
   void clearShuffle() => setRandomPolicy(null);
 
   void clearRandomHistory() {
