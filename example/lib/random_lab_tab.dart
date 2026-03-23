@@ -26,6 +26,7 @@ class RandomLabTabState extends State<RandomLabTab> {
   String? _selectedPlaylistId;
   RandomPreset _randomPreset = RandomPreset.off;
   RandomStrategyKind _selectedStrategy = RandomStrategyKind.fisherYates;
+  RandomExhaustionPolicy _exhaustionPolicy = RandomExhaustionPolicy.reshuffle;
   static const String _demoPlaylistId = 'demo_random_lab';
 
   @override
@@ -186,6 +187,7 @@ class RandomLabTabState extends State<RandomLabTab> {
       strategy: strategy,
       avoidRecent: 2,
       historySize: 200,
+      exhaustion: _exhaustionPolicy,
     );
   }
 
@@ -494,9 +496,24 @@ class RandomLabTabState extends State<RandomLabTab> {
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(width: 12),
-        Text(
-          'History: ${widget.controller.playlist.randomHistory.length}',
-          style: Theme.of(context).textTheme.bodyMedium,
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Stop at end',
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
+            Switch(
+              value: _exhaustionPolicy == RandomExhaustionPolicy.stop,
+              activeColor: Colors.red,
+              onChanged: _randomPreset == RandomPreset.off ? null : (value) {
+                setState(() {
+                  _exhaustionPolicy = value ? RandomExhaustionPolicy.stop : RandomExhaustionPolicy.reshuffle;
+                });
+                _updateRandomPolicy();
+              },
+            ),
+          ],
         ),
       ],
     );

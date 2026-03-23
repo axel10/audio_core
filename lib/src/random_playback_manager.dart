@@ -208,13 +208,63 @@ class RandomPlaybackManager {
         if (policy.exhaustion == RandomExhaustionPolicy.stop) {
           return null;
         }
-        if (!peek) {
-          if (policy.strategy.kind == RandomStrategyKind.fisherYates) {
-            _deck.shuffle(_random);
+
+        // Fisher-Yates stable reshuffle: 
+        // We pick a designated "next" track (not the current one), shuffle the rest, 
+        // and update the deck to anchor at the current track followed by the new cycle.
+        // This ensures nextTrack remains stable between peek and actual navigation.
+        if (policy.strategy.kind == RandomStrategyKind.fisherYates) {
+          final candidates = policy.scope.resolve(context);
+          if (candidates.isNotEmpty) {
+            final candidateIds = candidates.map((i) => context.trackAt(i)?.id).whereType<String>().toList();
+            final currentId = currentTrack?.id;
+            
+            // Generate a fresh shuffle for the next cycle
+            final nextCycle = List<String>.from(candidateIds)..shuffle(_random);
+            
+            // According to user request: pick a random one as "next" (must not be current if possible)
+            // If the first of shuffled happens to be current, move it.
+            if (nextCycle.length > 1 && nextCycle[0] == currentId) {
+                final swapIdx = _random.nextInt(nextCycle.length - 1) + 1;
+                final tmp = nextCycle[0];
+                nextCycle[0] = nextCycle[swapIdx];
+                nextCycle[swapIdx] = tmp;
+            }
+            
+            // Update _deck to be: [current, ...nextCycle (excluding another current)]
+            // This way, _deckCursor points to 0 (current), and _deck[1] is our designated next song.
+            final newDeck = <String>[];
+            if (currentId != null) {
+              newDeck.add(currentId);
+              for (final id in nextCycle) {
+                if (id != currentId) newDeck.add(id);
+              }
+              _deck.clear();
+              _deck.addAll(newDeck);
+              _deckCursor = 0;
+            } else {
+              _deck.clear();
+              _deck.addAll(nextCycle);
+              _deckCursor = null; 
+            }
           }
+        } else if (!peek) {
+          // Sequential strategy or others: just loop back
           _deckCursor = 0;
         }
-        if (_deck.isNotEmpty) {
+
+        // Now that deck is reset/prepared, try to find the next song
+        final cursor = _deckCursor ?? _findCurrentDeckCursor(tracks, context.currentIndex);
+        if (cursor != null && cursor < _deck.length - 1) {
+          final target = cursor + 1;
+          final trackId = _deck[target];
+          final trackIdx = tracks.indexWhere((t) => t.id == trackId);
+          if (trackIdx >= 0) {
+            if (!peek) _deckCursor = target;
+            resultIndex = trackIdx;
+          }
+        } else if (_deck.isNotEmpty) {
+          // Fallback if no specific next found but deck exists (e.g. 1 song)
           final trackId = _deck[0];
           final trackIdx = tracks.indexWhere((t) => t.id == trackId);
           if (trackIdx >= 0) resultIndex = trackIdx;
