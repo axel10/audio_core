@@ -19,8 +19,12 @@ class RandomPlaybackManager {
   /// The current shuffle deck (Track IDs for consistency across changes).
   final List<String> _deck = [];
 
-  /// The current position in the deck.
+  /// Current position in the deck.
   int? _deckCursor;
+
+  /// Stashed next track ID for stability at shuffle boundaries.
+  String? _stashedNextTrackId;
+  String? _stashedForTrackId;
 
   /// A signature used to detect when the candidate list has changed.
   String? _deckSignature;
@@ -91,6 +95,8 @@ class RandomPlaybackManager {
     _deck.clear();
     _deckCursor = null;
     _deckSignature = null;
+    _stashedNextTrackId = null;
+    _stashedForTrackId = null;
   }
 
   /// Keeps the internal state in sync with the current playback status.
@@ -209,21 +215,24 @@ class RandomPlaybackManager {
           return null;
         }
 
-        // Fisher-Yates stable reshuffle: 
-        // We pick a designated "next" track (not the current one), shuffle the rest, 
-        // and update the deck to anchor at the current track followed by the new cycle.
-        // This ensures nextTrack remains stable between peek and actual navigation.
         if (policy.strategy.kind == RandomStrategyKind.fisherYates) {
-          final candidates = policy.scope.resolve(context);
-          if (candidates.isNotEmpty) {
-            final candidateIds = candidates.map((i) => context.trackAt(i)?.id).whereType<String>().toList();
-            final currentId = currentTrack?.id;
+          final currentId = currentTrack?.id;
+          
+          if (peek) {
+            // Predict the next song for UI/peek stability but DO NOT modify the main deck yet.
+            // This ensures the current track still shows its correct position at the end.
+            if (_stashedForTrackId == currentId && _stashedNextTrackId != null) {
+              final idx = tracks.indexWhere((t) => t.id == _stashedNextTrackId);
+              if (idx >= 0) return idx;
+            }
+
+            final candidates = policy.scope.resolve(context);
+            if (candidates.isEmpty) return null;
             
-            // Generate a fresh shuffle for the next cycle
+            final candidateIds = candidates.map((i) => context.trackAt(i)?.id).whereType<String>().toList();
             final nextCycle = List<String>.from(candidateIds)..shuffle(_random);
             
-            // According to user request: pick a random one as "next" (must not be current if possible)
-            // If the first of shuffled happens to be current, move it.
+            // Avoid immediate duplicate if possible
             if (nextCycle.length > 1 && nextCycle[0] == currentId) {
                 final swapIdx = _random.nextInt(nextCycle.length - 1) + 1;
                 final tmp = nextCycle[0];
@@ -231,29 +240,50 @@ class RandomPlaybackManager {
                 nextCycle[swapIdx] = tmp;
             }
             
-            // Update _deck to be: [current, ...nextCycle (excluding another current)]
-            // This way, _deckCursor points to 0 (current), and _deck[1] is our designated next song.
+            final nextId = nextCycle[0];
+            _stashedNextTrackId = nextId;
+            _stashedForTrackId = currentId;
+
+            return tracks.indexWhere((t) => t.id == nextId);
+          } else {
+            // Actually moving to next round
+            final candidates = policy.scope.resolve(context);
+            if (candidates.isEmpty) return null;
+
+            final candidateIds = candidates.map((i) => context.trackAt(i)?.id).whereType<String>().toList();
+            final nextRound = List<String>.from(candidateIds)..shuffle(_random);
+
+            // Use the stashed ID if it aligns with current state, otherwise use the fresh shuffle
+            final targetId = (_stashedForTrackId == currentId && _stashedNextTrackId != null) 
+                ? _stashedNextTrackId! 
+                : nextRound[0];
+
+            _stashedNextTrackId = null;
+            _stashedForTrackId = null;
+
+            // Rebuild the deck starting with the target song
             final newDeck = <String>[];
-            if (currentId != null) {
-              newDeck.add(currentId);
-              for (final id in nextCycle) {
-                if (id != currentId) newDeck.add(id);
-              }
-              _deck.clear();
-              _deck.addAll(newDeck);
-              _deckCursor = 0;
-            } else {
-              _deck.clear();
-              _deck.addAll(nextCycle);
-              _deckCursor = null; 
+            newDeck.add(targetId);
+            for (final id in candidateIds) {
+              if (id != targetId) newDeck.add(id);
             }
+            // Shuffle the rest of the new round
+            final rest = newDeck.sublist(1);
+            rest.shuffle(_random);
+            
+            _deck.clear();
+            _deck.add(targetId);
+            _deck.addAll(rest);
+            _deckCursor = 0;
+
+            return tracks.indexWhere((t) => t.id == targetId);
           }
         } else if (!peek) {
-          // Sequential strategy or others: just loop back
+          // Sequential strategy or others: loop back
           _deckCursor = 0;
         }
 
-        // Now that deck is reset/prepared, try to find the next song
+        // Re-evaluate cursor for Sequential or fallback
         final cursor = _deckCursor ?? _findCurrentDeckCursor(tracks, context.currentIndex);
         if (cursor != null && cursor < _deck.length - 1) {
           final target = cursor + 1;
@@ -264,7 +294,6 @@ class RandomPlaybackManager {
             resultIndex = trackIdx;
           }
         } else if (_deck.isNotEmpty) {
-          // Fallback if no specific next found but deck exists (e.g. 1 song)
           final trackId = _deck[0];
           final trackIdx = tracks.indexWhere((t) => t.id == trackId);
           if (trackIdx >= 0) resultIndex = trackIdx;
