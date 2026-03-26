@@ -11,7 +11,7 @@ flutter_rust_bridge = "=2.11.1"
 anyhow = "1.0.102"
 ringbuf = "0.4.8"
 crossbeam-channel = "0.5.15"
-rodio = { version = "0.22.1", default-features = true, features = ["symphonia-all"] }
+rodio = { path = "./rodio", default-features = true, features = ["symphonia-all"] }
 symphonia = { version = "0.5.5", features = ["all"] }
 
 
