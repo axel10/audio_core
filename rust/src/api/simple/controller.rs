@@ -1,11 +1,17 @@
 use super::equalizer::{EqSource, EqualizerConfig, EqualizerShared};
 use super::fft::{clear_fft_buffer, FftSource, RAW_FFT_BINS};
+use android_logger::Config;
 use cpal::traits::{DeviceTrait, HostTrait};
+use log::{info, LevelFilter};
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use std::fs::File;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
+
+pub fn init_logger() {
+    android_logger::init_once(Config::default().with_max_level(LevelFilter::Debug));
+}
 
 const DEFAULT_OUTPUT_POLL_INTERVAL: Duration = Duration::from_millis(1000);
 const CROSSFADE_TICK_INTERVAL: Duration = Duration::from_millis(16);
@@ -98,9 +104,9 @@ impl PlayerController {
             return Ok(());
         }
 
-        eprintln!("[AudioDeviceMonitor] ensure_audio_output: opening new default output");
+        info!("[AudioDeviceMonitor] ensure_audio_output: opening new default output");
         let (sink, device_name) = Self::open_current_default_output()?;
-        eprintln!("[AudioDeviceMonitor] ensure_audio_output: opened device '{}'", device_name);
+        info!("[AudioDeviceMonitor] ensure_audio_output: opened device '{}'", device_name);
         self.sink = Some(sink);
         self.active_output_device_name = Some(device_name);
         Ok(())
@@ -365,23 +371,24 @@ impl PlayerController {
 
     fn maybe_switch_to_new_default_output(&mut self) -> Result<(), String> {
         if self.sink.is_none() {
-            eprintln!("[AudioDeviceMonitor] maybe_switch: sink is None, skipping");
+            info!("[AudioDeviceMonitor] maybe_switch: sink is None, skipping");
             return Ok(());
         }
 
         let Some(current_default_device) = cpal::default_host().default_output_device() else {
-            eprintln!("[AudioDeviceMonitor] maybe_switch: no default output device found");
+            info!("[AudioDeviceMonitor] maybe_switch: no default output device found");
             return Ok(());
         };
         let current_default_name = describe_output_device(&current_default_device);
 
-        eprintln!("[AudioDeviceMonitor] maybe_switch: active='{:?}' vs current='{:?}'", self.active_output_device_name, current_default_name);
+        info!("[AudioDeviceMonitor] maybe_switch: active='{}' vs current='{}'", self.active_output_device_name.as_deref().unwrap_or("(none)"), current_default_name);
+        info!("[AudioDeviceMonitor] maybe_switch: comparison result = {}", self.active_output_device_name.as_deref() == Some(current_default_name.as_str()));
 
         if self.active_output_device_name.as_deref() == Some(current_default_name.as_str()) {
             return Ok(());
         }
 
-        eprintln!("[AudioDeviceMonitor] maybe_switch: DEVICE CHANGED detected, switching...");
+        info!("[AudioDeviceMonitor] maybe_switch: DEVICE CHANGED detected, switching...");
 
         let playback_position = self.public_position();
         let loaded_path = self.public_path().map(str::to_string);
@@ -438,7 +445,7 @@ fn start_default_output_monitor() {
                 #[cfg(debug_assertions)]
                 {
                     if let Err(e) = result {
-                        eprintln!("[AudioDeviceMonitor] maybe_switch_to_new_default_output error: {e}");
+                        info!("[AudioDeviceMonitor] maybe_switch_to_new_default_output error: {e}");
                     }
                 }
             }
@@ -502,12 +509,13 @@ fn drive_crossfade(generation: u64, duration: Duration) {
 
 pub fn init_app() {
     flutter_rust_bridge::setup_default_user_utils();
-    eprintln!("[AudioDeviceMonitor] init_app called, starting monitor thread...");
+    init_logger();
+    info!("[AudioDeviceMonitor] init_app called, starting monitor thread...");
     start_default_output_monitor();
 
     if let Ok(mut c) = controller().lock() {
         let _ = c.ensure_audio_output();
-        eprintln!("[AudioDeviceMonitor] initial audio output ensured, sink={}", c.sink.is_some());
+        info!("[AudioDeviceMonitor] initial audio output ensured, sink={}", c.sink.is_some());
     }
 }
 
