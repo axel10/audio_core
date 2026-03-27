@@ -391,11 +391,13 @@ impl PlayerController {
 
             info!("[AudioDeviceMonitor] Starting safe audio reconstruction...");
 
-            // 2. Take resources and release lock
-            let old_data = if let Ok(mut c) = controller().lock() {
+            // 2. Pause and Take resources
+            let old_resources = if let Ok(mut c) = controller().lock() {
+                let was_playing = c.any_deck_playing();
+                c.pause_all(); // Pause immediately as requested
+
                 let pos = c.public_position();
                 let path = c.public_path().map(str::to_string);
-                let was_playing = c.any_deck_playing();
 
                 c.transition_generation = c.transition_generation.wrapping_add(1);
                 let incoming = c.incoming_deck.take();
@@ -407,29 +409,29 @@ impl PlayerController {
                 None
             };
 
-            let Some((pos, path, was_playing, incoming, current, sink)) = old_data else {
+            let Some((pos, path, was_playing, old_incoming, old_current, old_sink)) = old_resources else {
                 return;
             };
 
-            // 3. Cleanup outside the lock
-            if let Some(d) = incoming {
-                d.clear();
-            }
-            if let Some(d) = current {
-                d.clear();
-            }
-            drop(sink); // This is where deadlocks usually happen on Android
+            // 3. Wait 0.1 second before resuming on new device
+            thread::sleep(Duration::from_millis(100));
 
-            // 4. Grace period for OS to settle
-            thread::sleep(Duration::from_millis(200));
-
-            // 5. Re-open output
-            let Ok((new_sink, device_name)) = PlayerController::open_current_default_output() else {
-                info!("[AudioDeviceMonitor] Failed to re-open audio output after switch");
-                return;
+            // 4. Re-open output
+            let open_result = PlayerController::open_current_default_output();
+            
+            let (new_sink, device_name) = match open_result {
+                Ok(res) => res,
+                Err(e) => {
+                    info!("[AudioDeviceMonitor] Failed to re-open audio output: {}", e);
+                    // Standard cleanup on failure
+                    if let Some(d) = old_incoming { d.clear(); }
+                    if let Some(d) = old_current { d.clear(); }
+                    drop(old_sink);
+                    return;
+                }
             };
 
-            // 6. Restore state
+            // 5. Restore state on new device
             if let Ok(mut c) = controller().lock() {
                 c.sink = Some(new_sink);
                 c.active_output_device_name = Some(device_name);
@@ -438,6 +440,20 @@ impl PlayerController {
                     let _ = c.replace_current_from_path(&p, pos, was_playing);
                 }
             }
+
+            // 6. Old stream pause 3 seconds total before destruction
+            // Since we already waited 1s, wait 2 more seconds
+            thread::sleep(Duration::from_secs(2));
+
+            // 7. Cleanup old resources
+            // if let Some(d) = old_incoming {
+            //     d.clear();
+            // }
+            // if let Some(d) = old_current {
+            //     d.clear();
+            // }
+            drop(old_sink);
+            info!("[AudioDeviceMonitor] Old audio resources destroyed after 3s pause.");
         });
     }
 
