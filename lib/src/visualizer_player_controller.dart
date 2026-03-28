@@ -234,6 +234,12 @@ class AudioVisualizerPlayerController extends ChangeNotifier
       },
     );
     visualizer.resetState();
+    
+    // On Android, EQ processor might need re-attaching or re-configuring 
+    // after a new DataSource is loaded.
+    if (Platform.isAndroid) {
+      unawaited(Future.delayed(const Duration(milliseconds: 200), () => equalizer.reapply()));
+    }
   }
 
   @override

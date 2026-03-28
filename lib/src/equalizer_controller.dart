@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -24,9 +25,22 @@ class EqualizerController extends ChangeNotifier {
   EqualizerConfig _config = _makeDefaultConfig();
   EqualizerConfig get config => _config;
 
+  bool _isAdvanced = true;
+  bool get isAdvanced => _isAdvanced;
+
+  // System EQ states (Android only)
+  Map<String, dynamic>? _systemParams;
+  Map<String, dynamic>? get systemParams => _systemParams;
+  List<double> _systemBandGains = [];
+  double _systemBassBoostDb = 0.0;
+
   @internal
   Future<void> initialize() async {
-    if (Platform.isAndroid) return;
+    if (Platform.isAndroid) {
+      // For Android, we default to advanced mode
+      await setAdvanced(true);
+      return;
+    }
     try {
       _config = await getAudioEqualizerConfig();
       notifyListeners();
@@ -35,15 +49,64 @@ class EqualizerController extends ChangeNotifier {
     }
   }
 
+  Future<void> setAdvanced(bool advanced) async {
+    _isAdvanced = advanced;
+    if (Platform.isAndroid) {
+      if (advanced) {
+        // Switch to Advanced EQ
+        await MyExoplayer.setCppEqualizerEnabled(_config.enabled);
+        await MyExoplayer.setCppEqualizerPreAmp(_config.preampDb);
+        await MyExoplayer.setCppEqualizerBandCount(_config.bandCount);
+        await MyExoplayer.setCppEqualizerConfig(
+          bandGains: _config.bandGainsDb.toList(),
+        );
+      } else {
+        // Switch to System EQ
+        await MyExoplayer.setCppEqualizerEnabled(false);
+        if (_systemParams == null) {
+          _systemParams = await MyExoplayer.getSystemEqualizerParams();
+          if (_systemParams != null) {
+            final int bandCount = _systemParams!['numBands'] ?? 5;
+            _systemBandGains = List.filled(bandCount, 0.0);
+          }
+        }
+        await _updateSystemEq();
+      }
+    }
+    notifyListeners();
+  }
+
+  Future<void> reapply() async {
+    if (Platform.isAndroid) {
+      await setAdvanced(_isAdvanced);
+    } else {
+      await setConfig(_config);
+    }
+  }
+
+  Future<void> _updateSystemEq() async {
+    if (!Platform.isAndroid) return;
+    await MyExoplayer.setEqualizerConfig(
+      enabled: _config.enabled,
+      bandGains: _systemBandGains,
+      bassBoostDb: _systemBassBoostDb,
+    );
+  }
+
   Future<void> setConfig(EqualizerConfig config) async {
     final normalized = _normalizeConfig(config);
     try {
       if (Platform.isAndroid) {
-        await MyExoplayer.setEqualizerConfig(
-          enabled: normalized.enabled,
-          bandGains: normalized.bandGainsDb.toList(),
-          bassBoostDb: normalized.bassBoostDb,
-        );
+        if (_isAdvanced) {
+          await MyExoplayer.setCppEqualizerEnabled(normalized.enabled);
+          await MyExoplayer.setCppEqualizerPreAmp(normalized.preampDb);
+          await MyExoplayer.setCppEqualizerBandCount(normalized.bandCount);
+          await MyExoplayer.setCppEqualizerConfig(
+            bandGains: normalized.bandGainsDb.toList(),
+          );
+        } else {
+          await _updateSystemEq();
+        }
       } else {
         await setAudioEqualizerConfig(config: normalized);
       }
@@ -55,9 +118,32 @@ class EqualizerController extends ChangeNotifier {
     }
   }
 
-  Future<void> setEnabled(bool enabled) async => setConfig(_copyConfig(enabled: enabled));
+  // System EQ specific setters
+  Future<void> setSystemBandGain(int index, double gain) async {
+    if (index < 0 || index >= _systemBandGains.length) return;
+    _systemBandGains[index] = gain;
+    await _updateSystemEq();
+    notifyListeners();
+  }
 
-  Future<void> setBandCount(int bandCount) async => setConfig(_copyConfig(bandCount: bandCount));
+  Future<void> setSystemBassBoost(double gainDb) async {
+    _systemBassBoostDb = gainDb;
+    await _updateSystemEq();
+    notifyListeners();
+  }
+
+  double getSystemBandGain(int index) {
+    if (index < 0 || index >= _systemBandGains.length) return 0.0;
+    return _systemBandGains[index];
+  }
+
+  double get systemBassBoostDb => _systemBassBoostDb;
+
+  Future<void> setEnabled(bool enabled) async =>
+      setConfig(_copyConfig(enabled: enabled));
+
+  Future<void> setBandCount(int bandCount) async =>
+      setConfig(_copyConfig(bandCount: bandCount));
 
   Future<void> setBandGain(int bandIndex, double gainDb) async {
     if (bandIndex < 0 || bandIndex >= maxEqualizerBands) return;
@@ -66,12 +152,21 @@ class EqualizerController extends ChangeNotifier {
     await setConfig(_copyConfig(bandGainsDb: gains));
   }
 
-  Future<void> setPreamp(double preampDb) async => setConfig(_copyConfig(preampDb: preampDb));
+  Future<void> setPreamp(double preampDb) async =>
+      setConfig(_copyConfig(preampDb: preampDb));
 
-  Future<void> setBassBoost(double gainDb) async => setConfig(_copyConfig(bassBoostDb: gainDb));
+  Future<void> setBassBoost(double gainDb) async =>
+      setConfig(_copyConfig(bassBoostDb: gainDb));
 
   void resetDefaults() {
-    setConfig(_makeDefaultConfig());
+    if (_isAdvanced || !Platform.isAndroid) {
+      setConfig(_makeDefaultConfig());
+    } else {
+      _systemBandGains = List.filled(_systemBandGains.length, 0.0);
+      _systemBassBoostDb = 0.0;
+      unawaited(_updateSystemEq());
+      notifyListeners();
+    }
   }
 
   List<double> getBandCenters({int? bandCount}) {
@@ -79,7 +174,11 @@ class EqualizerController extends ChangeNotifier {
     if (count <= 0) return const [];
     if (count == 1) return const [1000.0];
     final ratio = maxFrequencyHz / minFrequencyHz;
-    return List.generate(count, (i) => minFrequencyHz * math.pow(ratio, i / (count - 1)).toDouble(), growable: false);
+    return List.generate(
+      count,
+      (i) => minFrequencyHz * math.pow(ratio, i / (count - 1)).toDouble(),
+      growable: false,
+    );
   }
 
   static EqualizerConfig _makeDefaultConfig() => EqualizerConfig(
@@ -95,7 +194,7 @@ class EqualizerController extends ChangeNotifier {
   EqualizerConfig _normalizeConfig(EqualizerConfig config) {
     final gains = Float32List(maxEqualizerBands);
     for (var i = 0; i < maxEqualizerBands; i++) {
-        gains[i] = i < config.bandGainsDb.length ? config.bandGainsDb[i] : 0.0;
+      gains[i] = i < config.bandGainsDb.length ? config.bandGainsDb[i] : 0.0;
     }
     return EqualizerConfig(
       enabled: config.enabled,
@@ -108,7 +207,13 @@ class EqualizerController extends ChangeNotifier {
     );
   }
 
-  EqualizerConfig _copyConfig({bool? enabled, int? bandCount, double? preampDb, double? bassBoostDb, Float32List? bandGainsDb}) {
+  EqualizerConfig _copyConfig({
+    bool? enabled,
+    int? bandCount,
+    double? preampDb,
+    double? bassBoostDb,
+    Float32List? bandGainsDb,
+  }) {
     return EqualizerConfig(
       enabled: enabled ?? _config.enabled,
       bandCount: bandCount ?? _config.bandCount,
