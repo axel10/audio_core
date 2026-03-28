@@ -8,6 +8,79 @@ use std::fs::File;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
+use rodio::source::SeekError;
+
+// 为了试验bug：交换左右声道的包装类
+struct StereoSwapSource<S>
+where
+    S: Source<Item = f32>,
+{
+    inner: S,
+    temp_sample: Option<f32>,
+    channels: usize,
+}
+
+impl<S> StereoSwapSource<S>
+where
+    S: Source<Item = f32>,
+{
+    fn new(inner: S) -> Self {
+        let channels = inner.channels().get() as usize;
+        Self {
+            inner,
+            temp_sample: None,
+            channels,
+        }
+    }
+}
+
+impl<S> Iterator for StereoSwapSource<S>
+where
+    S: Source<Item = f32>,
+{
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.channels != 2 {
+            return self.inner.next();
+        }
+
+        if let Some(sample) = self.temp_sample.take() {
+            Some(sample)
+        } else {
+            let left = self.inner.next()?;
+            let right = self.inner.next()?;
+            self.temp_sample = Some(left);
+            Some(right)
+        }
+    }
+}
+
+impl<S> Source for StereoSwapSource<S>
+where
+    S: Source<Item = f32>,
+{
+    fn current_span_len(&self) -> Option<usize> {
+        self.inner.current_span_len()
+    }
+
+    fn channels(&self) -> rodio::ChannelCount {
+        self.inner.channels()
+    }
+
+    fn sample_rate(&self) -> rodio::SampleRate {
+        self.inner.sample_rate()
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
+    }
+
+    fn try_seek(&mut self, pos: Duration) -> Result<(), SeekError> {
+        self.temp_sample = None;
+        self.inner.try_seek(pos)
+    }
+}
 
 pub fn init_logger() {
     android_logger::init_once(Config::default().with_max_level(LevelFilter::Debug));
@@ -219,13 +292,14 @@ impl PlayerController {
         let player = self.create_player()?;
         player.set_volume((self.volume * gain).clamp(0.0, 1.0));
         let eq_source = EqSource::new(source, Arc::clone(&self.equalizer));
+        let swapped_source = StereoSwapSource::new(eq_source);
         if clamped_offset > Duration::ZERO {
             player.append(FftSource::new(
-                eq_source.skip_duration(clamped_offset),
+                swapped_source.skip_duration(clamped_offset),
                 Arc::clone(&latest_fft),
             ));
         } else {
-            player.append(FftSource::new(eq_source, Arc::clone(&latest_fft)));
+            player.append(FftSource::new(swapped_source, Arc::clone(&latest_fft)));
         }
         if auto_play {
             player.play();
