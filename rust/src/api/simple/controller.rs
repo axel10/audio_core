@@ -10,6 +10,31 @@ use std::thread;
 use std::time::Duration;
 use rodio::source::SeekError;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FadeMode {
+    Sequential,
+    Crossfade,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct FadeSettings {
+    pub fade_on_switch: bool,
+    pub fade_on_pause_resume: bool,
+    pub duration_ms: i64,
+    pub mode: FadeMode,
+}
+
+impl Default for FadeSettings {
+    fn default() -> Self {
+        Self {
+            fade_on_switch: false,
+            fade_on_pause_resume: false,
+            duration_ms: 500,
+            mode: FadeMode::Sequential,
+        }
+    }
+}
+
 pub fn init_logger() {
     android_logger::init_once(Config::default().with_max_level(LevelFilter::Debug));
 }
@@ -76,7 +101,9 @@ struct PlayerController {
     incoming_deck: Option<PlaybackDeck>,
     equalizer: Arc<EqualizerShared>,
     volume: f32,
+    fade_settings: FadeSettings,
     transition_generation: u64,
+    volume_fade_generation: u64,
     cached_path: Option<String>,
     cached_pcm: Option<Arc<Vec<f32>>>,
     cached_channels: usize,
@@ -92,7 +119,9 @@ impl PlayerController {
             incoming_deck: None,
             equalizer: EqualizerShared::new(EqualizerConfig::default()),
             volume: 1.0,
+            fade_settings: FadeSettings::default(),
             transition_generation: 0,
+            volume_fade_generation: 0,
             cached_path: None,
             cached_pcm: None,
             cached_channels: 0,
@@ -336,12 +365,24 @@ impl PlayerController {
 
     fn set_master_volume(&mut self, volume: f32) {
         self.volume = volume.clamp(0.0, 1.0);
+        // Only apply immediately if no volume fade is active
+        // (In a more complex impl, we'd adjust the target of the active fade)
         if let Some(current) = self.current_deck.as_ref() {
             current.apply_master_volume(self.volume);
         }
         if let Some(incoming) = self.incoming_deck.as_ref() {
             incoming.apply_master_volume(self.volume);
         }
+    }
+
+    fn start_volume_fade(&mut self, from: f32, to: f32, duration: Duration, on_complete: bool) {
+        self.volume_fade_generation = self.volume_fade_generation.wrapping_add(1);
+        let generation = self.volume_fade_generation;
+        let master_volume_on_start = self.volume;
+
+        thread::spawn(move || {
+            drive_volume_fade(generation, from, to, duration, master_volume_on_start, on_complete);
+        });
     }
 
     fn start_crossfade(&mut self, path: &str, duration: Duration) -> Result<(), String> {
@@ -500,6 +541,51 @@ fn drive_crossfade(generation: u64, duration: Duration) {
     }
 }
 
+fn drive_volume_fade(
+    generation: u64,
+    from: f32,
+    to: f32,
+    duration: Duration,
+    base_volume: f32,
+    pause_on_complete: bool,
+) {
+    let steps =
+        ((duration.as_millis() / CROSSFADE_TICK_INTERVAL.as_millis().max(1)).max(1)) as usize;
+
+    for step in 1..=steps {
+        thread::sleep(CROSSFADE_TICK_INTERVAL);
+
+        let Ok(mut c) = controller().lock() else {
+            return;
+        };
+        if c.volume_fade_generation != generation {
+            return;
+        }
+
+        let progress = step as f32 / steps as f32;
+        let current_gain = from + (to - from) * progress;
+        let master_volume = c.volume;
+        
+        if let Some(deck) = c.current_deck.as_mut() {
+            deck.gain = current_gain;
+            deck.apply_master_volume(master_volume);
+        }
+    }
+
+    if pause_on_complete {
+        if let Ok(mut c) = controller().lock() {
+            if c.volume_fade_generation == generation {
+                let master_volume = c.volume;
+                c.pause_all();
+                if let Some(deck) = c.current_deck.as_mut() {
+                    deck.gain = 1.0;
+                    deck.apply_master_volume(master_volume);
+                }
+            }
+        }
+    }
+}
+
 pub fn init_app() {
     flutter_rust_bridge::setup_default_user_utils();
     init_logger();
@@ -528,24 +614,50 @@ pub fn crossfade_to_audio_file(path: String, duration_ms: i64) -> Result<(), Str
 }
 
 pub fn play_audio() -> Result<(), String> {
-    let c = controller()
+    let mut c = controller()
         .lock()
         .map_err(|_| "player lock poisoned".to_string())?;
     if c.public_deck().is_none() {
         return Err("player is not initialized".to_string());
     }
-    c.play_all();
+    
+    if c.fade_settings.fade_on_pause_resume {
+        let duration = Duration::from_millis(c.fade_settings.duration_ms.max(0) as u64);
+        let master_volume = c.volume;
+        c.play_all();
+        if let Some(deck) = c.current_deck.as_mut() {
+            deck.gain = 0.0;
+            deck.apply_master_volume(master_volume);
+        }
+        c.start_volume_fade(0.0, 1.0, duration, false);
+    } else {
+        c.play_all();
+    }
     Ok(())
 }
 
 pub fn pause_audio() -> Result<(), String> {
-    let c = controller()
+    let mut c = controller()
         .lock()
         .map_err(|_| "player lock poisoned".to_string())?;
     if c.public_deck().is_none() {
         return Err("player is not initialized".to_string());
     }
-    c.pause_all();
+
+    if c.fade_settings.fade_on_pause_resume {
+        let duration = Duration::from_millis(c.fade_settings.duration_ms.max(0) as u64);
+        c.start_volume_fade(1.0, 0.0, duration, true);
+    } else {
+        c.pause_all();
+    }
+    Ok(())
+}
+
+pub fn set_audio_fade_settings(settings: FadeSettings) -> Result<(), String> {
+    let mut c = controller()
+        .lock()
+        .map_err(|_| "player lock poisoned".to_string())?;
+    c.fade_settings = settings;
     Ok(())
 }
 

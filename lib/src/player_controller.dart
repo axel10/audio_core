@@ -4,7 +4,8 @@ import 'package:meta/meta.dart';
 import 'package:my_exoplayer/my_exoplayer.dart';
 
 import 'player_models.dart';
-import 'rust/api/simple_api.dart';
+import 'rust/api/simple_api.dart' as rust_api;
+import 'rust/api/simple/controller.dart' as rust_controller;
 
 /// Manages the actual audio engine session and transitions.
 class PlayerController extends ChangeNotifier {
@@ -21,8 +22,7 @@ class PlayerController extends ChangeNotifier {
   bool _isPlaying = false;
   double _volume = 1.0;
   
-  Duration _fadeDuration = Duration.zero;
-  FadeMode _fadeMode = FadeMode.sequential;
+  FadeSettings _fadeSettings = const FadeSettings();
   int _fadeSequence = 0;
   bool _trackFadeTransitionActive = false;
   PlayerState _playerState = PlayerState.idle;
@@ -36,8 +36,7 @@ class PlayerController extends ChangeNotifier {
   bool get isPlaying => _isPlaying;
   double get volume => _volume;
   PlayerState get currentState => _playerState;
-  Duration get fadeDuration => _fadeDuration;
-  FadeMode get fadeMode => _fadeMode;
+  FadeSettings get fadeSettings => _fadeSettings;
   bool get isFadeActive => _trackFadeTransitionActive;
   int get fadeSequence => _fadeSequence;
 
@@ -57,12 +56,12 @@ class PlayerController extends ChangeNotifier {
     
     PlaybackTransition strategy = const ImmediateTransition();
 
-    if (switchingTracks && _fadeDuration > Duration.zero) {
-      if (_fadeMode == FadeMode.crossfade && isPlaying && autoPlay && position == null && !Platform.isAndroid) {
-        strategy = CrossfadeTransition(duration: _fadeDuration);
+    if (switchingTracks && _fadeSettings.fadeOnSwitch && _fadeSettings.duration > Duration.zero) {
+      if (_fadeSettings.mode == FadeMode.crossfade && isPlaying && autoPlay && position == null && !Platform.isAndroid) {
+        strategy = CrossfadeTransition(duration: _fadeSettings.duration);
       } else {
         strategy = SequentialFadeTransition(
-          duration: _fadeDuration,
+          duration: _fadeSettings.duration,
           targetVolume: _volume,
         );
       }
@@ -103,9 +102,9 @@ class PlayerController extends ChangeNotifier {
         _isPlaying = false;
         _playerState = PlayerState.ready;
       } else {
-        await loadAudioFile(path: path);
+        await rust_api.loadAudioFile(path: path);
         await applyNativeVolume(nativeVolume ?? _volume);
-        final durationMs = await getAudioDurationMs();
+        final durationMs = await rust_api.getAudioDurationMs();
         _selectedPath = path;
         _position = Duration.zero;
         _duration = Duration(milliseconds: durationMs.toInt());
@@ -115,6 +114,41 @@ class PlayerController extends ChangeNotifier {
       }
     } catch (e) {
       setError('Load failed: $e');
+    }
+    notifyListeners();
+  }
+
+  Future<void> togglePlayPause() async {
+    if (_selectedPath == null) return;
+    if (_isPlaying) {
+      await pause();
+    } else {
+      await play();
+    }
+  }
+
+  Future<void> pause() async {
+    try {
+      if (Platform.isAndroid) {
+        // AndroidAudioEngine implementation (if used) would handle this internally.
+        // But here we are still calling MyExoplayer directly in PlayerController.
+        // TODO: We should eventually migrate everything to use AudioEngine interface.
+        if (_fadeSettings.fadeOnPauseResume) {
+          await fadeNativeVolume(from: _volume, to: 0.0, duration: _fadeSettings.duration, sequence: _fadeSequence);
+          await MyExoplayer.pause();
+          await applyNativeVolume(_volume); // Restore volume for next play
+        } else {
+          await MyExoplayer.pause();
+        }
+      } else {
+        // Rust handles fade internally if configured
+        await rust_api.pauseAudio();
+      }
+      _lastCommandTime = DateTime.now();
+      _isPlaying = false;
+      _playerState = PlayerState.paused;
+    } catch (e) {
+      setError('Pause failed: $e');
     }
     notifyListeners();
   }
@@ -131,10 +165,18 @@ class PlayerController extends ChangeNotifier {
       if (_playerState == PlayerState.completed) {
         await seek(Duration.zero);
       }
+      
       if (Platform.isAndroid) {
-        await MyExoplayer.play();
+        if (_fadeSettings.fadeOnPauseResume) {
+          await applyNativeVolume(0.0);
+          await MyExoplayer.play();
+          await fadeNativeVolume(from: 0.0, to: _volume, duration: _fadeSettings.duration, sequence: _fadeSequence, followTargetVolume: true);
+        } else {
+          await MyExoplayer.play();
+        }
       } else {
-        await playAudio();
+        // Rust handles fade internally if configured
+        await rust_api.playAudio();
       }
       _lastCommandTime = DateTime.now();
       _isPlaying = true;
@@ -145,31 +187,6 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> pause() async {
-    try {
-      if (Platform.isAndroid) {
-        await MyExoplayer.pause();
-      } else {
-        await pauseAudio();
-      }
-      _lastCommandTime = DateTime.now();
-      _isPlaying = false;
-      _playerState = PlayerState.paused;
-    } catch (e) {
-      setError('Pause failed: $e');
-    }
-    notifyListeners();
-  }
-
-  Future<void> togglePlayPause() async {
-    if (_selectedPath == null) return;
-    if (_isPlaying) {
-      await pause();
-    } else {
-      await play();
-    }
-  }
-
   Future<void> seek(Duration target) async {
     if (_selectedPath == null) return;
     final ms = target.inMilliseconds.clamp(0, _duration.inMilliseconds);
@@ -177,7 +194,7 @@ class PlayerController extends ChangeNotifier {
       if (Platform.isAndroid) {
         await MyExoplayer.seek(ms);
       } else {
-        await seekAudioMs(positionMs: ms);
+        await rust_api.seekAudioMs(positionMs: ms.toInt());
       }
       _lastCommandTime = DateTime.now();
       _position = Duration(milliseconds: ms);
@@ -195,9 +212,19 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setFadeConfig({Duration? duration, FadeMode? mode}) {
-    if (duration != null) _fadeDuration = duration;
-    if (mode != null) _fadeMode = mode;
+  void setFadeSettings(FadeSettings settings) {
+    _fadeSettings = settings;
+    if (!Platform.isAndroid) {
+      // Sync to Rust
+      rust_api.setAudioFadeSettings(
+        settings: rust_controller.FadeSettings(
+          fadeOnSwitch: settings.fadeOnSwitch,
+          fadeOnPauseResume: settings.fadeOnPauseResume,
+          durationMs: settings.duration.inMilliseconds.toInt(),
+          mode: settings.mode == FadeMode.crossfade ? rust_controller.FadeMode.crossfade : rust_controller.FadeMode.sequential,
+        ),
+      );
+    }
     notifyListeners();
   }
 
@@ -207,7 +234,7 @@ class PlayerController extends ChangeNotifier {
     if (Platform.isAndroid) {
       await MyExoplayer.setVolume(clamped);
     } else {
-      await setAudioVolume(volume: clamped);
+      await rust_api.setAudioVolume(volume: clamped);
     }
   }
 
@@ -379,9 +406,9 @@ class CrossfadeTransition extends PlaybackTransition {
   Future<void> execute({required PlayerController player, required String uri, required bool autoPlay, Duration? position}) async {
     player.nextFadeSequence();
     final seq = player.fadeSequence;
-    await crossfadeToAudioFile(path: uri, durationMs: duration.inMilliseconds);
+    await rust_api.crossfadeToAudioFile(path: uri, durationMs: duration.inMilliseconds.toInt());
     if (player.fadeSequence != seq) return;
-    final durationMs = await getAudioDurationMs();
+    final durationMs = await rust_api.getAudioDurationMs();
     player.applySnapshot(uri, Duration.zero, Duration(milliseconds: durationMs.toInt()), true, player.volume);
   }
 }

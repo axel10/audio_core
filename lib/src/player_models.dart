@@ -26,6 +26,42 @@ enum FadeMode {
   crossfade,
 }
 
+/// Settings for fade-in/fade-out transitions.
+class FadeSettings {
+  /// Whether to use fade when switching songs.
+  final bool fadeOnSwitch;
+
+  /// Whether to use fade when pausing or resuming.
+  final bool fadeOnPauseResume;
+
+  /// Duration of the fade transition.
+  final Duration duration;
+
+  /// The style of the fade (Crossfade vs Sequential).
+  final FadeMode mode;
+
+  const FadeSettings({
+    this.fadeOnSwitch = false,
+    this.fadeOnPauseResume = false,
+    this.duration = const Duration(milliseconds: 500),
+    this.mode = FadeMode.sequential,
+  });
+
+  FadeSettings copyWith({
+    bool? fadeOnSwitch,
+    bool? fadeOnPauseResume,
+    Duration? duration,
+    FadeMode? mode,
+  }) {
+    return FadeSettings(
+      fadeOnSwitch: fadeOnSwitch ?? this.fadeOnSwitch,
+      fadeOnPauseResume: fadeOnPauseResume ?? this.fadeOnPauseResume,
+      duration: duration ?? this.duration,
+      mode: mode ?? this.mode,
+    );
+  }
+}
+
 /// Playback states for the player.
 enum PlayerState {
   /// 初始状态：播放器已实例化，但尚未加载任何媒体源。

@@ -8,7 +8,7 @@ import 'playlist_models.dart';
 import 'player_controller.dart';
 import 'playlist_controller.dart';
 import 'visualizer_controller.dart';
-import 'rust/api/simple_api.dart';
+import 'rust/api/simple_api.dart' hide FadeSettings, FadeMode;
 import 'rust/frb_generated.dart';
 import 'fft_processor.dart';
 import 'player_state_snapshot.dart';
@@ -31,15 +31,13 @@ class AudioVisualizerPlayerController extends ChangeNotifier
   factory AudioVisualizerPlayerController({
     int fftSize = 1024,
     double analysisFrequencyHz = 30.0,
-    Duration fadeDuration = Duration.zero,
-    FadeMode fadeMode = FadeMode.sequential,
+    FadeSettings fadeSettings = const FadeSettings(),
     VisualizerOptimizationOptions visualOptions = const VisualizerOptimizationOptions(),
   }) {
     return _instance ??= AudioVisualizerPlayerController._internal(
       fftSize: fftSize,
       analysisFrequencyHz: analysisFrequencyHz,
-      fadeDuration: fadeDuration,
-      fadeMode: fadeMode,
+      fadeSettings: fadeSettings,
       visualOptions: visualOptions,
     );
   }
@@ -47,13 +45,12 @@ class AudioVisualizerPlayerController extends ChangeNotifier
   AudioVisualizerPlayerController._internal({
     required this.fftSize,
     required this.analysisFrequencyHz,
-    required Duration fadeDuration,
-    required FadeMode fadeMode,
+    required FadeSettings fadeSettings,
     VisualizerOptimizationOptions visualOptions =
         const VisualizerOptimizationOptions(),
   }) {
     player = PlayerController(parent: this);
-    player.setFadeConfig(duration: fadeDuration, mode: fadeMode);
+    player.setFadeSettings(fadeSettings);
 
     playlist = PlaylistController(parent: this);
 

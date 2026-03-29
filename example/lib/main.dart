@@ -61,8 +61,12 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
     _controller = AudioVisualizerPlayerController(
       fftSize: 1024,
       analysisFrequencyHz: 30,
-      fadeMode: FadeMode.crossfade,
-      fadeDuration: const Duration(milliseconds: 500),
+      fadeSettings: const FadeSettings(
+        fadeOnSwitch: true,
+        fadeOnPauseResume: true,
+        duration: Duration(milliseconds: 500),
+        mode: FadeMode.crossfade,
+      ),
       visualOptions: const VisualizerOptimizationOptions(
         smoothingCoefficient: 0.35,
         gravityCoefficient: 10,

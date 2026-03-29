@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'package:my_exoplayer/my_exoplayer.dart';
 import '../rust/api/simple/equalizer.dart';
+import '../player_models.dart';
 import 'audio_engine_interface.dart';
 
 class AndroidAudioEngine implements AudioEngine {
   final _statusController = StreamController<AudioStatus>.broadcast();
   String? _currentPath;
   double _currentVolume = 1.0;
+  FadeSettings _fadeSettings = const FadeSettings();
 
   @override
   Stream<AudioStatus> get statusStream => _statusController.stream;
@@ -33,7 +35,6 @@ class AndroidAudioEngine implements AudioEngine {
   }
 
   String _activePlayerId = 'main';
-  String get _inactivePlayerId => _activePlayerId == 'main' ? 'crossfade' : 'main';
   EqualizerConfig? _lastConfig;
 
   @override
@@ -50,10 +51,27 @@ class AndroidAudioEngine implements AudioEngine {
   }
 
   @override
-  Future<void> play() => MyExoplayer.play(playerId: _activePlayerId);
+  Future<void> play() async {
+    if (_fadeSettings.fadeOnPauseResume) {
+      await MyExoplayer.setVolume(0.0, playerId: _activePlayerId);
+      await MyExoplayer.play(playerId: _activePlayerId);
+      await _fadeVolume(0.0, _currentVolume, _fadeSettings.duration);
+    } else {
+      await MyExoplayer.play(playerId: _activePlayerId);
+    }
+  }
 
   @override
-  Future<void> pause() => MyExoplayer.pause(playerId: _activePlayerId);
+  Future<void> pause() async {
+    if (_fadeSettings.fadeOnPauseResume) {
+      await _fadeVolume(_currentVolume, 0.0, _fadeSettings.duration);
+      await MyExoplayer.pause(playerId: _activePlayerId);
+      // Restore volume for next time
+      await MyExoplayer.setVolume(_currentVolume, playerId: _activePlayerId);
+    } else {
+      await MyExoplayer.pause(playerId: _activePlayerId);
+    }
+  }
 
   @override
   Future<void> seek(Duration position) =>
@@ -124,34 +142,19 @@ class AndroidAudioEngine implements AudioEngine {
   bool get supportsCrossfade => true;
 
   @override
-  Future<void> crossfade(String path, Duration duration) async {
-    final oldPlayerId = _activePlayerId;
-    final newPlayerId = _inactivePlayerId;
-    _currentPath = path;
+  Future<void> setFadeSettings(FadeSettings settings) async {
+    _fadeSettings = settings;
+    // Potentially sync with native if needed, but here we handle it in Dart
+  }
 
-    // 1. Prepare new player
-    await MyExoplayer.load(path, playerId: newPlayerId);
-    if (_lastConfig != null) {
-      await _applyConfigToPlayer(newPlayerId, _lastConfig!);
-    }
-    await MyExoplayer.setVolume(0.0, playerId: newPlayerId);
-    await MyExoplayer.play(playerId: newPlayerId);
-
-    // 2. Switch active player ID so status stream starts reporting the NEW track
-    _activePlayerId = newPlayerId;
-
-    // 3. Fading loop
+  Future<void> _fadeVolume(double from, double to, Duration duration) async {
     const steps = 20;
     final stepDuration = Duration(milliseconds: duration.inMilliseconds ~/ steps);
     for (int i = 1; i <= steps; i++) {
       final t = i / steps;
-      // Linear crossfade (could also use sine/cosine for constant power)
-      await MyExoplayer.setVolume(_currentVolume * (1.0 - t), playerId: oldPlayerId);
-      await MyExoplayer.setVolume(_currentVolume * t, playerId: newPlayerId);
+      final vol = from + (to - from) * t;
+      await MyExoplayer.setVolume(vol, playerId: _activePlayerId);
       await Future.delayed(stepDuration);
     }
-
-    // 4. Cleanup old player
-    await MyExoplayer.pause(playerId: oldPlayerId);
   }
 }

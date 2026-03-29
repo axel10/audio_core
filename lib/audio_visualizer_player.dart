@@ -1,6 +1,6 @@
 library;
 
-export 'src/rust/api/simple_api.dart';
+export 'src/rust/api/simple_api.dart' hide FadeSettings, FadeMode;
 export 'src/rust/frb_generated.dart' show RustLib;
 
 export 'src/visualizer_player_controller.dart';
