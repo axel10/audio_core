@@ -53,9 +53,11 @@ class AndroidAudioEngine implements AudioEngine {
   @override
   Future<void> play() async {
     if (_fadeSettings.fadeOnPauseResume) {
-      await MyExoplayer.setVolume(0.0, playerId: _activePlayerId);
-      await MyExoplayer.play(playerId: _activePlayerId);
-      await _fadeVolume(0.0, _currentVolume, _fadeSettings.duration);
+      await MyExoplayer.play(
+        playerId: _activePlayerId,
+        fadeDurationMs: _fadeSettings.duration.inMilliseconds,
+        targetVolume: _currentVolume,
+      );
     } else {
       await MyExoplayer.play(playerId: _activePlayerId);
     }
@@ -64,10 +66,10 @@ class AndroidAudioEngine implements AudioEngine {
   @override
   Future<void> pause() async {
     if (_fadeSettings.fadeOnPauseResume) {
-      await _fadeVolume(_currentVolume, 0.0, _fadeSettings.duration);
-      await MyExoplayer.pause(playerId: _activePlayerId);
-      // Restore volume for next time
-      await MyExoplayer.setVolume(_currentVolume, playerId: _activePlayerId);
+      await MyExoplayer.pause(
+        playerId: _activePlayerId,
+        fadeDurationMs: _fadeSettings.duration.inMilliseconds,
+      );
     } else {
       await MyExoplayer.pause(playerId: _activePlayerId);
     }
@@ -144,17 +146,5 @@ class AndroidAudioEngine implements AudioEngine {
   @override
   Future<void> setFadeSettings(FadeSettings settings) async {
     _fadeSettings = settings;
-    // Potentially sync with native if needed, but here we handle it in Dart
-  }
-
-  Future<void> _fadeVolume(double from, double to, Duration duration) async {
-    const steps = 20;
-    final stepDuration = Duration(milliseconds: duration.inMilliseconds ~/ steps);
-    for (int i = 1; i <= steps; i++) {
-      final t = i / steps;
-      final vol = from + (to - from) * t;
-      await MyExoplayer.setVolume(vol, playerId: _activePlayerId);
-      await Future.delayed(stepDuration);
-    }
   }
 }
