@@ -57,6 +57,23 @@ class AndroidAudioEngine implements AudioEngine {
   }
 
   @override
+  Future<void> crossfade(String path, Duration duration) async {
+    // Current native plugin doesn't have a dedicated 'crossfade' command that overlaps.
+    // We'll just load and play as a basic implementation.
+    _currentPath = path;
+    await _channel.invokeMethod('load', {'url': path, 'playerId': _activePlayerId});
+    if (_fadeSettings.fadeOnSwitch) {
+      await _channel.invokeMethod('play', {
+        'playerId': _activePlayerId,
+        'fadeDurationMs': duration.inMilliseconds,
+        'targetVolume': _currentVolume,
+      });
+    } else {
+      await _channel.invokeMethod('play', {'playerId': _activePlayerId});
+    }
+  }
+
+  @override
   Future<void> play() async {
     if (_fadeSettings.fadeOnPauseResume) {
       await _channel.invokeMethod('play', {

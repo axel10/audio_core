@@ -54,11 +54,17 @@ class PlayerController extends ChangeNotifier {
     PlaybackTransition strategy = const ImmediateTransition();
 
     if (switchingTracks && _fadeSettings.fadeOnSwitch && _fadeSettings.duration > Duration.zero) {
-      // For now, simplify and use sequential fade as default if native crossfade is not universal
-      strategy = SequentialFadeTransition(
-        duration: _fadeSettings.duration,
-        targetVolume: _volume,
-      );
+      if (_fadeSettings.mode == FadeMode.crossfade && _parent.engine.supportsCrossfade) {
+        strategy = NativeCrossfadeTransition(
+          duration: _fadeSettings.duration,
+        );
+      } else {
+        // Fallback to sequential fade
+        strategy = SequentialFadeTransition(
+          duration: _fadeSettings.duration,
+          targetVolume: _volume,
+        );
+      }
     }
 
     onStateChanged(true);
@@ -351,5 +357,26 @@ class ImmediateTransition extends PlaybackTransition {
     await player.load(uri);
     if (position != null) await player.seek(position);
     if (autoPlay) await player.play();
+  }
+}
+
+class NativeCrossfadeTransition extends PlaybackTransition {
+  const NativeCrossfadeTransition({required this.duration});
+  final Duration duration;
+
+  @override
+  Future<void> execute({required PlayerController player, required String uri, required bool autoPlay, Duration? position}) async {
+    // Native crossfade handles current deck management internally in Rust.
+    // It starts the new track immediately while the old one keeps playing (fading out).
+    await player._parent.engine.crossfade(uri, duration);
+    
+    // We update local state immediately
+    player._selectedPath = uri;
+    player._position = position ?? Duration.zero;
+    if (autoPlay) {
+      player._isPlaying = true;
+      player._playerState = PlayerState.playing;
+    }
+    player.notifyListeners();
   }
 }

@@ -34,6 +34,10 @@ class RustAudioEngine implements AudioEngine {
 
   @override
   Future<void> load(String path) => rust.loadAudioFile(path: path);
+  
+  @override
+  Future<void> crossfade(String path, Duration duration) => 
+      rust.crossfadeToAudioFile(path: path, durationMs: duration.inMilliseconds);
 
   @override
   Future<void> play() => rust.playAudio();
