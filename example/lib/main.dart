@@ -13,9 +13,9 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Android 下不使用 Rust，因此不需要初始化 RustLib
-  if (!Platform.isAndroid) {
-    await RustLib.init();
-  }
+  // if (!Platform.isAndroid) {
+  //   await RustLib.init();
+  // }
   runApp(const MyApp());
 }
 
