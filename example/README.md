@@ -1,6 +1,6 @@
-# audio_visualizer_player_example
+# audio_core_example
 
-Demonstrates how to use the audio_visualizer_player plugin.
+Demonstrates how to use the audio_core plugin.
 
 ## Getting Started
 

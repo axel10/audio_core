@@ -4,9 +4,8 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:meta/meta.dart';
-import 'package:my_exoplayer/my_exoplayer.dart';
 import 'player_models.dart';
-import 'rust/api/simple_api.dart';
+import 'rust/api/simple/equalizer.dart';
 
 /// Manages equalizer and bass boost configuration.
 class EqualizerController extends ChangeNotifier {
@@ -36,43 +35,17 @@ class EqualizerController extends ChangeNotifier {
 
   @internal
   Future<void> initialize() async {
-    if (Platform.isAndroid) {
-      // For Android, we default to advanced mode
-      await setAdvanced(true);
-      return;
-    }
     try {
-      _config = await getAudioEqualizerConfig();
+      _config = await _parent.engine.getEqualizerConfig();
       notifyListeners();
     } catch (e) {
-      debugPrint('Equalizer fallback to default: $e');
+      debugPrint('Equalizer initialization error: $e');
     }
   }
 
   Future<void> setAdvanced(bool advanced) async {
     _isAdvanced = advanced;
-    if (Platform.isAndroid) {
-      if (advanced) {
-        // Switch to Advanced EQ
-        await MyExoplayer.setCppEqualizerEnabled(_config.enabled);
-        await MyExoplayer.setCppEqualizerPreAmp(_config.preampDb);
-        await MyExoplayer.setCppEqualizerBandCount(_config.bandCount);
-        await MyExoplayer.setCppEqualizerConfig(
-          bandGains: _config.bandGainsDb.toList(),
-        );
-      } else {
-        // Switch to System EQ
-        await MyExoplayer.setCppEqualizerEnabled(false);
-        if (_systemParams == null) {
-          _systemParams = await MyExoplayer.getSystemEqualizerParams();
-          if (_systemParams != null) {
-            final int bandCount = _systemParams!['numBands'] ?? 5;
-            _systemBandGains = List.filled(bandCount, 0.0);
-          }
-        }
-        await _updateSystemEq();
-      }
-    }
+    await setConfig(_config);
     notifyListeners();
   }
 
@@ -85,31 +58,13 @@ class EqualizerController extends ChangeNotifier {
   }
 
   Future<void> _updateSystemEq() async {
-    if (!Platform.isAndroid) return;
-    await MyExoplayer.setEqualizerConfig(
-      enabled: _config.enabled,
-      bandGains: _systemBandGains,
-      bassBoostDb: _systemBassBoostDb,
-    );
+    // Legacy support for system EQ removed to streamline integration
   }
 
   Future<void> setConfig(EqualizerConfig config) async {
     final normalized = _normalizeConfig(config);
     try {
-      if (Platform.isAndroid) {
-        if (_isAdvanced) {
-          await MyExoplayer.setCppEqualizerEnabled(normalized.enabled);
-          await MyExoplayer.setCppEqualizerPreAmp(normalized.preampDb);
-          await MyExoplayer.setCppEqualizerBandCount(normalized.bandCount);
-          await MyExoplayer.setCppEqualizerConfig(
-            bandGains: normalized.bandGainsDb.toList(),
-          );
-        } else {
-          await _updateSystemEq();
-        }
-      } else {
-        await setAudioEqualizerConfig(config: normalized);
-      }
+      await _parent.engine.setEqualizerConfig(normalized);
       _config = normalized;
       notifyListeners();
     } catch (e) {

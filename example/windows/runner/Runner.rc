@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "audio_visualizer_player_example" "\0"
+            VALUE "FileDescription", "audio_core_example" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "audio_visualizer_player_example" "\0"
+            VALUE "InternalName", "audio_core_example" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
-            VALUE "OriginalFilename", "audio_visualizer_player_example.exe" "\0"
-            VALUE "ProductName", "audio_visualizer_player_example" "\0"
+            VALUE "OriginalFilename", "audio_core_example.exe" "\0"
+            VALUE "ProductName", "audio_core_example" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

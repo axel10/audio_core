@@ -1,11 +1,15 @@
 import 'package:meta/meta.dart';
 import 'playlist_models.dart';
 import 'random_playback_models.dart';
+import 'audio_engine/audio_engine_interface.dart';
 
 /// Internal interface for sub-controllers to communicate with the main controller.
 @internal
 abstract class AudioVisualizerParent {
   void notifyListeners();
+
+  /// Access to the underlying audio engine.
+  AudioEngine get engine;
 
   /// Called when a track needs to be loaded (e.g., from playlist navigation).
   Future<void> loadTrack({required bool autoPlay, Duration? position});

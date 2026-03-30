@@ -1,18 +1,18 @@
 // The Android Gradle Plugin builds the native code with the Android NDK.
 
-group 'com.flutter_rust_bridge.audio_visualizer_player'
+group 'com.flutter_rust_bridge.audio_core'
 version '1.0'
 
 buildscript {
     repositories {
         google()
         mavenCentral()
-        // maven { url 'https://jitpack.io' }
     }
 
     dependencies {
         // The Android Gradle Plugin knows how to build native code with the NDK.
         classpath 'com.android.tools.build:gradle:7.3.0'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10"
     }
 }
 
@@ -20,20 +20,20 @@ rootProject.allprojects {
     repositories {
         google()
         mavenCentral()
-        maven { url 'https://jitpack.io' }
     }
 }
 
 apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
 
 android {
     if (project.android.hasProperty("namespace")) {
-        namespace 'com.flutter_rust_bridge.audio_visualizer_player'
+        namespace 'com.flutter_rust_bridge.audio_core'
     }
 
     // Bumping the plugin compileSdkVersion requires all clients of this plugin
     // to bump the version in their app.
-    compileSdkVersion 33
+    compileSdkVersion 35
 
     // Use the NDK version
     // declared in /android/app/build.gradle file of the Flutter project.
@@ -42,17 +42,50 @@ android {
     ndkVersion android.ndkVersion
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_17.toString()
+    }
+
+    sourceSets {
+        main.java.srcDirs += 'src/main/kotlin'
     }
 
     defaultConfig {
-        minSdkVersion 26
+        minSdkVersion 24
+        
+        externalNativeBuild {
+            cmake {
+                // 开启 NEON
+                arguments "-DANDROID_ARM_NEON=ON"
+                cppFlags ""
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
+        }
     }
 }
 
-// apply from: "../cargokit/gradle/plugin.gradle"
-// cargokit {
-//     manifestDir = "../rust"
-//     libname = "audio_visualizer_player"
-// }
+dependencies {
+    def media3_version = "1.9.3"
+
+    implementation "androidx.media3:media3-exoplayer:$media3_version"
+    implementation "androidx.media3:media3-ui:$media3_version"
+    implementation "androidx.media3:media3-common:$media3_version"
+    implementation "com.github.wendykierp:JTransforms:3.2"
+    implementation "com.github.lincollincol:Amplituda:2.3.1"
+}
+
+apply from: "../cargokit/gradle/plugin.gradle"
+cargokit {
+    manifestDir = "../rust"
+    libname = "audio_core"
+}

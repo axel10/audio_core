@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:audio_visualizer_player/audio_visualizer_player.dart';
+import 'package:audio_core/audio_core.dart';
 import 'package:cross_file/cross_file.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 
@@ -13,7 +13,7 @@ class AudioDropRegion extends StatefulWidget {
     this.onTracksAccepted,
   });
 
-  final AudioVisualizerPlayerController controller;
+  final AudioCoreController controller;
   final Widget child;
   final String overlayText;
   final Future<void> Function(List<AudioTrack> tracks)? onTracksAccepted;

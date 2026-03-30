@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:audio_visualizer_player/audio_visualizer_player.dart';
+import 'package:audio_core/audio_core.dart';
 import 'widgets.dart';
 
 enum RandomPreset {
@@ -13,7 +13,7 @@ enum RandomPreset {
 }
 
 class RandomLabTab extends StatefulWidget {
-  final AudioVisualizerPlayerController controller;
+  final AudioCoreController controller;
 
   const RandomLabTab({super.key, required this.controller});
 

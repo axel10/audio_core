@@ -1,4 +1,4 @@
-# audio_visualizer_player
+# audio_core
 
 A new Flutter FFI plugin project.
 
@@ -62,8 +62,8 @@ The native build systems that are invoked by FFI (and method channel) plugins ar
 * For Android: Gradle, which invokes the Android NDK for native builds.
   * See the documentation in android/build.gradle.
 * For iOS and MacOS: Xcode, via CocoaPods.
-  * See the documentation in ios/audio_visualizer_player.podspec.
-  * See the documentation in macos/audio_visualizer_player.podspec.
+  * See the documentation in ios/audio_core.podspec.
+  * See the documentation in macos/audio_core.podspec.
 * For Linux and Windows: CMake.
   * See the documentation in linux/CMakeLists.txt.
   * See the documentation in windows/CMakeLists.txt.
@@ -72,17 +72,17 @@ The native build systems that are invoked by FFI (and method channel) plugins ar
 
 To use the native code, bindings in Dart are needed.
 To avoid writing these by hand, they are generated from the header file
-(`src/audio_visualizer_player.h`) by `package:ffigen`.
+(`src/audio_core.h`) by `package:ffigen`.
 Regenerate the bindings by running `dart run ffigen --config ffigen.yaml`.
 
 ## Invoking native code
 
 Very short-running native functions can be directly invoked from any isolate.
-For example, see `sum` in `lib/audio_visualizer_player.dart`.
+For example, see `sum` in `lib/audio_core.dart`.
 
 Longer-running functions should be invoked on a helper isolate to avoid
 dropping frames in Flutter applications.
-For example, see `sumAsync` in `lib/audio_visualizer_player.dart`.
+For example, see `sumAsync` in `lib/audio_core.dart`.
 
 ## Flutter help
 

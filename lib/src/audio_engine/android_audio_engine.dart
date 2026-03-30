@@ -1,104 +1,123 @@
 import 'dart:async';
-import 'package:my_exoplayer/my_exoplayer.dart';
+import 'package:flutter/services.dart';
 import '../rust/api/simple/equalizer.dart';
 import '../player_models.dart';
 import 'audio_engine_interface.dart';
 
 class AndroidAudioEngine implements AudioEngine {
+  static const MethodChannel _channel = MethodChannel('my_exoplayer');
+  
   final _statusController = StreamController<AudioStatus>.broadcast();
   String? _currentPath;
   double _currentVolume = 1.0;
   FadeSettings _fadeSettings = const FadeSettings();
+  String _activePlayerId = 'main';
+  EqualizerConfig? _lastConfig;
 
   @override
   Stream<AudioStatus> get statusStream => _statusController.stream;
 
   @override
   Future<void> initialize() async {
-    MyExoplayer.setPlayerStateListener((
-        {required playerId,
-        required state,
-        required isPlaying,
-        required durationMs,
-        required positionMs}) {
-      // Only report status for the active player (the one that is not being faded out)
-      if (playerId == _activePlayerId) {
-        _statusController.add(AudioStatus(
-          path: _currentPath,
-          position: Duration(milliseconds: positionMs),
-          duration: Duration(milliseconds: durationMs),
-          isPlaying: isPlaying,
-          volume: _currentVolume,
-        ));
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'onPlayerStateChanged') {
+        final String playerId = call.arguments['playerId'] ?? 'main';
+        if (playerId == _activePlayerId) {
+          final int positionMs = call.arguments['position'] ?? 0;
+          final int durationMs = call.arguments['duration'] ?? 0;
+          final bool isPlaying = call.arguments['isPlaying'] ?? false;
+          
+          _statusController.add(AudioStatus(
+            path: _currentPath,
+            position: Duration(milliseconds: positionMs),
+            duration: Duration(milliseconds: durationMs),
+            isPlaying: isPlaying,
+            volume: _currentVolume,
+          ));
+        }
       }
     });
+    // Ensure default player exists on native side
+    await _channel.invokeMethod('sayHello');
   }
-
-  String _activePlayerId = 'main';
-  EqualizerConfig? _lastConfig;
 
   @override
   Future<void> dispose() async {
     await _statusController.close();
-    await MyExoplayer.dispose(playerId: 'main');
-    await MyExoplayer.dispose(playerId: 'crossfade');
+    await _channel.invokeMethod('dispose', {'playerId': 'main'});
+    await _channel.invokeMethod('dispose', {'playerId': 'crossfade'});
   }
 
   @override
   Future<void> load(String path) async {
     _currentPath = path;
-    await MyExoplayer.load(path, playerId: _activePlayerId);
+    await _channel.invokeMethod('load', {'url': path, 'playerId': _activePlayerId});
   }
 
   @override
   Future<void> play() async {
     if (_fadeSettings.fadeOnPauseResume) {
-      await MyExoplayer.play(
-        playerId: _activePlayerId,
-        fadeDurationMs: _fadeSettings.duration.inMilliseconds,
-        targetVolume: _currentVolume,
-      );
+      await _channel.invokeMethod('play', {
+        'playerId': _activePlayerId,
+        'fadeDurationMs': _fadeSettings.duration.inMilliseconds,
+        'targetVolume': _currentVolume,
+      });
     } else {
-      await MyExoplayer.play(playerId: _activePlayerId);
+      await _channel.invokeMethod('play', {'playerId': _activePlayerId});
     }
   }
 
   @override
   Future<void> pause() async {
     if (_fadeSettings.fadeOnPauseResume) {
-      await MyExoplayer.pause(
-        playerId: _activePlayerId,
-        fadeDurationMs: _fadeSettings.duration.inMilliseconds,
-      );
+      await _channel.invokeMethod('pause', {
+        'playerId': _activePlayerId,
+        'fadeDurationMs': _fadeSettings.duration.inMilliseconds,
+      });
     } else {
-      await MyExoplayer.pause(playerId: _activePlayerId);
+      await _channel.invokeMethod('pause', {'playerId': _activePlayerId});
     }
   }
 
   @override
   Future<void> seek(Duration position) =>
-      MyExoplayer.seek(position.inMilliseconds, playerId: _activePlayerId);
+      _channel.invokeMethod('seek', {
+        'position': position.inMilliseconds, 
+        'playerId': _activePlayerId
+      });
 
   @override
   Future<void> setVolume(double volume) {
     _currentVolume = volume;
-    return MyExoplayer.setVolume(volume, playerId: _activePlayerId);
+    return _channel.invokeMethod('setVolume', {
+      'volume': volume, 
+      'playerId': _activePlayerId,
+      'fadeDurationMs': 0,
+    });
   }
 
   @override
   Future<Duration> getDuration() async {
-    final ms = await MyExoplayer.getDuration(playerId: _activePlayerId);
-    return Duration(milliseconds: ms);
+    final int? ms = await _channel.invokeMethod('getDuration', {'playerId': _activePlayerId});
+    return Duration(milliseconds: ms ?? 0);
   }
 
   @override
   Future<Duration> getCurrentPosition() async {
-    final ms = await MyExoplayer.getCurrentPosition(playerId: _activePlayerId);
-    return Duration(milliseconds: ms);
+    final int? ms = await _channel.invokeMethod('getCurrentPosition', {'playerId': _activePlayerId});
+    return Duration(milliseconds: ms ?? 0);
   }
 
   @override
-  Future<List<double>> getLatestFft() => MyExoplayer.getLatestFft(playerId: _activePlayerId);
+  Future<List<double>> getLatestFft() async {
+    try {
+      final List<dynamic>? result = await _channel.invokeMethod('getLatestFft', {'playerId': _activePlayerId});
+      if (result == null) return [];
+      return result.map((e) => (e as num).toDouble()).toList();
+    } catch (e) {
+      return [];
+    }
+  }
 
   @override
   Future<List<double>> getWaveform({
@@ -106,16 +125,19 @@ class AndroidAudioEngine implements AudioEngine {
     required int expectedChunks,
     int sampleStride = 1,
   }) async {
-    final rawData = await MyExoplayer.getWaveform(path);
-    if (rawData.isEmpty) return const [];
-    
-    final List<double> result = [];
-    for (int i = 0; i < expectedChunks; i++) {
-      final int sourceIdx = (i * rawData.length / expectedChunks).floor();
-      // Normalize to 0.0 - 1.0. Amplituda typically returns 0-100.
-      result.add(rawData[sourceIdx] / 100.0);
+    try {
+      // Direct native waveform extraction with downsampling
+      final List<dynamic>? result = await _channel.invokeMethod('getWaveform', {
+        'path': path,
+        'expectedChunks': expectedChunks,
+        'sampleStride': sampleStride,
+      });
+      if (result == null) return [];
+      // Native returns 0-100, we normalize to 0.0-1.0
+      return result.map((e) => (e as num).toDouble() / 100.0).toList();
+    } catch (e) {
+      return [];
     }
-    return result;
   }
 
   @override
@@ -125,13 +147,22 @@ class AndroidAudioEngine implements AudioEngine {
   }
 
   Future<void> _applyConfigToPlayer(String playerId, EqualizerConfig config) async {
-    await MyExoplayer.setCppEqualizerEnabled(config.enabled, playerId: playerId);
-    await MyExoplayer.setCppEqualizerPreAmp(config.preampDb, playerId: playerId);
-    await MyExoplayer.setCppEqualizerBandCount(config.bandCount, playerId: playerId);
-    await MyExoplayer.setCppEqualizerConfig(
-      bandGains: config.bandGainsDb.toList(),
-      playerId: playerId,
-    );
+    await _channel.invokeMethod('setCppEqualizerEnabled', {
+      'enabled': config.enabled,
+      'playerId': playerId,
+    });
+    await _channel.invokeMethod('setCppEqualizerPreAmp', {
+      'gainDb': config.preampDb,
+      'playerId': playerId,
+    });
+    await _channel.invokeMethod('setCppEqualizerBandCount', {
+      'count': config.bandCount,
+      'playerId': playerId,
+    });
+    await _channel.invokeMethod('setCppEqualizerConfig', {
+      'bandGains': config.bandGainsDb.toList(),
+      'playerId': playerId,
+    });
   }
 
   @override
@@ -147,4 +178,11 @@ class AndroidAudioEngine implements AudioEngine {
   Future<void> setFadeSettings(FadeSettings settings) async {
     _fadeSettings = settings;
   }
+  
+  // Internal helper for non-AudioEngine interface methods if needed
+  Future<Map<String, dynamic>?> getSystemEqualizerParams() async {
+    final Map<dynamic, dynamic>? result = await _channel.invokeMethod('getSystemEqualizerParams', {'playerId': _activePlayerId});
+    return result?.cast<String, dynamic>();
+  }
 }
+

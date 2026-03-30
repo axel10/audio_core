@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:audio_visualizer_player/audio_visualizer_player.dart';
+import 'package:audio_core/audio_core.dart';
 import 'package:file_picker/file_picker.dart';
 import 'equalizer_panel.dart';
 import 'widgets.dart';
@@ -43,7 +43,7 @@ class VisualizerDemoPage extends StatefulWidget {
 }
 
 class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
-  late final AudioVisualizerPlayerController _controller;
+  late final AudioCoreController _controller;
   StreamSubscription<FftFrame>? _subSmooth;
   StreamSubscription<FftFrame>? _subResponsive;
   List<double> _bandsSmooth = const [];
@@ -58,7 +58,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
   @override
   void initState() {
     super.initState();
-    _controller = AudioVisualizerPlayerController(
+    _controller = AudioCoreController(
       fftSize: 1024,
       analysisFrequencyHz: 30,
       fadeSettings: const FadeSettings(
@@ -135,13 +135,17 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
   }
 
   Future<void> _pickAudio() async {
+    debugPrint('Select Audio clicked');
     if (!_controller.isInitialized) {
+      debugPrint('Controller not initialized, initializing now...');
       await _controller.initialize();
     }
+    debugPrint('Opening file picker...');
     final result = await FilePicker.platform.pickFiles(
       type: FileType.audio,
       allowMultiple: true,
     );
+    debugPrint('File picker returned: ${result?.files.length ?? 0} files');
     if (result == null || result.files.isEmpty) {
       return;
     }

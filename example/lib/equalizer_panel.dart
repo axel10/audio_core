@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:audio_visualizer_player/audio_visualizer_player.dart';
+import 'package:audio_core/audio_core.dart';
 
 typedef BandGainChanged = void Function(int index, double value);
 
 class EqualizerPanel extends StatelessWidget {
-  final AudioVisualizerPlayerController controller;
+  final AudioCoreController controller;
 
   const EqualizerPanel({
     super.key,

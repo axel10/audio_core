@@ -12,8 +12,10 @@ import 'rust/api/simple_api.dart' hide FadeSettings, FadeMode;
 import 'rust/frb_generated.dart';
 import 'fft_processor.dart';
 import 'player_state_snapshot.dart';
-import 'package:my_exoplayer/my_exoplayer.dart';
 import 'equalizer_controller.dart';
+import 'audio_engine/audio_engine_interface.dart';
+import 'audio_engine/android_audio_engine.dart';
+import 'audio_engine/rust_audio_engine.dart';
 
 export 'player_controller.dart';
 export 'playlist_controller.dart';
@@ -24,17 +26,17 @@ export 'playlist_models.dart';
 export 'player_state_snapshot.dart';
 
 /// The top-level modular controller for audio playback and visualization.
-class AudioVisualizerPlayerController extends ChangeNotifier
+class AudioCoreController extends ChangeNotifier
     implements AudioVisualizerParent {
-  static AudioVisualizerPlayerController? _instance;
+  static AudioCoreController? _instance;
 
-  factory AudioVisualizerPlayerController({
+  factory AudioCoreController({
     int fftSize = 1024,
     double analysisFrequencyHz = 30.0,
     FadeSettings fadeSettings = const FadeSettings(),
     VisualizerOptimizationOptions visualOptions = const VisualizerOptimizationOptions(),
   }) {
-    return _instance ??= AudioVisualizerPlayerController._internal(
+    return _instance ??= AudioCoreController._internal(
       fftSize: fftSize,
       analysisFrequencyHz: analysisFrequencyHz,
       fadeSettings: fadeSettings,
@@ -42,13 +44,19 @@ class AudioVisualizerPlayerController extends ChangeNotifier
     );
   }
 
-  AudioVisualizerPlayerController._internal({
+  AudioCoreController._internal({
     required this.fftSize,
     required this.analysisFrequencyHz,
     required FadeSettings fadeSettings,
     VisualizerOptimizationOptions visualOptions =
         const VisualizerOptimizationOptions(),
   }) {
+    if (Platform.isAndroid) {
+      _engine = AndroidAudioEngine();
+    } else {
+      _engine = RustAudioEngine();
+    }
+
     player = PlayerController(parent: this);
     player.setFadeSettings(fadeSettings);
 
@@ -88,7 +96,7 @@ class AudioVisualizerPlayerController extends ChangeNotifier
   bool _isTransitioning = false;
   Timer? _analysisTick;
   Timer? _renderTick;
-  StreamSubscription<PlaybackState>? _playbackStateSubscription;
+  StreamSubscription<AudioStatus>? _playbackStateSubscription;
 
   bool get isSupported =>
       Platform.isAndroid || Platform.isLinux || Platform.isWindows;
@@ -120,21 +128,30 @@ class AudioVisualizerPlayerController extends ChangeNotifier
     isTransitioning: _isTransitioning || player.isFadeActive,
   );
 
+  @override
+  AudioEngine get engine => _engine;
+  late final AudioEngine _engine;
+
   Future<void> initialize() async {
+    debugPrint('AudioCoreController: Starting initialization');
     if (_initialized) return;
     if (!isSupported) {
+      debugPrint('AudioCoreController: NOT SUPPORTED');
       player.setError('Only Android, Linux, and Windows are supported.');
       return;
     }
+    debugPrint('AudioCoreController: isSupported = true');
 
     if (!Platform.isAndroid && !_rustLibInitialized) {
       try {
+        debugPrint('AudioCoreController: Initializing RustLib');
         await RustLib.init();
         _rustLibInitialized = true;
       } catch (e) {
         if (!e.toString().contains(
           'Should not initialize flutter_rust_bridge twice',
         )) {
+          debugPrint('AudioCoreController: RustLib init failed: $e');
           player.setError('Rust bridge init failed: $e');
           return;
         }
@@ -145,27 +162,45 @@ class AudioVisualizerPlayerController extends ChangeNotifier
     // Initialize the Rust audio engine (starts device monitoring thread)
     try {
       if (!Platform.isAndroid) {
+        debugPrint('AudioCoreController: Initializing Rust App engine');
         await initApp();
       }
     } catch (e) {
+      debugPrint('AudioCoreController: Rust App engine init failed: $e');
       player.setError('Audio engine init failed: $e');
       return;
     }
 
     try {
+      debugPrint('AudioCoreController: Initializing Equalizer');
       await equalizer.initialize();
+      debugPrint('AudioCoreController: Equalizer initialized');
     } catch (e) {
+      debugPrint('AudioCoreController: Equalizer init failed: $e');
       player.setError('Equalizer sync failed: $e');
       return;
     }
 
-    if (Platform.isAndroid) {
-      _setupExoPlayerListeners();
-    } else {
-      _playbackStateSubscription = subscribePlaybackState().listen(
-        _applyPlaybackStateSnapshot,
-        onError: (e) => player.setError('Playback subscription failed: $e'),
-      );
+    // Initialize Audio Engine
+    try {
+      await _engine.initialize();
+      _playbackStateSubscription = _engine.statusStream.listen((status) {
+        player.applySnapshot(
+          status.path,
+          status.position,
+          status.duration,
+          status.isPlaying,
+          status.volume,
+        );
+        if (status.isPlaying == false && 
+            status.duration > Duration.zero && 
+            status.position >= status.duration - const Duration(milliseconds: 250)) {
+           unawaited(_handleAutoTransition());
+        }
+      });
+    } catch (e) {
+      player.setError('Audio engine init failed: $e');
+      return;
     }
 
     _analysisTick = Timer.periodic(
@@ -174,34 +209,11 @@ class AudioVisualizerPlayerController extends ChangeNotifier
     );
     _renderTick = Timer.periodic(_renderInterval, (_) => _onRenderTick());
 
+    debugPrint('AudioCoreController: Starting visualizer outputs');
     visualizer.visualizerOutputManager.startAll();
     _initialized = true;
     notifyListeners();
-  }
-
-  void _setupExoPlayerListeners() {
-    MyExoplayer.setPlayerStateListener((
-        {required playerId,
-        required state,
-        required isPlaying,
-        required durationMs,
-        required positionMs}) {
-      // In this controller, we typically only care about the 'main' player events 
-      // or we can allow both if they represent the same logical track.
-      // But usually, during crossfade, we want to follow the active one.
-      // For simplicity, we just apply the snapshot.
-      player.applySnapshot(
-        player.currentPath,
-        Duration(milliseconds: positionMs),
-        Duration(milliseconds: durationMs),
-        isPlaying,
-        player.volume,
-      );
-
-      if (state == 'ENDED') {
-        unawaited(_handleAutoTransition());
-      }
-    });
+    debugPrint('AudioCoreController: Initialization COMPLETE');
   }
 
   @override
@@ -279,10 +291,6 @@ class AudioVisualizerPlayerController extends ChangeNotifier
   );
 
   Future<void> _onAnalysisTick() async {
-    if (Platform.isAndroid && player.isPlaying && !_isTransitioning) {
-      final posMs = await MyExoplayer.getCurrentPosition();
-      player.updatePosition(Duration(milliseconds: posMs));
-    }
     await _refreshLatestFftCache();
     visualizer.processAnalysisTick(player.isPlaying, player.position);
   }
@@ -304,17 +312,6 @@ class AudioVisualizerPlayerController extends ChangeNotifier
     }
   }
 
-  void _applyPlaybackStateSnapshot(PlaybackState state) {
-    player.applySnapshot(
-      state.path,
-      Duration(milliseconds: state.positionMs.toInt()),
-      Duration(milliseconds: state.durationMs.toInt()),
-      state.isPlaying,
-      state.volume.clamp(0.0, 1.0),
-    );
-    unawaited(_handleAutoTransition());
-  }
-
   Future<void> _handleAutoTransition() async {
     if (_isTransitioning || player.currentState != PlayerState.completed)
       return;
@@ -334,13 +331,7 @@ class AudioVisualizerPlayerController extends ChangeNotifier
 
   Future<void> _refreshLatestFftCache() async {
     try {
-      if (Platform.isAndroid) {
-        _latestFftCache = await MyExoplayer.getLatestFft();
-      } else {
-        _latestFftCache = (await getLatestFft())
-            .map((value) => value.toDouble())
-            .toList(growable: false);
-      }
+      _latestFftCache = await _engine.getLatestFft();
     } catch (e) {
       player.setError('FFT fetch failed: $e');
       _latestFftCache = const [];
@@ -356,31 +347,26 @@ class AudioVisualizerPlayerController extends ChangeNotifier
     final targetPath = filePath ?? player.currentPath;
     if (targetPath == null) return const [];
     try {
-      if (Platform.isAndroid) {
-        final rawData = await MyExoplayer.getWaveform(targetPath);
-        if (rawData.isEmpty) return const [];
-        
-        final List<double> result = [];
-        for (int i = 0; i < expectedChunks; i++) {
-          final int sourceIdx = (i * rawData.length / expectedChunks).floor();
-          // Normalize to 0.0 - 1.0. Amplituda typically returns 0-100.
-          result.add(rawData[sourceIdx] / 100.0);
-        }
-        return result;
+      final finalData = await _engine.getWaveform(
+        path: targetPath,
+        expectedChunks: expectedChunks,
+        sampleStride: sampleStride,
+      );
+
+      if (finalData.isEmpty) return const [];
+
+      // 为统一视觉效果，如果最高值未达到 1.0，则等比例提升至 1.0
+      double maxVal = 0.0;
+      for (final v in finalData) {
+        if (v > maxVal) maxVal = v;
+      }
+      
+      if (maxVal > 0 && maxVal < 1.0) {
+        final multiplier = 1.0 / maxVal;
+        return finalData.map((v) => v * multiplier).toList();
       }
 
-      final clampedStride = sampleStride < 1 ? 1 : sampleStride;
-      final data = (filePath != null)
-          ? await extractWaveformForPath(
-              path: filePath,
-              expectedChunks: BigInt.from(expectedChunks),
-              sampleStride: BigInt.from(clampedStride),
-            )
-          : await extractLoadedWaveform(
-              expectedChunks: BigInt.from(expectedChunks),
-              sampleStride: BigInt.from(clampedStride),
-            );
-      return data.toList();
+      return finalData;
     } catch (e) {
       player.setError('Waveform failed: $e');
       return const [];
