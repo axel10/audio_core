@@ -19,6 +19,10 @@ class FFTAudioProcessor(private val fftSize: Int = 1024) : BaseAudioProcessor() 
     private val fftBuffer = FloatArray(fftSize * 2) // Real and Imaginary parts
     private val window = FloatArray(fftSize)
     
+    // Accumulate samples for FFT
+    private val sampleBuffer = FloatArray(fftSize)
+    private var sampleCount = 0L
+
     // Thread-safe storage for the latest magnitude spectrum
     private val latestMagnitudes = AtomicReference<FloatArray>(FloatArray(fftSize / 2))
 
@@ -34,7 +38,7 @@ class FFTAudioProcessor(private val fftSize: Int = 1024) : BaseAudioProcessor() 
             inputAudioFormat.encoding != C.ENCODING_PCM_FLOAT) {
             throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
         }
-        // Always output 16-bit PCM for wide compatibility with other processors and AudioTrack
+        // Always output 16-bit PCM
         return AudioFormat(inputAudioFormat.sampleRate, inputAudioFormat.channelCount, C.ENCODING_PCM_16BIT)
     }
 
@@ -45,83 +49,90 @@ class FFTAudioProcessor(private val fftSize: Int = 1024) : BaseAudioProcessor() 
         val encoding = inputAudioFormat.encoding
         val channelCount = inputAudioFormat.channelCount
         
-        // Bytes per sample: 2 for 16-bit, 4 for float
         val bytesPerSample = if (encoding == C.ENCODING_PCM_16BIT) 2 else 4
         val bytesPerFrame = bytesPerSample * channelCount
+        val frameCount = remaining / bytesPerFrame
         
         // Output will always be 16-bit
-        val outputSize = if (encoding == C.ENCODING_PCM_FLOAT) {
-            (remaining / 4) * 2
-        } else {
-            remaining
-        }
+        val outputSize = frameCount * 2 * channelCount
         val outputBuffer = replaceOutputBuffer(outputSize)
 
         if (encoding == C.ENCODING_PCM_FLOAT) {
             val floatBuffer = inputBuffer.asFloatBuffer()
-            val floatArray = FloatArray(floatBuffer.remaining())
-            floatBuffer.get(floatArray)
-            inputBuffer.position(inputBuffer.position() + remaining)
-            
-            // Process FFT if we have enough data
-            if (floatArray.size >= fftSize * channelCount) {
-                for (i in 0 until fftSize) {
-                    var sum = 0f
-                    for (c in 0 until channelCount) {
-                        sum += floatArray[i * channelCount + c]
-                    }
-                    fftBuffer[i] = (sum / channelCount) * window[i]
-                    fftBuffer[fftSize + i] = 0f
+            for (i in 0 until frameCount) {
+                var sum = 0f
+                for (c in 0 until channelCount) {
+                    val sample = floatBuffer.get()
+                    sum += sample
+                    
+                    // Convert and put to output
+                    val clamped = if (sample > 1f) 1f else if (sample < -1f) -1f else sample
+                    outputBuffer.putShort((clamped * 32767.0f).toInt().toShort())
                 }
-                fft.realForwardFull(fftBuffer)
-                
-                val magnitudes = FloatArray(fftSize / 2)
-                for (i in 0 until fftSize / 2) {
-                    val real = fftBuffer[2 * i]
-                    val imag = fftBuffer[2 * i + 1]
-                    magnitudes[i] = sqrt(real * real + imag * imag) / fftSize
-                }
-                latestMagnitudes.set(magnitudes)
-            }
-            
-            // Convert everything to 16-bit for output
-            for (f in floatArray) {
-                // Clamp and convert
-                val clamped = if (f > 1f) 1f else if (f < -1f) -1f else f
-                outputBuffer.putShort((clamped * 32767.0f).toInt().toShort())
+                processSample(sum / channelCount)
             }
         } else {
-            // 16-bit input
             val shortBuffer = inputBuffer.asShortBuffer()
-            
-            // Process FFT if we have enough data
-            if (remaining >= fftSize * bytesPerFrame) {
-                for (i in 0 until fftSize) {
-                    var sum = 0f
-                    for (c in 0 until channelCount) {
-                        val index = i * channelCount + c
-                        if (index < shortBuffer.remaining()) {
-                            sum += shortBuffer.get(index).toFloat()
-                        }
-                    }
-                    fftBuffer[i] = (sum / channelCount / 32768f) * window[i]
-                    fftBuffer[fftSize + i] = 0f
+            for (i in 0 until frameCount) {
+                var sum = 0f
+                for (c in 0 until channelCount) {
+                    val sample = shortBuffer.get()
+                    sum += sample.toFloat()
+                    
+                    // Already 16-bit, just put to output
+                    outputBuffer.putShort(sample)
                 }
-                fft.realForwardFull(fftBuffer)
-                
-                val magnitudes = FloatArray(fftSize / 2)
-                for (i in 0 until fftSize / 2) {
-                    val real = fftBuffer[2 * i]
-                    val imag = fftBuffer[2 * i + 1]
-                    magnitudes[i] = sqrt(real * real + imag * imag) / fftSize
-                }
-                latestMagnitudes.set(magnitudes)
+                processSample(sum / channelCount / 32768f)
             }
-            
-            // Pass through the original 16-bit data
-            outputBuffer.put(inputBuffer)
         }
+        
+        // Finalize input buffer position consumption
+        inputBuffer.position(inputBuffer.position() + remaining)
+        
+        // Execute FFT after filling the buffer with all samples from this chunk
+        runFft()
+        
         outputBuffer.flip()
+    }
+
+    private fun processSample(monoSample: Float) {
+        sampleBuffer[(sampleCount % fftSize).toInt()] = monoSample
+        sampleCount++
+    }
+
+    private fun runFft() {
+        if (sampleCount < fftSize) return
+
+        for (i in 0 until fftSize) {
+            // Get the latest fftSize samples in chronological order
+            val index = ((sampleCount - fftSize + i) % fftSize).toInt()
+            fftBuffer[i] = sampleBuffer[index] * window[i]
+            fftBuffer[fftSize + i] = 0f
+        }
+        
+        fft.realForwardFull(fftBuffer)
+        
+        val magnitudes = FloatArray(fftSize / 2)
+        for (i in 0 until fftSize / 2) {
+            val real = fftBuffer[2 * i]
+            val imag = fftBuffer[2 * i + 1]
+            magnitudes[i] = sqrt(real * real + imag * imag) / fftSize
+        }
+        latestMagnitudes.set(magnitudes)
+    }
+
+    override fun onFlush() {
+        resetInternalState()
+    }
+
+    override fun onReset() {
+        resetInternalState()
+    }
+
+    private fun resetInternalState() {
+        sampleCount = 0
+        latestMagnitudes.set(FloatArray(fftSize / 2))
+        for (i in sampleBuffer.indices) sampleBuffer[i] = 0f
     }
 
     fun getLatestMagnitudes(): FloatArray {
