@@ -1,17 +1,14 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
-import 'package:meta/meta.dart';
 import 'player_models.dart';
 import 'rust/api/simple/equalizer.dart';
 
 /// Manages equalizer and bass boost configuration.
 class EqualizerController extends ChangeNotifier {
-  EqualizerController({
-    required AudioVisualizerParent parent,
-  }) : _parent = parent;
+  EqualizerController({required AudioVisualizerParent parent})
+    : _parent = parent;
 
   final AudioVisualizerParent _parent;
 

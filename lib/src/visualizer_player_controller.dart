@@ -34,7 +34,8 @@ class AudioCoreController extends ChangeNotifier
     int fftSize = 1024,
     double analysisFrequencyHz = 30.0,
     FadeSettings fadeSettings = const FadeSettings(),
-    VisualizerOptimizationOptions visualOptions = const VisualizerOptimizationOptions(),
+    VisualizerOptimizationOptions visualOptions =
+        const VisualizerOptimizationOptions(),
   }) {
     return _instance ??= AudioCoreController._internal(
       fftSize: fftSize,
@@ -197,10 +198,11 @@ class AudioCoreController extends ChangeNotifier
           status.volume,
           error: status.error,
         );
-        if (status.isPlaying == false && 
-            status.duration > Duration.zero && 
-            status.position >= status.duration - const Duration(milliseconds: 250)) {
-           unawaited(_handleAutoTransition());
+        if (status.isPlaying == false &&
+            status.duration > Duration.zero &&
+            status.position >=
+                status.duration - const Duration(milliseconds: 250)) {
+          unawaited(_handleAutoTransition());
         }
       });
     } catch (e) {
@@ -253,11 +255,16 @@ class AudioCoreController extends ChangeNotifier
       },
     );
     visualizer.resetState();
-    
-    // On Android, EQ processor might need re-attaching or re-configuring 
+
+    // On Android, EQ processor might need re-attaching or re-configuring
     // after a new DataSource is loaded.
     if (Platform.isAndroid) {
-      unawaited(Future.delayed(const Duration(milliseconds: 200), () => equalizer.reapply()));
+      unawaited(
+        Future.delayed(
+          const Duration(milliseconds: 200),
+          () => equalizer.reapply(),
+        ),
+      );
     }
   }
 
@@ -318,8 +325,9 @@ class AudioCoreController extends ChangeNotifier
   }
 
   Future<void> _handleAutoTransition() async {
-    if (_isTransitioning || player.currentState != PlayerState.completed)
+    if (_isTransitioning || player.currentState != PlayerState.completed) {
       return;
+    }
 
     if (playlist.mode == PlaylistMode.singleLoop) {
       await loadTrack(autoPlay: true);
@@ -343,7 +351,6 @@ class AudioCoreController extends ChangeNotifier
     }
   }
 
-
   Future<List<double>> getWaveform({
     required int expectedChunks,
     int sampleStride = 1,
@@ -365,7 +372,7 @@ class AudioCoreController extends ChangeNotifier
       for (final v in finalData) {
         if (v > maxVal) maxVal = v;
       }
-      
+
       if (maxVal > 0 && maxVal < 1.0) {
         final multiplier = 1.0 / maxVal;
         return finalData.map((v) => v * multiplier).toList();

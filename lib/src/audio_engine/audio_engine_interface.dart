@@ -46,7 +46,7 @@ abstract class AudioEngine {
   // Effects
   Future<void> setEqualizerConfig(EqualizerConfig config);
   Future<EqualizerConfig> getEqualizerConfig();
-  
+
   // Platform specific features (optional or capabilities-based)
   bool get supportsCrossfade;
   Future<void> setFadeSettings(FadeSettings settings);

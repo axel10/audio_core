@@ -14,14 +14,16 @@ class RustAudioEngine implements AudioEngine {
   @override
   Future<void> initialize() async {
     _subscription = rust.subscribePlaybackState().listen((state) {
-      _statusController.add(AudioStatus(
-        path: state.path,
-        position: Duration(milliseconds: state.positionMs.toInt()),
-        duration: Duration(milliseconds: state.durationMs.toInt()),
-        isPlaying: state.isPlaying,
-        volume: state.volume,
-        error: state.error,
-      ));
+      _statusController.add(
+        AudioStatus(
+          path: state.path,
+          position: Duration(milliseconds: state.positionMs.toInt()),
+          duration: Duration(milliseconds: state.durationMs.toInt()),
+          isPlaying: state.isPlaying,
+          volume: state.volume,
+          error: state.error,
+        ),
+      );
     });
   }
 
@@ -34,10 +36,10 @@ class RustAudioEngine implements AudioEngine {
 
   @override
   Future<void> load(String path) => rust.loadAudioFile(path: path);
-  
+
   @override
-  Future<void> crossfade(String path, Duration duration) => 
-      rust.crossfadeToAudioFile(path: path, durationMs: duration.inMilliseconds);
+  Future<void> crossfade(String path, Duration duration) => rust
+      .crossfadeToAudioFile(path: path, durationMs: duration.inMilliseconds);
 
   @override
   Future<void> play() => rust.playAudio();
@@ -89,7 +91,8 @@ class RustAudioEngine implements AudioEngine {
       rust.setAudioEqualizerConfig(config: config);
 
   @override
-  Future<EqualizerConfig> getEqualizerConfig() => rust.getAudioEqualizerConfig();
+  Future<EqualizerConfig> getEqualizerConfig() =>
+      rust.getAudioEqualizerConfig();
 
   @override
   bool get supportsCrossfade => true;
@@ -102,7 +105,9 @@ class RustAudioEngine implements AudioEngine {
         fadeOnSwitch: settings.fadeOnSwitch,
         fadeOnPauseResume: settings.fadeOnPauseResume,
         durationMs: settings.duration.inMilliseconds.toInt(),
-        mode: settings.mode == FadeMode.crossfade ? rust.FadeMode.crossfade : rust.FadeMode.sequential,
+        mode: settings.mode == FadeMode.crossfade
+            ? rust.FadeMode.crossfade
+            : rust.FadeMode.sequential,
       ),
     );
   }

@@ -1,14 +1,11 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:meta/meta.dart';
 
 import 'player_models.dart';
 
 /// Manages the actual audio engine session and transitions.
 class PlayerController extends ChangeNotifier {
-  PlayerController({
-    required AudioVisualizerParent parent,
-  }) : _parent = parent;
+  PlayerController({required AudioVisualizerParent parent}) : _parent = parent;
 
   final AudioVisualizerParent _parent;
 
@@ -18,7 +15,7 @@ class PlayerController extends ChangeNotifier {
   Duration _position = Duration.zero;
   bool _isPlaying = false;
   double _volume = 1.0;
-  
+
   FadeSettings _fadeSettings = const FadeSettings();
   int _fadeSequence = 0;
   bool _trackFadeTransitionActive = false;
@@ -54,11 +51,13 @@ class PlayerController extends ChangeNotifier {
 
     PlaybackTransition strategy = const ImmediateTransition();
 
-    if (switchingTracks && !isAutoTransition && _fadeSettings.fadeOnSwitch && _fadeSettings.duration > Duration.zero) {
-      if (_fadeSettings.mode == FadeMode.crossfade && _parent.engine.supportsCrossfade) {
-        strategy = NativeCrossfadeTransition(
-          duration: _fadeSettings.duration,
-        );
+    if (switchingTracks &&
+        !isAutoTransition &&
+        _fadeSettings.fadeOnSwitch &&
+        _fadeSettings.duration > Duration.zero) {
+      if (_fadeSettings.mode == FadeMode.crossfade &&
+          _parent.engine.supportsCrossfade) {
+        strategy = NativeCrossfadeTransition(duration: _fadeSettings.duration);
       } else {
         // Fallback to sequential fade
         strategy = SequentialFadeTransition(
@@ -142,7 +141,7 @@ class PlayerController extends ChangeNotifier {
       if (_playerState == PlayerState.completed) {
         await seek(Duration.zero);
       }
-      
+
       await _parent.engine.play();
       _lastCommandTime = DateTime.now();
       _isPlaying = true;
@@ -198,7 +197,9 @@ class PlayerController extends ChangeNotifier {
     }
 
     final steps = (duration.inMilliseconds / 16).round().clamp(1, 1000);
-    final stepDelay = Duration(microseconds: (duration.inMicroseconds / steps).round());
+    final stepDelay = Duration(
+      microseconds: (duration.inMicroseconds / steps).round(),
+    );
 
     for (var i = 1; i <= steps; i++) {
       if (_fadeSequence != sequence) return false;
@@ -231,42 +232,52 @@ class PlayerController extends ChangeNotifier {
   // --- External Sync Interface ---
 
   @internal
-  void applySnapshot(String? path, Duration position, Duration duration, bool isPlaying, double nativeVolume, {String? error}) {
+  void applySnapshot(
+    String? path,
+    Duration position,
+    Duration duration,
+    bool isPlaying,
+    double nativeVolume, {
+    String? error,
+  }) {
     if (error != null) {
       setError(error);
       return;
     }
 
     final now = DateTime.now();
-    final recentlyCommanded = now.difference(_lastCommandTime) < const Duration(milliseconds: 500);
+    final recentlyCommanded =
+        now.difference(_lastCommandTime) < const Duration(milliseconds: 500);
 
     // Update duration and volume even if recently commanded
     if (duration > Duration.zero) {
       _duration = duration;
     }
-    
+
     if (!_trackFadeTransitionActive) {
       _volume = nativeVolume;
     }
 
     // Guard position and playing state to avoid "jumping" back to old state during command processing
     if (recentlyCommanded) {
-       notifyListeners();
-       return;
+      notifyListeners();
+      return;
     }
 
     _selectedPath = path;
     _position = position;
     _isPlaying = isPlaying;
-    
+
     if (_isPlaying) {
       _playerState = PlayerState.playing;
-    } else if (_selectedPath != null && _duration > Duration.zero && _position.inMilliseconds >= (_duration.inMilliseconds - 250)) {
-       _playerState = PlayerState.completed;
+    } else if (_selectedPath != null &&
+        _duration > Duration.zero &&
+        _position.inMilliseconds >= (_duration.inMilliseconds - 250)) {
+      _playerState = PlayerState.completed;
     } else if (_selectedPath != null) {
       _playerState = PlayerState.paused;
     }
-    
+
     notifyListeners();
   }
 
@@ -279,10 +290,13 @@ class PlayerController extends ChangeNotifier {
 
   @internal
   void updatePosition(Duration position) {
-    if (DateTime.now().difference(_lastCommandTime) < const Duration(milliseconds: 500)) return;
+    if (DateTime.now().difference(_lastCommandTime) <
+        const Duration(milliseconds: 500))
+      return;
 
     _position = position;
-    if (_duration > Duration.zero && _position >= _duration - const Duration(milliseconds: 250)) {
+    if (_duration > Duration.zero &&
+        _position >= _duration - const Duration(milliseconds: 250)) {
       _isPlaying = false;
       _playerState = PlayerState.completed;
     }
@@ -314,19 +328,32 @@ abstract class PlaybackTransition {
 }
 
 class SequentialFadeTransition extends PlaybackTransition {
-  const SequentialFadeTransition({required this.duration, required this.targetVolume});
+  const SequentialFadeTransition({
+    required this.duration,
+    required this.targetVolume,
+  });
   final Duration duration;
   final double targetVolume;
 
   @override
-  Future<void> execute({required PlayerController player, required String uri, required bool autoPlay, Duration? position}) async {
+  Future<void> execute({
+    required PlayerController player,
+    required String uri,
+    required bool autoPlay,
+    Duration? position,
+  }) async {
     player.nextFadeSequence();
     final seq = player.fadeSequence;
 
     if (player.isPlaying) {
       player.setFadeActive(true);
       try {
-        final fadedOut = await player.fadeNativeVolume(from: player.volume, to: 0.0, duration: duration, sequence: seq);
+        final fadedOut = await player.fadeNativeVolume(
+          from: player.volume,
+          to: 0.0,
+          duration: duration,
+          sequence: seq,
+        );
         if (!fadedOut) return;
       } finally {
         if (!autoPlay) player.setFadeActive(false);
@@ -341,7 +368,13 @@ class SequentialFadeTransition extends PlaybackTransition {
       player.setFadeActive(true);
       try {
         await player.play();
-        await player.fadeNativeVolume(from: 0.0, to: targetVolume, duration: duration, sequence: seq, followTargetVolume: true);
+        await player.fadeNativeVolume(
+          from: 0.0,
+          to: targetVolume,
+          duration: duration,
+          sequence: seq,
+          followTargetVolume: true,
+        );
       } finally {
         player.setFadeActive(false);
       }
@@ -349,11 +382,15 @@ class SequentialFadeTransition extends PlaybackTransition {
   }
 }
 
-
 class ImmediateTransition extends PlaybackTransition {
   const ImmediateTransition();
   @override
-  Future<void> execute({required PlayerController player, required String uri, required bool autoPlay, Duration? position}) async {
+  Future<void> execute({
+    required PlayerController player,
+    required String uri,
+    required bool autoPlay,
+    Duration? position,
+  }) async {
     player.nextFadeSequence();
     await player.load(uri);
     if (position != null) await player.seek(position);
@@ -366,11 +403,16 @@ class NativeCrossfadeTransition extends PlaybackTransition {
   final Duration duration;
 
   @override
-  Future<void> execute({required PlayerController player, required String uri, required bool autoPlay, Duration? position}) async {
+  Future<void> execute({
+    required PlayerController player,
+    required String uri,
+    required bool autoPlay,
+    Duration? position,
+  }) async {
     // Native crossfade handles current deck management internally in Rust.
     // It starts the new track immediately while the old one keeps playing (fading out).
     await player._parent.engine.crossfade(uri, duration);
-    
+
     // We update local state immediately
     player._selectedPath = uri;
     player._position = position ?? Duration.zero;

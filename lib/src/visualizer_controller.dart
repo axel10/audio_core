@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:meta/meta.dart';
 
 import 'fft_frame.dart';
 import 'fft_processor.dart';
@@ -14,7 +13,8 @@ import 'visualizer_output_manager.dart';
 class VisualizerController extends ChangeNotifier {
   VisualizerController({
     required int fftSize,
-    VisualizerOptimizationOptions visualOptions = const VisualizerOptimizationOptions(),
+    VisualizerOptimizationOptions visualOptions =
+        const VisualizerOptimizationOptions(),
     required List<double> Function() getLatestFft,
     required AudioVisualizerParent parent,
   }) : _getLatestFft = getLatestFft,
@@ -33,8 +33,10 @@ class VisualizerController extends ChangeNotifier {
   int _lastAnalysisMicros = 0;
   List<double> _currentRawBins = const [];
 
-  final StreamController<FftFrame> _rawFftController = StreamController<FftFrame>.broadcast();
-  final StreamController<FftFrame> _optimizedFftController = StreamController<FftFrame>.broadcast();
+  final StreamController<FftFrame> _rawFftController =
+      StreamController<FftFrame>.broadcast();
+  final StreamController<FftFrame> _optimizedFftController =
+      StreamController<FftFrame>.broadcast();
 
   // --- Getters ---
   VisualizerOptimizationOptions get options => _fftProcessor.options;
@@ -80,10 +82,12 @@ class VisualizerController extends ChangeNotifier {
     if (!_fftEnabled) return;
 
     final engineBins = _getLatestFft();
-    
+
     List<double> rawBins;
     if (!isPlaying) {
-      final length = engineBins.isNotEmpty ? engineBins.length : (_currentRawBins.isNotEmpty ? _currentRawBins.length : 0);
+      final length = engineBins.isNotEmpty
+          ? engineBins.length
+          : (_currentRawBins.isNotEmpty ? _currentRawBins.length : 0);
       if (length == 0) return;
       rawBins = List<double>.filled(length, 0.0);
     } else {
@@ -94,7 +98,7 @@ class VisualizerController extends ChangeNotifier {
 
     final nowMicros = DateTime.now().microsecondsSinceEpoch;
     final dtSec = _lastAnalysisMicros == 0
-        ? (1.0 / 30.0) 
+        ? (1.0 / 30.0)
         : (nowMicros - _lastAnalysisMicros) / 1000000.0;
     _lastAnalysisMicros = nowMicros;
 
@@ -107,21 +111,25 @@ class VisualizerController extends ChangeNotifier {
     if (!_fftEnabled || !hasOptimizedListeners) return;
     _fftProcessor.processRender(elapsedMicros, analysisIntervalMicros);
     if (!_optimizedFftController.isClosed) {
-      _optimizedFftController.add(FftFrame(
-        position: Duration.zero,
-        values: _fftProcessor.latestOptimizedFft,
-        isPlaying: true, 
-      ));
+      _optimizedFftController.add(
+        FftFrame(
+          position: Duration.zero,
+          values: _fftProcessor.latestOptimizedFft,
+          isPlaying: true,
+        ),
+      );
     }
   }
 
   void _emitFrames(Duration position, bool isPlaying) {
     if (!_rawFftController.isClosed && _rawFftController.hasListener) {
-      _rawFftController.add(FftFrame(
-        position: position,
-        values: _fftProcessor.latestRawFft,
-        isPlaying: isPlaying,
-      ));
+      _rawFftController.add(
+        FftFrame(
+          position: position,
+          values: _fftProcessor.latestRawFft,
+          isPlaying: isPlaying,
+        ),
+      );
     }
   }
 
@@ -140,7 +148,9 @@ class VisualizerController extends ChangeNotifier {
   }
 
   // --- Output Manager Proxy ---
-  VisualizerOutputStream createOutput(VisualizerOutputConfig config) => visualizerOutputManager.createOutput(config);
+  VisualizerOutputStream createOutput(VisualizerOutputConfig config) =>
+      visualizerOutputManager.createOutput(config);
   void removeOutput(String id) => visualizerOutputManager.removeOutput(id);
-  VisualizerOutputStream? getOutput(String id) => visualizerOutputManager.getOutput(id);
+  VisualizerOutputStream? getOutput(String id) =>
+      visualizerOutputManager.getOutput(id);
 }

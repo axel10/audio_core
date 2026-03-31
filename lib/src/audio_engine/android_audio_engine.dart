@@ -6,12 +6,12 @@ import 'audio_engine_interface.dart';
 
 class AndroidAudioEngine implements AudioEngine {
   static const MethodChannel _channel = MethodChannel('my_exoplayer');
-  
+
   final _statusController = StreamController<AudioStatus>.broadcast();
   String? _currentPath;
   double _currentVolume = 1.0;
   FadeSettings _fadeSettings = const FadeSettings();
-  String _activePlayerId = 'main';
+  final String _activePlayerId = 'main';
   EqualizerConfig? _lastConfig;
 
   @override
@@ -27,15 +27,17 @@ class AndroidAudioEngine implements AudioEngine {
           final int durationMs = call.arguments['duration'] ?? 0;
           final bool isPlaying = call.arguments['isPlaying'] ?? false;
           final String? error = call.arguments['error'];
-          
-          _statusController.add(AudioStatus(
-            path: _currentPath,
-            position: Duration(milliseconds: positionMs),
-            duration: Duration(milliseconds: durationMs),
-            isPlaying: isPlaying,
-            volume: _currentVolume,
-            error: error,
-          ));
+
+          _statusController.add(
+            AudioStatus(
+              path: _currentPath,
+              position: Duration(milliseconds: positionMs),
+              duration: Duration(milliseconds: durationMs),
+              isPlaying: isPlaying,
+              volume: _currentVolume,
+              error: error,
+            ),
+          );
         }
       }
     });
@@ -53,7 +55,10 @@ class AndroidAudioEngine implements AudioEngine {
   @override
   Future<void> load(String path) async {
     _currentPath = path;
-    await _channel.invokeMethod('load', {'url': path, 'playerId': _activePlayerId});
+    await _channel.invokeMethod('load', {
+      'url': path,
+      'playerId': _activePlayerId,
+    });
   }
 
   @override
@@ -61,7 +66,10 @@ class AndroidAudioEngine implements AudioEngine {
     // Current native plugin doesn't have a dedicated 'crossfade' command that overlaps.
     // We'll just load and play as a basic implementation.
     _currentPath = path;
-    await _channel.invokeMethod('load', {'url': path, 'playerId': _activePlayerId});
+    await _channel.invokeMethod('load', {
+      'url': path,
+      'playerId': _activePlayerId,
+    });
     if (_fadeSettings.fadeOnSwitch) {
       await _channel.invokeMethod('play', {
         'playerId': _activePlayerId,
@@ -99,17 +107,16 @@ class AndroidAudioEngine implements AudioEngine {
   }
 
   @override
-  Future<void> seek(Duration position) =>
-      _channel.invokeMethod('seek', {
-        'position': position.inMilliseconds, 
-        'playerId': _activePlayerId
-      });
+  Future<void> seek(Duration position) => _channel.invokeMethod('seek', {
+    'position': position.inMilliseconds,
+    'playerId': _activePlayerId,
+  });
 
   @override
   Future<void> setVolume(double volume) {
     _currentVolume = volume;
     return _channel.invokeMethod('setVolume', {
-      'volume': volume, 
+      'volume': volume,
       'playerId': _activePlayerId,
       'fadeDurationMs': 0,
     });
@@ -117,20 +124,27 @@ class AndroidAudioEngine implements AudioEngine {
 
   @override
   Future<Duration> getDuration() async {
-    final int? ms = await _channel.invokeMethod('getDuration', {'playerId': _activePlayerId});
+    final int? ms = await _channel.invokeMethod('getDuration', {
+      'playerId': _activePlayerId,
+    });
     return Duration(milliseconds: ms ?? 0);
   }
 
   @override
   Future<Duration> getCurrentPosition() async {
-    final int? ms = await _channel.invokeMethod('getCurrentPosition', {'playerId': _activePlayerId});
+    final int? ms = await _channel.invokeMethod('getCurrentPosition', {
+      'playerId': _activePlayerId,
+    });
     return Duration(milliseconds: ms ?? 0);
   }
 
   @override
   Future<List<double>> getLatestFft() async {
     try {
-      final List<dynamic>? result = await _channel.invokeMethod('getLatestFft', {'playerId': _activePlayerId});
+      final List<dynamic>? result = await _channel.invokeMethod(
+        'getLatestFft',
+        {'playerId': _activePlayerId},
+      );
       if (result == null) return [];
       return result.map((e) => (e as num).toDouble()).toList();
     } catch (e) {
@@ -165,7 +179,10 @@ class AndroidAudioEngine implements AudioEngine {
     await _applyConfigToPlayer(_activePlayerId, config);
   }
 
-  Future<void> _applyConfigToPlayer(String playerId, EqualizerConfig config) async {
+  Future<void> _applyConfigToPlayer(
+    String playerId,
+    EqualizerConfig config,
+  ) async {
     await _channel.invokeMethod('setCppEqualizerEnabled', {
       'enabled': config.enabled,
       'playerId': playerId,
@@ -197,11 +214,13 @@ class AndroidAudioEngine implements AudioEngine {
   Future<void> setFadeSettings(FadeSettings settings) async {
     _fadeSettings = settings;
   }
-  
+
   // Internal helper for non-AudioEngine interface methods if needed
   Future<Map<String, dynamic>?> getSystemEqualizerParams() async {
-    final Map<dynamic, dynamic>? result = await _channel.invokeMethod('getSystemEqualizerParams', {'playerId': _activePlayerId});
+    final Map<dynamic, dynamic>? result = await _channel.invokeMethod(
+      'getSystemEqualizerParams',
+      {'playerId': _activePlayerId},
+    );
     return result?.cast<String, dynamic>();
   }
 }
-

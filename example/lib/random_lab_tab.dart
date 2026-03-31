@@ -129,15 +129,15 @@ class RandomLabTabState extends State<RandomLabTab> {
         scope = RandomScope.activePlaylist();
         break;
       case RandomPreset.queueOnly:
-        scope =
-            RandomScope.playlist(widget.controller.playlist.queuePlaylistId);
+        scope = RandomScope.playlist(
+          widget.controller.playlist.queuePlaylistId,
+        );
         break;
       case RandomPreset.likedOnly:
         scope = RandomScope.filtered(
           id: 'liked-only',
-          predicate:
-              (track, index, context) =>
-                  track.metadataValue<bool>('isLike') == true,
+          predicate: (track, index, context) =>
+              track.metadataValue<bool>('isLike') == true,
         );
         break;
       case RandomPreset.playCountWeighted:
@@ -202,9 +202,8 @@ class RandomLabTabState extends State<RandomLabTab> {
       case RandomStrategyKind.weighted:
         return RandomStrategy.weighted(
           id: 'playcount-weighted',
-          weightOf:
-              (track, index, context) =>
-                  1.0 / (1 + (track.metadataValue<int>('playCount') ?? 0)),
+          weightOf: (track, index, context) =>
+              1.0 / (1 + (track.metadataValue<int>('playCount') ?? 0)),
         );
       case RandomStrategyKind.custom:
         // Use random for demo custom strategy if not specific.
@@ -278,11 +277,20 @@ class RandomLabTabState extends State<RandomLabTab> {
                             const SizedBox(width: 12),
                             SizedBox(width: 320, child: _buildQueuePanel()),
                             const SizedBox(width: 12),
-                            SizedBox(width: 320, child: _buildSelectedPlaylistPanel()),
+                            SizedBox(
+                              width: 320,
+                              child: _buildSelectedPlaylistPanel(),
+                            ),
                             const SizedBox(width: 12),
-                            SizedBox(width: 320, child: _buildShuffleDeckPanel()),
+                            SizedBox(
+                              width: 320,
+                              child: _buildShuffleDeckPanel(),
+                            ),
                             const SizedBox(width: 12),
-                            SizedBox(width: 320, child: _buildRandomHistoryPanel()),
+                            SizedBox(
+                              width: 320,
+                              child: _buildRandomHistoryPanel(),
+                            ),
                           ],
                         ),
                       ),
@@ -322,32 +330,34 @@ class RandomLabTabState extends State<RandomLabTab> {
     return _buildTrackPanel(
       title: 'Shuffle Deck',
       subtitle: 'The internal sequence for random playback (Cursor: $cursor)',
-      child:
-          deck.isEmpty
-              ? _emptyPanel('Shuffle is not active or deck is empty.')
-              : ListView.separated(
-                itemCount: deck.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 8),
-                itemBuilder: (context, index) {
-                  final id = deck[index];
-                  final track = _resolveTrack(id) ?? AudioTrack(id: id, uri: '');
-                  final isCurrentCursor = cursor == index;
+      child: deck.isEmpty
+          ? _emptyPanel('Shuffle is not active or deck is empty.')
+          : ListView.separated(
+              itemCount: deck.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 8),
+              itemBuilder: (context, index) {
+                final id = deck[index];
+                final track = _resolveTrack(id) ?? AudioTrack(id: id, uri: '');
+                final isCurrentCursor = cursor == index;
 
-                  return _TrackSummaryTile(
-                    track: track,
-                    highlight: isCurrentCursor,
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (isCurrentCursor)
-                          const Icon(Icons.play_arrow, color: Colors.green),
-                        const SizedBox(width: 4),
-                        Text('#$index', style: Theme.of(context).textTheme.labelSmall),
-                      ],
-                    ),
-                  );
-                },
-              ),
+                return _TrackSummaryTile(
+                  track: track,
+                  highlight: isCurrentCursor,
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isCurrentCursor)
+                        const Icon(Icons.play_arrow, color: Colors.green),
+                      const SizedBox(width: 4),
+                      Text(
+                        '#$index',
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
     );
   }
 
@@ -357,37 +367,36 @@ class RandomLabTabState extends State<RandomLabTab> {
     return _buildTrackPanel(
       title: 'Random History',
       subtitle: 'Tracks recently played in random mode (Cursor: $cursor)',
-      child:
-          history.isEmpty
-              ? _emptyPanel('No random history available.')
-              : ListView.separated(
-                itemCount: history.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 8),
-                itemBuilder: (context, index) {
-                  final entry = history[index];
-                  final track =
-                      _resolveTrack(entry.trackId) ??
-                      AudioTrack(id: entry.trackId, uri: '');
-                  final isCurrentCursor = cursor == index;
+      child: history.isEmpty
+          ? _emptyPanel('No random history available.')
+          : ListView.separated(
+              itemCount: history.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 8),
+              itemBuilder: (context, index) {
+                final entry = history[index];
+                final track =
+                    _resolveTrack(entry.trackId) ??
+                    AudioTrack(id: entry.trackId, uri: '');
+                final isCurrentCursor = cursor == index;
 
-                  return _TrackSummaryTile(
-                    track: track,
-                    highlight: isCurrentCursor,
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (isCurrentCursor)
-                          const Icon(Icons.history, color: Colors.blue),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${entry.generatedAt.hour}:${entry.generatedAt.minute}:${entry.generatedAt.second}',
-                          style: Theme.of(context).textTheme.labelSmall,
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
+                return _TrackSummaryTile(
+                  track: track,
+                  highlight: isCurrentCursor,
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isCurrentCursor)
+                        const Icon(Icons.history, color: Colors.blue),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${entry.generatedAt.hour}:${entry.generatedAt.minute}:${entry.generatedAt.second}',
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
     );
   }
 
@@ -452,19 +461,17 @@ class RandomLabTabState extends State<RandomLabTab> {
             },
           ),
         IconButton(
-          onPressed:
-              widget.controller.player.currentPath == null
-                  ? null
-                  : () => widget.controller.player.togglePlayPause(),
+          onPressed: widget.controller.player.currentPath == null
+              ? null
+              : () => widget.controller.player.togglePlayPause(),
           icon: Icon(
             widget.controller.player.isPlaying
                 ? Icons.pause_circle_filled
                 : Icons.play_circle_filled,
             size: 40,
-            color:
-                widget.controller.player.currentPath == null
-                    ? Theme.of(context).disabledColor
-                    : Theme.of(context).colorScheme.primary,
+            color: widget.controller.player.currentPath == null
+                ? Theme.of(context).disabledColor
+                : Theme.of(context).colorScheme.primary,
           ),
         ),
         ElevatedButton.icon(
@@ -499,19 +506,20 @@ class RandomLabTabState extends State<RandomLabTab> {
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              'Stop at end',
-              style: Theme.of(context).textTheme.labelSmall,
-            ),
+            Text('Stop at end', style: Theme.of(context).textTheme.labelSmall),
             Switch(
               value: _exhaustionPolicy == RandomExhaustionPolicy.stop,
-              activeColor: Colors.red,
-              onChanged: _randomPreset == RandomPreset.off ? null : (value) {
-                setState(() {
-                  _exhaustionPolicy = value ? RandomExhaustionPolicy.stop : RandomExhaustionPolicy.reshuffle;
-                });
-                _updateRandomPolicy();
-              },
+              activeThumbColor: Colors.red,
+              onChanged: _randomPreset == RandomPreset.off
+                  ? null
+                  : (value) {
+                      setState(() {
+                        _exhaustionPolicy = value
+                            ? RandomExhaustionPolicy.stop
+                            : RandomExhaustionPolicy.reshuffle;
+                      });
+                      _updateRandomPolicy();
+                    },
             ),
           ],
         ),
@@ -532,7 +540,8 @@ class RandomLabTabState extends State<RandomLabTab> {
                 final track = _libraryTracks[index];
                 return _TrackDraggableTile(
                   track: track,
-                  highlight: track.id == widget.controller.playlist.currentTrack?.id,
+                  highlight:
+                      track.id == widget.controller.playlist.currentTrack?.id,
                   onToggleLike: () => _toggleLike(track),
                   onBumpPlayCount: () => _bumpPlayCount(track),
                 );
@@ -568,7 +577,9 @@ class RandomLabTabState extends State<RandomLabTab> {
                     final track = tracks[index];
                     return _TrackSummaryTile(
                       track: track,
-                      highlight: track.id == widget.controller.playlist.currentTrack?.id,
+                      highlight:
+                          track.id ==
+                          widget.controller.playlist.currentTrack?.id,
                       trailing: const Icon(Icons.queue_music),
                     );
                   },
@@ -657,7 +668,9 @@ class RandomLabTabState extends State<RandomLabTab> {
                           final track = selectedPlaylist.items[index];
                           return _TrackSummaryTile(
                             track: track,
-                            highlight: track.id == widget.controller.playlist.currentTrack?.id,
+                            highlight:
+                                track.id ==
+                                widget.controller.playlist.currentTrack?.id,
                             trailing: const Icon(Icons.playlist_play),
                           );
                         },
@@ -737,7 +750,12 @@ class RandomLabTabState extends State<RandomLabTab> {
           const SizedBox(width: 8),
           const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.grey),
           const SizedBox(width: 8),
-          _buildStatusChip('Now Playing', current, Icons.play_arrow, highlight: true),
+          _buildStatusChip(
+            'Now Playing',
+            current,
+            Icons.play_arrow,
+            highlight: true,
+          ),
           const SizedBox(width: 8),
           const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.grey),
           const SizedBox(width: 8),
@@ -747,12 +765,19 @@ class RandomLabTabState extends State<RandomLabTab> {
     );
   }
 
-  Widget _buildStatusChip(String label, AudioTrack? track, IconData icon, {bool highlight = false}) {
+  Widget _buildStatusChip(
+    String label,
+    AudioTrack? track,
+    IconData icon, {
+    bool highlight = false,
+  }) {
     final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: highlight ? colorScheme.primaryContainer : colorScheme.surfaceContainerHighest,
+        color: highlight
+            ? colorScheme.primaryContainer
+            : colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: highlight ? colorScheme.primary : colorScheme.outlineVariant,
@@ -762,7 +787,13 @@ class RandomLabTabState extends State<RandomLabTab> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: highlight ? colorScheme.primary : colorScheme.onSurfaceVariant),
+          Icon(
+            icon,
+            size: 16,
+            color: highlight
+                ? colorScheme.primary
+                : colorScheme.onSurfaceVariant,
+          ),
           const SizedBox(width: 8),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -771,7 +802,9 @@ class RandomLabTabState extends State<RandomLabTab> {
               Text(
                 label,
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: highlight ? colorScheme.primary : colorScheme.onSurfaceVariant,
+                  color: highlight
+                      ? colorScheme.primary
+                      : colorScheme.onSurfaceVariant,
                   fontWeight: FontWeight.bold,
                 ),
               ),
@@ -874,13 +907,18 @@ class _TrackSummaryTile extends StatelessWidget {
     return Card(
       elevation: highlight ? 4 : 0,
       color: highlight
-          ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.6)
+          ? Theme.of(
+              context,
+            ).colorScheme.primaryContainer.withValues(alpha: 0.6)
           : Theme.of(context).colorScheme.surface,
       shape: highlight
           ? RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: Theme.of(context).colorScheme.primary, width: 2),
-          )
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(
+                color: Theme.of(context).colorScheme.primary,
+                width: 2,
+              ),
+            )
           : null,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -888,17 +926,15 @@ class _TrackSummaryTile extends StatelessWidget {
           children: [
             CircleAvatar(
               radius: 18,
-              backgroundColor:
-                  highlight
-                      ? Theme.of(context).colorScheme.primary
-                      : Theme.of(context).colorScheme.primaryContainer,
+              backgroundColor: highlight
+                  ? Theme.of(context).colorScheme.primary
+                  : Theme.of(context).colorScheme.primaryContainer,
               child: Icon(
                 liked ? Icons.favorite : Icons.music_note,
                 size: 18,
-                color:
-                    highlight
-                        ? Theme.of(context).colorScheme.onPrimary
-                        : Theme.of(context).colorScheme.onPrimaryContainer,
+                color: highlight
+                    ? Theme.of(context).colorScheme.onPrimary
+                    : Theme.of(context).colorScheme.onPrimaryContainer,
               ),
             ),
             const SizedBox(width: 12),

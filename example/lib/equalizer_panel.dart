@@ -8,10 +8,7 @@ typedef BandGainChanged = void Function(int index, double value);
 class EqualizerPanel extends StatelessWidget {
   final AudioCoreController controller;
 
-  const EqualizerPanel({
-    super.key,
-    required this.controller,
-  });
+  const EqualizerPanel({super.key, required this.controller});
 
   @override
   Widget build(BuildContext context) {
@@ -70,16 +67,18 @@ class EqualizerPanel extends StatelessWidget {
                   Text(
                     'Audio Equalizer',
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                      fontWeight: FontWeight.bold,
+                    ),
                     overflow: TextOverflow.ellipsis,
                   ),
                   if (isAndroid)
                     Text(
-                      equalizer.isAdvanced ? 'Custom C++ Engine' : 'Android System',
+                      equalizer.isAdvanced
+                          ? 'Custom C++ Engine'
+                          : 'Android System',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
                       overflow: TextOverflow.ellipsis,
                     ),
                 ],
@@ -101,8 +100,9 @@ class EqualizerPanel extends StatelessWidget {
                     height: 28,
                     child: Switch(
                       value: equalizer.isAdvanced,
-                      onChanged: (value) => unawaited(equalizer.setAdvanced(value)),
-                      activeColor: Theme.of(context).colorScheme.primary,
+                      onChanged: (value) =>
+                          unawaited(equalizer.setAdvanced(value)),
+                      activeThumbColor: Theme.of(context).colorScheme.primary,
                     ),
                   ),
                 ],
@@ -113,13 +113,14 @@ class EqualizerPanel extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('Enabled', style: TextStyle(fontSize: 11,)),
+                const Text('Enabled', style: TextStyle(fontSize: 11)),
                 const SizedBox(height: 2),
                 SizedBox(
                   height: 28,
                   child: Switch(
                     value: config.enabled,
-                    onChanged: (value) => unawaited(equalizer.setEnabled(value)),
+                    onChanged: (value) =>
+                        unawaited(equalizer.setEnabled(value)),
                   ),
                 ),
               ],
@@ -154,10 +155,7 @@ class EqualizerPanel extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Bands',
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
+                Text('Bands', style: Theme.of(context).textTheme.labelLarge),
                 DropdownButton<int>(
                   value: config.bandCount,
                   items: [5, 10, 15, 20].map((int value) {
@@ -185,9 +183,9 @@ class EqualizerPanel extends StatelessWidget {
         Text(
           'Custom C++ equalizer with high precision biquad filters.',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                fontStyle: FontStyle.italic,
-                color: Colors.white54,
-              ),
+            fontStyle: FontStyle.italic,
+            color: Colors.white54,
+          ),
         ),
       ],
     );
@@ -206,7 +204,8 @@ class EqualizerPanel extends StatelessWidget {
             value: equalizer.systemBassBoostDb,
             min: 0,
             max: 15,
-            onChanged: (value) => unawaited(equalizer.setSystemBassBoost(value)),
+            onChanged: (value) =>
+                unawaited(equalizer.setSystemBassBoost(value)),
           ),
         ),
         const SizedBox(width: 16),
@@ -245,12 +244,9 @@ class EqualizerPanel extends StatelessWidget {
         if (hz >= 1000) return '${(hz / 1000).toStringAsFixed(1)}k';
         return hz.toInt().toString();
       }).toList();
-      gains = List.generate(
-        bandCount,
-        (i) => equalizer.getSystemBandGain(i),
-      );
-      onGainChanged =
-          (idx, val) => unawaited(equalizer.setSystemBandGain(idx, val));
+      gains = List.generate(bandCount, (i) => equalizer.getSystemBandGain(i));
+      onGainChanged = (idx, val) =>
+          unawaited(equalizer.setSystemBandGain(idx, val));
     }
 
     return SizedBox(
@@ -279,8 +275,9 @@ class EqualizerPanel extends StatelessWidget {
                     child: SliderTheme(
                       data: SliderTheme.of(context).copyWith(
                         trackHeight: 4,
-                        thumbShape:
-                            const RoundSliderThumbShape(enabledThumbRadius: 6),
+                        thumbShape: const RoundSliderThumbShape(
+                          enabledThumbRadius: 6,
+                        ),
                       ),
                       child: Slider(
                         value: gain.clamp(-15.0, 15.0),
@@ -296,9 +293,9 @@ class EqualizerPanel extends StatelessWidget {
                 Text(
                   '${gain >= 0 ? '+' : ''}${gain.toStringAsFixed(0)}',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: Theme.of(context).colorScheme.primary,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ],
             ),

@@ -43,10 +43,7 @@ class _AudioDropRegionState extends State<AudioDropRegion> {
             id: path,
             title: file.name,
             uri: path,
-            metadata: <String, Object?>{
-              'isLike': false,
-              'playCount': 0,
-            },
+            metadata: <String, Object?>{'isLike': false, 'playCount': 0},
           ),
         );
       }

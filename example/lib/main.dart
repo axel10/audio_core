@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:audio_core/audio_core.dart';
@@ -49,7 +48,8 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
   List<double> _bandsSmooth = const [];
   List<double> _bandsResponsive = const [];
 
-  final GlobalKey<RandomLabTabState> _randomLabKey = GlobalKey<RandomLabTabState>();
+  final GlobalKey<RandomLabTabState> _randomLabKey =
+      GlobalKey<RandomLabTabState>();
 
   List<double> _waveform = [];
   final int _waveformChunks = 500;
@@ -156,11 +156,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
           if (path == null || path.isEmpty) {
             return null;
           }
-          return _makeTrack(
-            id: path,
-            title: file.name,
-            uri: path,
-          );
+          return _makeTrack(id: path, title: file.name, uri: path);
         })
         .whereType<AudioTrack>()
         .toList();
@@ -169,10 +165,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
       return;
     }
 
-    await _registerImportedTracks(
-      tracks,
-      addToActivePlaylist: true,
-    );
+    await _registerImportedTracks(tracks, addToActivePlaylist: true);
   }
 
   AudioTrack _makeTrack({
@@ -184,10 +177,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
       id: id,
       title: title,
       uri: uri,
-      metadata: <String, Object?>{
-        'isLike': false,
-        'playCount': 0,
-      },
+      metadata: <String, Object?>{'isLike': false, 'playCount': 0},
     );
   }
 
@@ -240,7 +230,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
     _subSmooth?.cancel();
     _subResponsive?.cancel();
     // 采用单例模式后，不应在此处直接销毁全局控制器，否则页面重建会无法清理定时器
-    // _controller.dispose(); 
+    // _controller.dispose();
     super.dispose();
   }
 
@@ -278,11 +268,10 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                       Expanded(
                         child: AudioDropRegion(
                           controller: _controller,
-                          onTracksAccepted: (tracks) =>
-                              _registerImportedTracks(
-                                tracks,
-                                addToActivePlaylist: true,
-                              ),
+                          onTracksAccepted: (tracks) => _registerImportedTracks(
+                            tracks,
+                            addToActivePlaylist: true,
+                          ),
                           child: _buildSpectrumVisualizers(),
                         ),
                       ),
@@ -290,10 +279,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                   ),
                 ),
                 // 第二页: 随机播放实验台
-                RandomLabTab(
-                  key: _randomLabKey,
-                  controller: _controller,
-                ),
+                RandomLabTab(key: _randomLabKey, controller: _controller),
                 // 第三页: 均衡器界面
                 SingleChildScrollView(
                   padding: const EdgeInsets.all(16),
@@ -402,10 +388,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
               ),
               SizedBox(
                 width: 36,
-                child: Text(
-                  '$_waveformStride',
-                  textAlign: TextAlign.right,
-                ),
+                child: Text('$_waveformStride', textAlign: TextAlign.right),
               ),
             ],
           ),
@@ -425,20 +408,16 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
         ),
         Slider(
           value: _controller.player.duration.inMilliseconds > 0
-              ? _controller.player.position.inMilliseconds
-                  .toDouble()
-                  .clamp(
-                    0,
-                    _controller.player.duration.inMilliseconds.toDouble(),
-                  )
+              ? _controller.player.position.inMilliseconds.toDouble().clamp(
+                  0,
+                  _controller.player.duration.inMilliseconds.toDouble(),
+                )
               : 0.0,
           max: _controller.player.duration.inMilliseconds.toDouble() > 0
               ? _controller.player.duration.inMilliseconds.toDouble()
               : 1.0,
           onChanged: (value) {
-            _controller.player.seek(
-              Duration(milliseconds: value.toInt()),
-            );
+            _controller.player.seek(Duration(milliseconds: value.toInt()));
           },
         ),
         if (_controller.player.error != null) ...[
@@ -460,7 +439,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
               _waveform,
               _controller.player.duration.inMilliseconds > 0
                   ? _controller.player.position.inMilliseconds /
-                      _controller.player.duration.inMilliseconds
+                        _controller.player.duration.inMilliseconds
                   : 0.0,
             ),
           ),
@@ -477,10 +456,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
           child: Column(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 4,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.purple.withValues(alpha: 0.3),
                   borderRadius: BorderRadius.circular(4),
@@ -518,10 +494,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
           child: Column(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 4,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.orange.withValues(alpha: 0.3),
                   borderRadius: BorderRadius.circular(4),

@@ -222,7 +222,7 @@ class RandomPolicy {
 
   /// 随机历史保留规则。
   final RandomHistoryPolicy history;
-    
+
   /// What to do when the sequence is exhausted.
   final RandomExhaustionPolicy exhaustion;
 
@@ -531,7 +531,8 @@ class _WeightedRandomStrategy extends RandomStrategy {
       weights.add(normalized);
       totalWeight += normalized;
     }
-    if (totalWeight <= 0.0) return candidates[random.nextInt(candidates.length)];
+    if (totalWeight <= 0.0)
+      return candidates[random.nextInt(candidates.length)];
     final target = random.nextDouble() * totalWeight;
     var cursor = 0.0;
     for (var i = 0; i < candidates.length; i++) {

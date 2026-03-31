@@ -13,12 +13,9 @@ class VisualizerOutputStream {
   VisualizerOutputStream({
     required VisualizerOutputConfig config,
     required List<double> Function() fftSourceProvider,
-  })  : _config = config,
-        _fftSourceProvider = fftSourceProvider {
-    _fftProcessor = FftProcessor(
-      fftSize: 1024,
-      options: config.options,
-    );
+  }) : _config = config,
+       _fftSourceProvider = fftSourceProvider {
+    _fftProcessor = FftProcessor(fftSize: 1024, options: config.options);
     // Listen to stream subscription to auto-start/stop
     _fftStreamController.onListen = _onListen;
     _fftStreamController.onCancel = _onCancel;
@@ -97,9 +94,7 @@ class VisualizerOutputStream {
     final frameRate = _config.targetFrameRate;
     if (frameRate <= 0) return;
 
-    final interval = Duration(
-      microseconds: (1000000.0 / frameRate).round(),
-    );
+    final interval = Duration(microseconds: (1000000.0 / frameRate).round());
     _renderTimer = Timer.periodic(interval, (_) => _onRenderTick());
   }
 
@@ -124,10 +119,7 @@ class VisualizerOutputStream {
     _fftProcessor.processAnalysis(rawBins, dtSec);
 
     // Process render for interpolation
-    _fftProcessor.processRender(
-      _renderIntervalMicros,
-      _analysisIntervalMicros,
-    );
+    _fftProcessor.processRender(_renderIntervalMicros, _analysisIntervalMicros);
 
     // Emit frame
     _emitFftFrame();
@@ -146,11 +138,13 @@ class VisualizerOutputStream {
     if (_fftStreamController.isClosed) {
       return;
     }
-    _fftStreamController.add(FftFrame(
-      position: Duration.zero, // Position is updated by the manager
-      values: _fftProcessor.latestOptimizedFft,
-      isPlaying: true, // Managed by the main controller
-    ));
+    _fftStreamController.add(
+      FftFrame(
+        position: Duration.zero, // Position is updated by the manager
+        values: _fftProcessor.latestOptimizedFft,
+        isPlaying: true, // Managed by the main controller
+      ),
+    );
   }
 
   /// Updates the FFT processing options.
