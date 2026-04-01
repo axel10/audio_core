@@ -2,6 +2,7 @@ pub mod controller;
 pub mod equalizer;
 pub mod fft;
 pub mod waveform;
+pub mod audio_fingerprint;
 
 use crate::frb_generated::StreamSink;
 use std::thread;
@@ -14,6 +15,7 @@ pub use controller::{
     set_audio_fade_settings, set_audio_volume, toggle_audio, FadeMode, FadeSettings, PlaybackState,
 };
 pub use waveform::{extract_loaded_waveform, extract_waveform_for_path, WaveformChunk};
+pub use audio_fingerprint::get_audio_fingerprint;
 
 const PLAYBACK_STATE_PUSH_INTERVAL: Duration = Duration::from_millis(500);
 
