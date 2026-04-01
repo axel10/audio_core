@@ -48,6 +48,9 @@ fn get_raw_audio_fingerprint(path: &Path) -> anyhow::Result<Vec<u32>> {
     let mut is_printer_started = false;
     let mut sample_buf = None;
 
+    let mut total_samples_processed: usize = 0;
+    let mut target_samples: usize = usize::MAX;
+
     loop {
         let packet = match format.next_packet() {
             Ok(packet) => packet,
@@ -68,11 +71,23 @@ fn get_raw_audio_fingerprint(path: &Path) -> anyhow::Result<Vec<u32>> {
                     let duration = audio_buf.capacity() as u64;
                     sample_buf = Some(SampleBuffer::<i16>::new(duration, spec));
                     is_printer_started = true;
+                    
+                    target_samples = (spec.rate as usize) * (spec.channels.count() as usize) * 20;
                 }
 
                 if let Some(buf) = &mut sample_buf {
                     buf.copy_interleaved_ref(audio_buf);
-                    printer.consume(buf.samples());
+                    let samples = buf.samples();
+                    
+                    let remaining = target_samples.saturating_sub(total_samples_processed);
+                    if samples.len() >= remaining {
+                        printer.consume(&samples[..remaining]);
+                        total_samples_processed += remaining;
+                        break;
+                    } else {
+                        printer.consume(samples);
+                        total_samples_processed += samples.len();
+                    }
                 }
             }
             Err(SymphoniaError::DecodeError(_)) => continue,

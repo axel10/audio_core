@@ -85,11 +85,20 @@ object AudioFingerprintExtractor {
                         if (outputBuffer != null) {
                             outputBuffer.position(info.offset)
                             outputBuffer.limit(info.offset + info.size)
+                            val slicedBuffer = outputBuffer.slice()
 
                             // MediaCodec decoder output is 16-bit PCM (2 bytes per sample)
                             val numShorts = info.size / 2
-                            ChromaprintNative.nativeProcess(handle, outputBuffer, numShorts)
-                            totalSamplesProcessed += numShorts
+                            val remaining = (targetSamples - totalSamplesProcessed).toInt()
+                            if (numShorts >= remaining) {
+                                ChromaprintNative.nativeProcess(handle, slicedBuffer, remaining)
+                                totalSamplesProcessed += remaining
+                                codec.releaseOutputBuffer(outIndex, false)
+                                break
+                            } else {
+                                ChromaprintNative.nativeProcess(handle, slicedBuffer, numShorts)
+                                totalSamplesProcessed += numShorts
+                            }
                         }
                     }
                     codec.releaseOutputBuffer(outIndex, false)
