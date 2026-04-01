@@ -2,6 +2,15 @@ cmake_minimum_required(VERSION 3.22.1)
 
 project("my_exoplayer")
 
+# Chromaprint Configuration for Android
+set(FFT_LIB "kissfft" CACHE STRING "FFT library to use" FORCE)
+set(AUDIO_PROCESSOR_LIB "" CACHE STRING "Library to use for audio processing" FORCE)
+set(BUILD_TESTS OFF CACHE BOOL "Build test suite" FORCE)
+set(BUILD_TOOLS OFF CACHE BOOL "Build command line tools" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
+
+add_subdirectory(chromaprint)
+
 add_library( # Sets the name of the library.
         my_exoplayer
 
@@ -24,4 +33,5 @@ target_link_libraries( # Specifies the target library.
 
         # Links the target library to the log library
         # included in the NDK.
+        chromaprint
         ${log-lib})

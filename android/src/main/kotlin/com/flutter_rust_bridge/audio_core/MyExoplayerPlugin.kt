@@ -33,6 +33,7 @@ class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler {
         val player: ExoPlayer,
         val fftProcessor: FFTAudioProcessor,
         val cppEqualizerProcessor: CppEqualizerProcessor,
+        val cppFingerprintProcessor: CppFingerprintProcessor,
         var equalizer: Equalizer? = null,
         var bassBoost: BassBoost? = null,
         var volumeAnimator: ValueAnimator? = null
@@ -119,6 +120,7 @@ class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler {
         val safeContext = context!!
         val fftProcessor = FFTAudioProcessor(1024)
         val cppEqualizerProcessor = CppEqualizerProcessor()
+        val cppFingerprintProcessor = CppFingerprintProcessor()
 
         val renderersFactory = object : DefaultRenderersFactory(safeContext) {
             override fun buildAudioSink(
@@ -127,7 +129,8 @@ class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler {
                 enableAudioTrackPlaybackParams: Boolean
             ): AudioSink? {
                 return DefaultAudioSink.Builder(context)
-                    .setAudioProcessors(arrayOf(cppEqualizerProcessor, fftProcessor))
+                    // We must place cppFingerprintProcessor first, before it gets float-converted by EQ
+                    .setAudioProcessors(arrayOf(cppFingerprintProcessor, cppEqualizerProcessor, fftProcessor))
                     .build()
             }
         }
@@ -144,7 +147,7 @@ class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler {
         player.addAnalyticsListener(EventLogger())
         cppEqualizerProcessor.setNumBands(10)
         
-        val ctx = PlayerContext(id, player, fftProcessor, cppEqualizerProcessor)
+        val ctx = PlayerContext(id, player, fftProcessor, cppEqualizerProcessor, cppFingerprintProcessor)
         player.addListener(createPlayerListener(id))
         playerContexts[id] = ctx
         return ctx
@@ -199,6 +202,28 @@ class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler {
                         if (isTemp) java.io.File(localPath).delete()
                     }
                 })
+                return
+            }
+            "extractFingerprint" -> {
+                val path = call.argument<String>("path") ?: return result.error("INVALID_ARGUMENT", "Path is null", null)
+                val (localPath, isTemp) = ensureLocalPath(path)
+                val safeContext = context ?: return result.error("INTERNAL_ERROR", "Context is null", null)
+
+                Thread {
+                    val uri = if (localPath.startsWith("/")) Uri.parse("file://$localPath") else Uri.parse(localPath)
+                    val fingerprint = AudioFingerprintExtractor.extractFingerprint(safeContext, uri)
+                    
+                    Handler(Looper.getMainLooper()).post {
+                        if (fingerprint != null) {
+                            result.success(fingerprint)
+                        } else {
+                            result.error("FINGERPRINT_FAILED", "Failed to decode or generate fingerprint", null)
+                        }
+                        if (isTemp) {
+                            java.io.File(localPath).delete()
+                        }
+                    }
+                }.start()
                 return
             }
             "load" -> {
@@ -397,6 +422,7 @@ class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler {
         ctx.equalizer?.release()
         ctx.bassBoost?.release()
         ctx.cppEqualizerProcessor.release()
+        ctx.cppFingerprintProcessor.release()
     }
 
     private fun ensureLocalPath(path: String): Pair<String, Boolean> {

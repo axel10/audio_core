@@ -2,6 +2,7 @@
 #include <android/log.h>
 #include "EqualizerEngine.h"
 #include <memory>
+#include <chromaprint.h>
 
 #define LOG_TAG "MyExoplayerNative"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -65,4 +66,58 @@ extern "C"
 JNIEXPORT void JNICALL
 Java_com_flutter_1rust_1bridge_audio_1core_MyExoplayerPlugin_sayHelloFromCpp(JNIEnv *env, jobject thiz) {
     LOGI("Hello from C++!");
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_flutter_1rust_1bridge_audio_1core_ChromaprintNative_nativeCreate(
+        JNIEnv* env,
+        jobject /* this */,
+        jint sampleRate,
+        jint numChannels) {
+    ChromaprintContext *ctx = chromaprint_new(CHROMAPRINT_ALGORITHM_DEFAULT);
+    chromaprint_start(ctx, sampleRate, numChannels);
+    return reinterpret_cast<jlong>(ctx);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_flutter_1rust_1bridge_audio_1core_ChromaprintNative_nativeProcess(
+        JNIEnv* env,
+        jobject /* this */,
+        jlong handle,
+        jobject buffer,
+        jint numShorts) {
+    if (handle == 0) return;
+    auto *ctx = reinterpret_cast<ChromaprintContext *>(handle);
+    int16_t *pcmData = static_cast<int16_t *>(env->GetDirectBufferAddress(buffer));
+    if (pcmData != nullptr) {
+        chromaprint_feed(ctx, pcmData, numShorts);
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_flutter_1rust_1bridge_audio_1core_ChromaprintNative_nativeGetFingerprint(
+        JNIEnv* env,
+        jobject /* this */,
+        jlong handle) {
+    if (handle == 0) return nullptr;
+    auto *ctx = reinterpret_cast<ChromaprintContext *>(handle);
+    
+    char *fp;
+    if (chromaprint_get_fingerprint(ctx, &fp) == 1) {
+        jstring result = env->NewStringUTF(fp);
+        chromaprint_dealloc(fp); // free the char buffer
+        return result;
+    }
+    return nullptr;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_flutter_1rust_1bridge_audio_1core_ChromaprintNative_nativeDestroy(
+        JNIEnv* env,
+        jobject /* this */,
+        jlong handle) {
+    if (handle != 0) {
+        auto *ctx = reinterpret_cast<ChromaprintContext *>(handle);
+        chromaprint_free(ctx);
+    }
 }
