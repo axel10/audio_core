@@ -51,6 +51,9 @@ abstract class AudioEngine {
   bool get supportsCrossfade;
   Future<void> setFadeSettings(FadeSettings settings);
 
+  // Audio Fingerprinting
+  Future<String?> extractFingerprint(String path);
+
   // Status updates
   Stream<AudioStatus> get statusStream;
 }

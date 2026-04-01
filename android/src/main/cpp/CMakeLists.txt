@@ -9,6 +9,10 @@ set(BUILD_TESTS OFF CACHE BOOL "Build test suite" FORCE)
 set(BUILD_TOOLS OFF CACHE BOOL "Build command line tools" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
 
+# Fix for add_subdirectory() overriding CMAKE_SOURCE_DIR in FindKissFFT
+set(KISSFFT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/chromaprint/src/3rdparty/kissfft" CACHE PATH "KissFFT root directory" FORCE)
+set(KISSFFT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/chromaprint/src/3rdparty/kissfft" CACHE PATH "KissFFT source directory" FORCE)
+
 add_subdirectory(chromaprint)
 
 add_library( # Sets the name of the library.
@@ -20,6 +24,9 @@ add_library( # Sets the name of the library.
         # Provides a relative path to your source file(s).
         native-lib.cpp
         EqualizerEngine.cpp)
+
+# Make sure our code can find chromaprint.h
+target_include_directories(my_exoplayer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/chromaprint/src)
 
 find_library( # Sets the name of the path variable.
         log-lib

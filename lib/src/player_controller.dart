@@ -15,6 +15,7 @@ class PlayerController extends ChangeNotifier {
   Duration _position = Duration.zero;
   bool _isPlaying = false;
   double _volume = 1.0;
+  String? _lastFingerprint;
 
   FadeSettings _fadeSettings = const FadeSettings();
   int _fadeSequence = 0;
@@ -29,6 +30,7 @@ class PlayerController extends ChangeNotifier {
   Duration get position => _position;
   bool get isPlaying => _isPlaying;
   double get volume => _volume;
+  String? get lastFingerprint => _lastFingerprint;
   PlayerState get currentState => _playerState;
   FadeSettings get fadeSettings => _fadeSettings;
   bool get isFadeActive => _trackFadeTransitionActive;
@@ -102,10 +104,28 @@ class PlayerController extends ChangeNotifier {
       _lastCommandTime = DateTime.now();
       _isPlaying = false;
       _playerState = PlayerState.ready;
+      
+      _onTrackChanged(path);
     } catch (e) {
       setError('Load failed: $e');
     }
     notifyListeners();
+  }
+
+  void _onTrackChanged(String? path) {
+    if (path == null) {
+      _lastFingerprint = null;
+      return;
+    }
+    
+    // Fetch fingerprint in background
+    _lastFingerprint = null;
+    _parent.engine.extractFingerprint(path).then((value) {
+      if (_selectedPath == path) {
+         _lastFingerprint = value;
+         notifyListeners();
+      }
+    });
   }
 
   Future<void> togglePlayPause() async {
@@ -226,6 +246,7 @@ class PlayerController extends ChangeNotifier {
     _duration = Duration.zero;
     _isPlaying = false;
     _playerState = PlayerState.idle;
+    _onTrackChanged(null);
     notifyListeners();
   }
 
@@ -420,6 +441,7 @@ class NativeCrossfadeTransition extends PlaybackTransition {
       player._isPlaying = true;
       player._playerState = PlayerState.playing;
     }
+    player._onTrackChanged(uri);
     player.notifyListeners();
   }
 }

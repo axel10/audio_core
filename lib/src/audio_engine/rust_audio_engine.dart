@@ -111,4 +111,10 @@ class RustAudioEngine implements AudioEngine {
       ),
     );
   }
+
+  @override
+  Future<String?> extractFingerprint(String path) async {
+    // Rust engine does not support this yet
+    return null;
+  }
 }

@@ -215,6 +215,19 @@ class AndroidAudioEngine implements AudioEngine {
     _fadeSettings = settings;
   }
 
+  @override
+  Future<String?> extractFingerprint(String path) async {
+    try {
+      final String? fingerprint = await _channel.invokeMethod('extractFingerprint', {
+        'path': path,
+      });
+      return fingerprint;
+    } catch (e) {
+      print("Fingerprint extraction failed: $e");
+      return null;
+    }
+  }
+
   // Internal helper for non-AudioEngine interface methods if needed
   Future<Map<String, dynamic>?> getSystemEqualizerParams() async {
     final Map<dynamic, dynamic>? result = await _channel.invokeMethod(

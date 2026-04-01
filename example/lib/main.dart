@@ -362,6 +362,27 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
             overflow: TextOverflow.ellipsis,
           ),
         ),
+        if (_controller.player.lastFingerprint != null)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Container(
+              margin: const EdgeInsets.only(top: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.blue.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+              ),
+              child: SelectableText(
+                'Fingerprint: ${_controller.player.lastFingerprint!.length > 20 ? _controller.player.lastFingerprint!.substring(0, 20) + '...' : _controller.player.lastFingerprint}',
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                  color: Colors.blue,
+                ),
+              ),
+            ),
+          ),
         if (_controller.player.currentPath != null)
           ElevatedButton(
             onPressed: () => _loadWaveform(),
