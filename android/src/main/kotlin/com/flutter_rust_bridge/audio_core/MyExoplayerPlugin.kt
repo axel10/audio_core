@@ -169,7 +169,34 @@ class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler {
         }
     }
 
-    override fun onMethodCall(call: MethodCall, result: Result) {
+    private class MainThreadResult(private val result: Result) : Result {
+        private val handler = Handler(Looper.getMainLooper())
+        private var isHandled = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        override fun success(res: Any?) {
+            if (isHandled.getAndSet(true)) return
+            handler.post {
+                result.success(res)
+            }
+        }
+
+        override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+            if (isHandled.getAndSet(true)) return
+            handler.post {
+                result.error(errorCode, errorMessage, errorDetails)
+            }
+        }
+
+        override fun notImplemented() {
+            if (isHandled.getAndSet(true)) return
+            handler.post {
+                result.notImplemented()
+            }
+        }
+    }
+
+    override fun onMethodCall(call: MethodCall, originalResult: Result) {
+        val result = MainThreadResult(originalResult)
         val playerId = call.argument<String>("playerId") ?: "main"
 //        android.util.Log.d("MyExoplayer", "onMethodCall: ${call.method} for $playerId")
         
@@ -192,15 +219,11 @@ class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler {
                     } else {
                         rawData
                     }
-                    Handler(Looper.getMainLooper()).post {
-                        result.success(processedData)
-                        if (isTemp) java.io.File(localPath).delete()
-                    }
+                    result.success(processedData)
+                    if (isTemp) java.io.File(localPath).delete()
                 }, { error ->
-                    Handler(Looper.getMainLooper()).post {
-                        result.error("AMPLITUDA_ERROR", error.message, null)
-                        if (isTemp) java.io.File(localPath).delete()
-                    }
+                    result.error("AMPLITUDA_ERROR", error.message, null)
+                    if (isTemp) java.io.File(localPath).delete()
                 })
                 return
             }
@@ -213,15 +236,13 @@ class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler {
                     val uri = if (localPath.startsWith("/")) Uri.parse("file://$localPath") else Uri.parse(localPath)
                     val fingerprint = AudioFingerprintExtractor.extractFingerprint(safeContext, uri)
                     
-                    Handler(Looper.getMainLooper()).post {
-                        if (fingerprint != null) {
-                            result.success(fingerprint)
-                        } else {
-                            result.error("FINGERPRINT_FAILED", "Failed to decode or generate fingerprint", null)
-                        }
-                        if (isTemp) {
-                            java.io.File(localPath).delete()
-                        }
+                    if (fingerprint != null) {
+                        result.success(fingerprint)
+                    } else {
+                        result.error("FINGERPRINT_FAILED", "Failed to decode or generate fingerprint", null)
+                    }
+                    if (isTemp) {
+                        java.io.File(localPath).delete()
                     }
                 }.start()
                 return

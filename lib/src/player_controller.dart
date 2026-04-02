@@ -120,13 +120,13 @@ class PlayerController extends ChangeNotifier {
     
     // Fetch fingerprint in background
     _lastFingerprint = null;
-    _parent.engine.extractFingerprint(path).then((value) {
-      if (_selectedPath == path) {
-         debugPrint('Audio Fingerprint for $path: $value');
-         _lastFingerprint = value;
-         notifyListeners();
-      }
-    });
+    // _parent.engine.extractFingerprint(path).then((value) {
+    //   if (_selectedPath == path) {
+    //      debugPrint('Audio Fingerprint for $path: $value');
+    //      _lastFingerprint = value;
+    //      notifyListeners();
+    //   }
+    // });
   }
 
   Future<void> togglePlayPause() async {
