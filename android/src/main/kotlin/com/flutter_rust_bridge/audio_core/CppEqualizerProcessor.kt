@@ -28,7 +28,7 @@ class CppEqualizerProcessor : BaseAudioProcessor() {
 
     fun setNumBands(numBands: Int) {
         this.numBands = numBands
-        if (isInitialized) {
+        if (isInitialized && inputAudioFormat.channelCount > 0) {
             nativeInit(nativeHandle, numBands, currentSampleRate, inputAudioFormat.channelCount)
         }
     }
@@ -70,7 +70,7 @@ class CppEqualizerProcessor : BaseAudioProcessor() {
     }
 
     override fun queueInput(inputBuffer: ByteBuffer) {
-        if (!inputBuffer.hasRemaining() || !isInitialized || nativeHandle == 0L) return
+        if (!inputBuffer.hasRemaining() || !isInitialized || nativeHandle == 0L || inputAudioFormat.channelCount <= 0) return
 
         val encoding = inputAudioFormat.encoding
         val remaining = inputBuffer.remaining()
@@ -99,6 +99,14 @@ class CppEqualizerProcessor : BaseAudioProcessor() {
         }
         
         outputBuffer.flip()
+    }
+
+    override fun onFlush() {
+        // No-op for now, we want to maintain the equalizer state
+    }
+
+    override fun onReset() {
+        isInitialized = false
     }
 
     private external fun nativeCreate(): Long

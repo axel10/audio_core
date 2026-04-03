@@ -81,6 +81,16 @@ class CppFingerprintProcessor : BaseAudioProcessor() {
         outputBuffer.flip()
     }
 
+    override fun onFlush() {
+        totalSamplesProcessed = 0
+    }
+
+    override fun onReset() {
+        isInitialized = false
+        hasPrinted = false
+        totalSamplesProcessed = 0
+    }
+
     fun release() {
         if (nativeHandle != 0L) {
             ChromaprintNative.nativeDestroy(nativeHandle)

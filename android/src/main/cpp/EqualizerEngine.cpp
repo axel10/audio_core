@@ -30,6 +30,7 @@ inline float32x4_t vdivq_f32_fast(float32x4_t num, float32x4_t den) {
 BiquadFilter::BiquadFilter() : b0(1.0), b1(0.0), b2(0.0), a1(0.0), a2(0.0) {}
 
 void BiquadFilter::prepare(int channels) {
+    if (channels <= 0) return;
     if (z1.size() != (size_t)channels) {
         z1.assign(channels, 0.0);
         z2.assign(channels, 0.0);
