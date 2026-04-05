@@ -16,6 +16,8 @@ import 'equalizer_controller.dart';
 import 'audio_engine/audio_engine_interface.dart';
 import 'audio_engine/android_audio_engine.dart';
 import 'audio_engine/rust_audio_engine.dart';
+import 'package:audio_metadata_reader/audio_metadata_reader.dart' as amr;
+import 'package:audio_metadata_reader/audio_metadata_reader.dart' show ParserTag;
 
 export 'player_controller.dart';
 export 'playlist_controller.dart';
@@ -402,4 +404,50 @@ class AudioCoreController extends ChangeNotifier
   void resetEqualizerDefaults() => equalizer.resetDefaults();
   List<double> getEqualizerBandCenters({int? bandCount}) =>
       equalizer.getBandCenters(bandCount: bandCount);
+
+  /// Updates the metadata of a given track using the provided [updateCallback].
+  ///
+  /// If the track is currently playing, it will be temporarily paused on Windows
+  /// to release file handles before writing.
+  Future<bool> updateMetadata(
+    AudioTrack track,
+    void Function(ParserTag metadata) updateCallback,
+  ) async {
+    final path = track.uri;
+    final file = File(path);
+    if (!file.existsSync()) {
+      debugPrint('updateMetadata: File does not exist: $path');
+      return false;
+    }
+
+    final isCurrentTrack = player.currentPath == path;
+    final wasPlaying = player.isPlaying;
+
+    try {
+      if (isCurrentTrack && Platform.isWindows) {
+        // Release file handle on Windows by pausing/stopping
+        await player.pause();
+        // Give the OS a moment to release the handle
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+
+      amr.updateMetadata(file, updateCallback);
+
+      if (isCurrentTrack && wasPlaying) {
+        await player.play();
+      }
+
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('updateMetadata failed: $e');
+      player.setError('Metadata update failed: $e');
+      
+      // Try to resume even if failed
+      if (isCurrentTrack && wasPlaying && !player.isPlaying) {
+        await player.play();
+      }
+      return false;
+    }
+  }
 }
