@@ -20,6 +20,7 @@ rootProject.allprojects {
     repositories {
         google()
         mavenCentral()
+        maven { url 'https://jitpack.io' }
     }
 }
 
@@ -82,6 +83,7 @@ dependencies {
     implementation "androidx.media3:media3-common:$media3_version"
     implementation "com.github.wendykierp:JTransforms:3.2"
     implementation "com.github.lincollincol:Amplituda:2.3.1"
+    implementation "io.github.kyant0:taglib:1.0.5"
 }
 
 // apply from: "../cargokit/gradle/plugin.gradle"

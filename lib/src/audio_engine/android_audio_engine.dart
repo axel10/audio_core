@@ -282,6 +282,18 @@ class AndroidAudioEngine implements AudioEngine {
       rethrow;
     }
   }
+
+  @override
+  Future<bool> updateTrackMetadata({
+    required String path,
+    required Map<String, Object?> metadata,
+  }) async {
+    final success = await _channel.invokeMethod<bool>('updateTrackMetadata', {
+      'path': path,
+      'metadata': metadata,
+    });
+    return success ?? false;
+  }
 }
 
 class _PendingAndroidEdit {

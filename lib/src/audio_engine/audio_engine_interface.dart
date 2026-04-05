@@ -60,4 +60,10 @@ abstract class AudioEngine {
   // File synchronization (locking)
   Future<void> prepareForFileWrite();
   Future<void> finishFileWrite();
+
+  // Native metadata updates
+  Future<bool> updateTrackMetadata({
+    required String path,
+    required Map<String, Object?> metadata,
+  });
 }

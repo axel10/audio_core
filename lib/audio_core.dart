@@ -13,3 +13,4 @@ export 'src/random_playback_models.dart';
 export 'src/visualizer_output_config.dart';
 export 'src/visualizer_output_stream.dart';
 export 'src/visualizer_output_manager.dart';
+export 'src/android_track_metadata.dart';

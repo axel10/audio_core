@@ -1,9 +1,11 @@
 package com.flutter_rust_bridge.audio_core
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.media.audiofx.Equalizer
 import android.media.audiofx.BassBoost
+import android.os.Build
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -16,18 +18,23 @@ import androidx.media3.exoplayer.util.EventLogger
 import com.linc.amplituda.Amplituda
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
+import io.flutter.plugin.common.PluginRegistry.ActivityResultListener
 
+import android.app.Activity
+import android.provider.MediaStore
 import android.animation.ValueAnimator
 import android.os.Handler
 import android.os.Looper
 
 @UnstableApi
 /** MyExoplayerPlugin */
-class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler {
+class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityResultListener {
     private class PlayerContext(
         val id: String,
         val player: ExoPlayer,
@@ -43,6 +50,7 @@ class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler {
     companion object {
         private var instance: MyExoplayerPlugin? = null
         private val playerContexts = mutableMapOf<String, PlayerContext>()
+        private const val REQUEST_WRITE_MEDIA = 43041
 
         init {
             System.loadLibrary("my_exoplayer")
@@ -108,7 +116,16 @@ class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler {
 
     private lateinit var channel: MethodChannel
     private var context: Context? = null
+    private var activity: Activity? = null
+    private var activityBinding: ActivityPluginBinding? = null
     private var amplituda: Amplituda? = null
+    private var pendingMetadataWrite: PendingMetadataWrite? = null
+
+    private data class PendingMetadataWrite(
+        val path: String,
+        val metadata: Map<String, Any?>,
+        val result: Result,
+    )
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         instance = this
@@ -265,6 +282,14 @@ class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler {
                 ctx.player.playWhenReady = false
                 ctx.player.prepare()
                 result.success(null)
+                return
+            }
+            "updateTrackMetadata" -> {
+                val path = call.argument<String>("path")
+                    ?: return result.error("INVALID_ARGUMENT", "Path is null", null)
+                val metadata = call.argument<Map<String, Any?>>("metadata")
+                    ?: return result.error("INVALID_ARGUMENT", "Metadata is null", null)
+                handleUpdateTrackMetadata(path, metadata, result)
                 return
             }
         }
@@ -490,6 +515,191 @@ class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler {
         ctx.cppFingerprintProcessor.release()
     }
 
+    private fun handleUpdateTrackMetadata(
+        path: String,
+        metadata: Map<String, Any?>,
+        result: Result,
+    ) {
+        val safeContext = context ?: run {
+            result.error("INTERNAL_ERROR", "Context is null", null)
+            return
+        }
+
+        try {
+            val success = AndroidMetadataWriter.updateMetadata(safeContext, path, metadata)
+            if (success) {
+                result.success(true)
+            } else {
+                result.error(
+                    "WRITE_FAILED",
+                    "Failed to update audio metadata.",
+                    mapOf(
+                        "path" to path,
+                        "metadataKeys" to metadata.keys.sorted(),
+                    ),
+                )
+            }
+        } catch (e: MetadataWriteException) {
+            val cause = e.cause
+            if (cause is android.app.RecoverableSecurityException) {
+                requestWritePermission(path, metadata, result, cause)
+                return
+            }
+            if (cause is SecurityException) {
+                requestWritePermission(path, metadata, result, cause)
+                return
+            }
+
+            result.error(
+                e.code,
+                e.message,
+                e.details + mapOf("exception" to (cause?.javaClass?.name ?: e.javaClass.name)),
+            )
+        } catch (e: android.app.RecoverableSecurityException) {
+            requestWritePermission(path, metadata, result, e)
+        } catch (e: SecurityException) {
+            requestWritePermission(path, metadata, result, e)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            result.error(
+                "WRITE_FAILED",
+                e.message,
+                mapOf(
+                    "path" to path,
+                    "exception" to e::class.java.name,
+                ),
+            )
+        }
+    }
+
+    private fun requestWritePermission(
+        path: String,
+        metadata: Map<String, Any?>,
+        result: Result,
+        exception: Exception,
+    ) {
+        if (pendingMetadataWrite != null) {
+            result.error(
+                "PERMISSION_PENDING",
+                "A metadata write permission request is already in progress.",
+                null,
+            )
+            return
+        }
+
+        val safeActivity = activity ?: run {
+            result.error(
+                "NO_ACTIVITY",
+                "Android activity is not attached, cannot request write permission.",
+                null,
+            )
+            return
+        }
+        val safeContext = context ?: run {
+            result.error("INTERNAL_ERROR", "Context is null", null)
+            return
+        }
+
+        val fallbackMediaUri = metadata["fallbackMediaUri"]
+            ?.toString()
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        val requestUri = when {
+            path.startsWith("content://") -> path
+            fallbackMediaUri?.startsWith("content://") == true -> fallbackMediaUri
+            else -> null
+        }
+
+        if (requestUri == null) {
+            result.error(
+                "WRITE_PERMISSION_REQUIRED",
+                "This media item cannot be approved for direct rewrite because no MediaStore URI is available.",
+                mapOf("path" to path),
+            )
+            return
+        }
+
+        val uri = Uri.parse(requestUri)
+        val intentSender = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            MediaStore.createWriteRequest(safeContext.contentResolver, listOf(uri)).intentSender
+        } else if (exception is android.app.RecoverableSecurityException) {
+            exception.userAction.actionIntent.intentSender
+        } else {
+            result.error(
+                "WRITE_PERMISSION_REQUIRED",
+                "This media item requires user approval to modify.",
+                null,
+            )
+            return
+        }
+
+        pendingMetadataWrite = PendingMetadataWrite(path, metadata, result)
+        try {
+            safeActivity.startIntentSenderForResult(
+                intentSender,
+                REQUEST_WRITE_MEDIA,
+                null,
+                0,
+                0,
+                0,
+            )
+        } catch (launchError: Exception) {
+            pendingMetadataWrite = null
+            launchError.printStackTrace()
+            result.error("WRITE_PERMISSION_LAUNCH_FAILED", launchError.message, null)
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode != REQUEST_WRITE_MEDIA) return false
+
+        val pending = pendingMetadataWrite ?: return true
+        pendingMetadataWrite = null
+
+        if (resultCode != Activity.RESULT_OK) {
+            pending.result.error(
+                "WRITE_PERMISSION_DENIED",
+                "User denied permission to modify the media item.",
+                mapOf("path" to pending.path),
+            )
+            return true
+        }
+
+        val safeContext = context ?: run {
+            pending.result.error("INTERNAL_ERROR", "Context is null", null)
+            return true
+        }
+
+        try {
+            val success = AndroidMetadataWriter.updateMetadata(
+                safeContext,
+                pending.path,
+                pending.metadata,
+            )
+            if (success) {
+                pending.result.success(true)
+            } else {
+                pending.result.error(
+                    "WRITE_FAILED",
+                    "Failed to update audio metadata.",
+                    mapOf("path" to pending.path),
+                )
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            pending.result.error(
+                "WRITE_FAILED",
+                e.message,
+                mapOf(
+                    "path" to pending.path,
+                    "exception" to e::class.java.name,
+                ),
+            )
+        }
+
+        return true
+    }
+
     private fun ensureLocalPath(path: String): Pair<String, Boolean> {
         if (!path.startsWith("content://")) return Pair(path, false)
         
@@ -533,5 +743,33 @@ class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler {
         instance = null
         amplituda = null
         context = null
+        pendingMetadataWrite = null
+        activityBinding?.removeActivityResultListener(this)
+        activityBinding = null
+        activity = null
+    }
+
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        activity = binding.activity
+        activityBinding = binding
+        binding.addActivityResultListener(this)
+    }
+
+    override fun onDetachedFromActivityForConfigChanges() {
+        activityBinding?.removeActivityResultListener(this)
+        activityBinding = null
+        activity = null
+    }
+
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        activity = binding.activity
+        activityBinding = binding
+        binding.addActivityResultListener(this)
+    }
+
+    override fun onDetachedFromActivity() {
+        activityBinding?.removeActivityResultListener(this)
+        activityBinding = null
+        activity = null
     }
 }

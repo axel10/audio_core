@@ -126,4 +126,14 @@ class RustAudioEngine implements AudioEngine {
 
   @override
   Future<void> finishFileWrite() => rust.finishFileWrite();
+
+  @override
+  Future<bool> updateTrackMetadata({
+    required String path,
+    required Map<String, Object?> metadata,
+  }) {
+    throw UnsupportedError(
+      'Native Android metadata updates are only available on Android.',
+    );
+  }
 }

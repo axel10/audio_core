@@ -16,8 +16,10 @@ import 'equalizer_controller.dart';
 import 'audio_engine/audio_engine_interface.dart';
 import 'audio_engine/android_audio_engine.dart';
 import 'audio_engine/rust_audio_engine.dart';
+import 'android_track_metadata.dart';
 import 'package:audio_metadata_reader/audio_metadata_reader.dart' as amr;
-import 'package:audio_metadata_reader/audio_metadata_reader.dart' show ParserTag;
+import 'package:audio_metadata_reader/audio_metadata_reader.dart'
+    show ParserTag;
 
 export 'player_controller.dart';
 export 'playlist_controller.dart';
@@ -413,15 +415,20 @@ class AudioCoreController extends ChangeNotifier
     AudioTrack track,
     void Function(ParserTag metadata) updateCallback,
   ) async {
-    final path = track.uri;
-    final file = File(path);
-    if (!file.existsSync()) {
+    final fallbackMediaUri = track.metadataValue<String>('mediaUri');
+    final path = track.metadataValue<String>('filePath')?.trim().isNotEmpty == true
+        ? track.metadataValue<String>('filePath')!
+        : (track.metadataValue<String>('mediaUri') ?? track.uri);
+    final isAndroidContentUri =
+        Platform.isAndroid && path.startsWith('content://');
+    final file = isAndroidContentUri ? null : File(path);
+    if (file != null && !file.existsSync()) {
       debugPrint('updateMetadata: File does not exist: $path');
       return false;
     }
 
     final isCurrentTrack = player.currentPath == path;
-    final fileSize = file.lengthSync();
+    final fileSize = file?.lengthSync() ?? 0;
     // On Android, we release the active player before writing and restore it after.
     // On other platforms (Windows), only files >= 60MB need this because smaller
     // files are loaded into memory by the Rust engine.
@@ -435,7 +442,32 @@ class AudioCoreController extends ChangeNotifier
         await Future.delayed(const Duration(milliseconds: 200));
       }
 
-      amr.updateMetadata(file, updateCallback);
+      if (Platform.isAndroid) {
+        if (file == null) {
+          throw StateError(
+            'Android content URI metadata updates should use updateAndroidMetadata.',
+          );
+        }
+        final metadata = amr.readAllMetadata(file);
+        updateCallback(metadata);
+
+        final nativeUpdate = AndroidTrackMetadataUpdate.fromParserTag(metadata);
+        final success = await _engine.updateTrackMetadata(
+          path: path,
+          metadata: <String, Object?>{
+            ...nativeUpdate.toMap(),
+            'fallbackMediaUri': fallbackMediaUri,
+          },
+        );
+        if (!success) {
+          throw StateError('Android native metadata update failed.');
+        }
+      } else {
+        if (file == null) {
+          throw StateError('File path is not available for metadata updates.');
+        }
+        amr.updateMetadata(file, updateCallback);
+      }
 
       if (needsSync) {
         await _engine.finishFileWrite();
@@ -449,6 +481,56 @@ class AudioCoreController extends ChangeNotifier
 
       // Try to restore playback state even if failed
       if (needsSync) {
+        await _engine.finishFileWrite().catchError((_) {});
+      }
+      return false;
+    }
+  }
+
+  Future<bool> updateAndroidMetadata(
+    AudioTrack track,
+    AndroidTrackMetadataUpdate update,
+  ) async {
+    if (!Platform.isAndroid) {
+      throw UnsupportedError(
+        'updateAndroidMetadata is only supported on Android.',
+      );
+    }
+
+    final fallbackMediaUri = track.metadataValue<String>('mediaUri');
+    final path = track.metadataValue<String>('filePath')?.trim().isNotEmpty == true
+        ? track.metadataValue<String>('filePath')!
+        : (track.metadataValue<String>('mediaUri') ?? track.uri);
+
+    final isCurrentTrack = player.currentPath == path;
+
+    try {
+      if (isCurrentTrack) {
+        await _engine.prepareForFileWrite();
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+
+      final success = await _engine.updateTrackMetadata(
+        path: path,
+        metadata: <String, Object?>{
+          ...update.toMap(),
+          'fallbackMediaUri': fallbackMediaUri,
+        },
+      );
+      if (!success) {
+        throw StateError('Android native metadata update failed.');
+      }
+
+      if (isCurrentTrack) {
+        await _engine.finishFileWrite();
+      }
+
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('updateAndroidMetadata failed: $e');
+      player.setError('Metadata update failed: $e');
+      if (isCurrentTrack) {
         await _engine.finishFileWrite().catchError((_) {});
       }
       return false;

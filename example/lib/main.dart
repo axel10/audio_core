@@ -10,9 +10,6 @@ import 'random_lab_tab.dart';
 import 'audio_handler.dart';
 import 'android_media_library_picker.dart';
 import 'package:audio_service/audio_service.dart';
-import 'package:audio_metadata_reader/audio_metadata_reader.dart' as amr;
-import 'package:audio_metadata_reader/audio_metadata_reader.dart'
-    show CommonMetadataSetters;
 
 late AudioCoreHandler audioHandler;
 
@@ -484,17 +481,17 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                         ? 'image/png'
                         : 'image/jpeg';
 
-                    final success = await _controller.updateMetadata(track, (
-                      metadata,
-                    ) {
-                      metadata.setPictures([
-                        amr.Picture(
-                          bytes,
-                          mimeType,
-                          amr.PictureType.coverFront,
-                        ),
-                      ]);
-                    });
+                    final success = await _controller.updateAndroidMetadata(
+                      track,
+                      AndroidTrackMetadataUpdate(
+                        title: track.title,
+                        artist: track.artist,
+                        album: track.album,
+                        pictures: [
+                          AndroidTrackPicture(bytes: bytes, mimeType: mimeType),
+                        ],
+                      ),
+                    );
 
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
