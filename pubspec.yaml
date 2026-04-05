@@ -8,6 +8,7 @@ environment:
   flutter: '>=3.3.0'
 
 dependencies:
+  audio_metadata_reader: ^1.4.2
   desktop_drop: ^0.7.0
   flutter:
     sdk: flutter

@@ -7,9 +7,9 @@ import '../../frb_generated.dart';
 import 'equalizer.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `any_deck_playing`, `apply_master_volume`, `clear`, `controller`, `create_player`, `describe_output_device`, `dispose_audio`, `drive_crossfade`, `drive_volume_fade`, `ensure_audio_output`, `invalidate_waveform_cache`, `is_playing`, `new`, `open_current_default_output`, `open_deck_from_path`, `pause_all`, `play_all`, `playback_position`, `playback_state_snapshot`, `poll_output_device`, `public_deck`, `public_path`, `public_position`, `replace_current_from_path`, `set_master_volume`, `settle_to_public_deck`, `snapshot_loaded_path`, `snapshot_playback_state`, `start_crossfade`, `start_default_output_monitor`, `start_volume_fade`, `toggle_all`, `warm_waveform_cache_for_public_path`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `PlaybackDeck`, `PlayerController`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `any_deck_playing`, `apply_master_volume`, `clear`, `controller`, `create_player`, `describe_output_device`, `dispose_audio`, `drive_crossfade`, `drive_volume_fade`, `ensure_audio_output`, `finish_file_write`, `invalidate_waveform_cache`, `is_playing`, `new`, `new`, `open_current_default_output`, `open_deck_from_path`, `pause_all`, `play_all`, `playback_position`, `playback_state_snapshot`, `poll_output_device`, `prepare_for_file_write`, `public_deck`, `public_path`, `public_position`, `replace_current_from_path`, `set_master_volume`, `settle_to_public_deck`, `snapshot_loaded_path`, `snapshot_playback_state`, `start_crossfade`, `start_default_output_monitor`, `start_volume_fade`, `toggle_all`, `warm_waveform_cache_for_public_path`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `LazyMemoryInner`, `LazyMemorySource`, `PendingEdit`, `PlaybackDeck`, `PlayerController`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `drop`, `eq`, `fmt`, `fmt`, `fmt`, `read`, `seek`
 
 Future<void> initLogger() =>
     RustLib.instance.api.crateApiSimpleControllerInitLogger();
@@ -78,6 +78,12 @@ Future<String?> getLoadedAudioPath() =>
 
 Future<void> handleDeviceChanged() =>
     RustLib.instance.api.crateApiSimpleControllerHandleDeviceChanged();
+
+Future<void> prepareForFileWrite() =>
+    RustLib.instance.api.crateApiSimpleControllerPrepareForFileWrite();
+
+Future<void> finishFileWrite() =>
+    RustLib.instance.api.crateApiSimpleControllerFinishFileWrite();
 
 enum FadeMode { sequential, crossfade }
 

@@ -5,7 +5,8 @@ use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use log::{info, LevelFilter};
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use std::fs::File;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::io::{Read, Seek, SeekFrom};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 use rodio::source::SeekError;
@@ -109,6 +110,14 @@ struct PlayerController {
     cached_pcm: Option<Arc<Vec<f32>>>,
     cached_channels: usize,
     cached_sample_rate: u32,
+    pending_edit: Option<PendingEdit>,
+}
+
+struct PendingEdit {
+    path: String,
+    position: Duration,
+    was_playing: bool,
+    gain: f32,
 }
 
 impl PlayerController {
@@ -127,6 +136,7 @@ impl PlayerController {
             cached_pcm: None,
             cached_channels: 0,
             cached_sample_rate: 0,
+            pending_edit: None,
         }
     }
 
@@ -242,7 +252,23 @@ impl PlayerController {
 
         // 耗时操作：打开文件、构建系统层级组件 (大约耗时几十毫秒以上)
         let file = File::open(path).map_err(|e| format!("open file failed: {e}"))?;
-        let source = Decoder::try_from(file).map_err(|e| format!("decode failed: {e}"))?;
+        let metadata = file.metadata().map_err(|e| format!("get metadata failed: {e}"))?;
+        let file_size = metadata.len();
+
+        // 60MB 以下的文件使用内存缓存模式，60MB 以上使用流式读取
+        let source: Box<dyn Source<Item = f32> + Send> = if file_size < 60 * 1024 * 1024 {
+            let lazy_source = LazyMemorySource::new(file, file_size);
+            let decoder = Decoder::builder()
+                .with_data(lazy_source)
+                .with_byte_len(file_size)
+                .with_seekable(true)
+                .build()
+                .map_err(|e| format!("decode failed: {e}"))?;
+            Box::new(decoder)
+        } else {
+            let decoder = Decoder::try_from(file).map_err(|e| format!("decode failed: {e}"))?;
+            Box::new(decoder)
+        };
 
         let total = source.total_duration().unwrap_or(Duration::ZERO);
         let clamped_offset = if total.is_zero() {
@@ -469,7 +495,57 @@ impl PlayerController {
         self.cached_pcm = None;
         self.cached_channels = 0;
         self.cached_sample_rate = 0;
+        self.pending_edit = None;
         self.equalizer = EqualizerShared::new(EqualizerConfig::default());
+    }
+
+    fn prepare_for_file_write(&mut self) -> Result<(), String> {
+        let deck = self
+            .public_deck()
+            .ok_or_else(|| "no audio is currently loaded".to_string())?;
+
+        self.pending_edit = Some(PendingEdit {
+            path: deck.loaded_path.clone(),
+            position: self.public_position(),
+            was_playing: deck.is_playing(),
+            gain: deck.gain,
+        });
+
+        info!(
+            "[PlayerController] Preparing for file write. Releasing handle for: {}",
+            deck.loaded_path
+        );
+
+        self.transition_generation = self.transition_generation.wrapping_add(1);
+        if let Some(incoming) = self.incoming_deck.take() {
+            incoming.clear();
+        }
+        if let Some(current) = self.current_deck.take() {
+            current.clear();
+        }
+
+        Ok(())
+    }
+
+    fn finish_file_write(&mut self) -> Result<(), String> {
+        let edit = self
+            .pending_edit
+            .take()
+            .ok_or_else(|| "no pending edit state found".to_string())?;
+
+        info!(
+            "[PlayerController] File write finished. Restoring playback for: {}",
+            edit.path
+        );
+
+        let deck = self.open_deck_from_path(&edit.path, edit.position, edit.was_playing, edit.gain)?;
+        self.current_deck = Some(deck);
+
+        if self.public_path() != Some(&edit.path) {
+            self.warm_waveform_cache_for_public_path();
+        }
+
+        Ok(())
     }
 }
 
@@ -778,4 +854,124 @@ pub fn get_loaded_audio_path() -> Option<String> {
 pub fn handle_device_changed() -> Result<(), String> {
     // Legacy stub: device switching is now fully handled by internal periodic polling in Rust.
     Ok(())
+}
+
+pub fn prepare_for_file_write() -> Result<(), String> {
+    let mut c = controller()
+        .lock()
+        .map_err(|_| "player lock poisoned".to_string())?;
+    c.prepare_for_file_write()
+}
+
+pub fn finish_file_write() -> Result<(), String> {
+    let mut c = controller()
+        .lock()
+        .map_err(|_| "player lock poisoned".to_string())?;
+    c.finish_file_write()
+}
+
+/// 延迟内存读取 Source
+/// 允许在后台读取文件的同时进行播放，读取完成后自动关闭文件句柄
+struct LazyMemorySource {
+    inner: Arc<Mutex<LazyMemoryInner>>,
+    cond: Arc<Condvar>,
+    pos: u64,
+    abort: Arc<AtomicBool>,
+}
+
+struct LazyMemoryInner {
+    buffer: Vec<u8>,
+    total_size: u64,
+    is_finished: bool,
+}
+
+impl LazyMemorySource {
+    fn new(mut file: File, size: u64) -> Self {
+        let inner = Arc::new(Mutex::new(LazyMemoryInner {
+            buffer: Vec::with_capacity(size as usize),
+            total_size: size,
+            is_finished: false,
+        }));
+        let cond = Arc::new(Condvar::new());
+        let abort = Arc::new(AtomicBool::new(false));
+
+        let inner_clone = inner.clone();
+        let cond_clone = cond.clone();
+        let abort_clone = abort.clone();
+
+        // 启动后台线程读取文件
+        thread::spawn(move || {
+            let mut buf = [0u8; 64 * 1024]; // 64KB 缓冲区
+            loop {
+                if abort_clone.load(Ordering::SeqCst) {
+                    info!("[LazyMemorySource] Background read aborted.");
+                    break;
+                }
+
+                match file.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        let mut inner = inner_clone.lock().unwrap();
+                        inner.buffer.extend_from_slice(&buf[..n]);
+                        cond_clone.notify_all();
+                    }
+                    Err(_) => break,
+                }
+            }
+            let mut inner = inner_clone.lock().unwrap();
+            inner.is_finished = true;
+            cond_clone.notify_all();
+            // file 在此处离开作用域，句柄被自动释放
+            info!("[LazyMemorySource] Background thread finished, reader handle released.");
+        });
+
+        Self {
+            inner,
+            cond,
+            pos: 0,
+            abort,
+        }
+    }
+}
+
+impl Drop for LazyMemorySource {
+    fn drop(&mut self) {
+        // 当 LazyMemorySource (及其包装层 Decoder) 被销毁时，中止后台线程
+        self.abort.store(true, Ordering::SeqCst);
+        self.cond.notify_all();
+    }
+}
+
+impl Read for LazyMemorySource {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let mut inner = self.inner.lock().unwrap();
+        // 如果请求的位置还没有数据，且文件还没读完，则等待
+        while inner.buffer.len() as u64 <= self.pos && !inner.is_finished {
+            inner = self.cond.wait(inner).unwrap();
+        }
+
+        let available = inner.buffer.len() as u64;
+        if self.pos >= available {
+            return Ok(0); // EOF
+        }
+
+        let start = self.pos as usize;
+        let end = (start + buf.len()).min(available as usize);
+        let n = end - start;
+        buf[..n].copy_from_slice(&inner.buffer[start..end]);
+        self.pos += n as u64;
+        Ok(n)
+    }
+}
+
+impl Seek for LazyMemorySource {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        let total = self.inner.lock().unwrap().total_size;
+        match pos {
+            SeekFrom::Start(p) => self.pos = p,
+            SeekFrom::Current(p) => self.pos = (self.pos as i64 + p) as u64,
+            SeekFrom::End(p) => self.pos = (total as i64 + p) as u64,
+        }
+        Ok(self.pos)
+    }
 }
