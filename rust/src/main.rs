@@ -1,5 +1,4 @@
-use rodio::source::{SineWave, Source};
-use rodio::{Decoder, MixerDeviceSink, Player};
+use rodio::Decoder;
 use std::fs::File;
 use std::time::Duration;
 

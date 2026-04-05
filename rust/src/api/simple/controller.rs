@@ -7,9 +7,9 @@ use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
-use rodio::source::SeekError;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FadeMode {
@@ -500,20 +500,28 @@ impl PlayerController {
     }
 
     fn prepare_for_file_write(&mut self) -> Result<(), String> {
-        let deck = self
-            .public_deck()
-            .ok_or_else(|| "no audio is currently loaded".to_string())?;
+        let (path, pos, was_playing, gain) = {
+            let deck = self
+                .public_deck()
+                .ok_or_else(|| "no audio is currently loaded".to_string())?;
+            (
+                deck.loaded_path.clone(),
+                self.public_position(),
+                deck.is_playing(),
+                deck.gain,
+            )
+        };
 
         self.pending_edit = Some(PendingEdit {
-            path: deck.loaded_path.clone(),
-            position: self.public_position(),
-            was_playing: deck.is_playing(),
-            gain: deck.gain,
+            path: path.clone(),
+            position: pos,
+            was_playing,
+            gain,
         });
 
         info!(
             "[PlayerController] Preparing for file write. Releasing handle for: {}",
-            deck.loaded_path
+            path
         );
 
         self.transition_generation = self.transition_generation.wrapping_add(1);
@@ -625,7 +633,7 @@ fn drive_volume_fade(
     from: f32,
     to: f32,
     duration: Duration,
-    base_volume: f32,
+    _base_volume: f32,
     pause_on_complete: bool,
 ) {
     let steps =
