@@ -8,9 +8,11 @@ import 'equalizer_panel.dart';
 import 'widgets.dart';
 import 'random_lab_tab.dart';
 import 'audio_handler.dart';
+import 'android_media_library_picker.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_metadata_reader/audio_metadata_reader.dart' as amr;
-import 'package:audio_metadata_reader/audio_metadata_reader.dart' show CommonMetadataSetters;
+import 'package:audio_metadata_reader/audio_metadata_reader.dart'
+    show CommonMetadataSetters;
 
 late AudioCoreHandler audioHandler;
 
@@ -43,7 +45,8 @@ void main() async {
   audioHandler = await AudioService.init(
     builder: () => AudioCoreHandler(controller),
     config: const AudioServiceConfig(
-      androidNotificationChannelId: 'com.flutter_rust_bridge.audio_core.channel.audio',
+      androidNotificationChannelId:
+          'com.flutter_rust_bridge.audio_core.channel.audio',
       androidNotificationChannelName: 'Audio Playback',
       androidNotificationOngoing: true,
     ),
@@ -79,10 +82,14 @@ class VisualizerDemoPage extends StatefulWidget {
 
 class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
   late final AudioCoreController _controller;
+  final AndroidMediaLibraryApi _mediaLibraryApi = AndroidMediaLibraryApi();
   StreamSubscription<FftFrame>? _subSmooth;
   StreamSubscription<FftFrame>? _subResponsive;
   List<double> _bandsSmooth = const [];
   List<double> _bandsResponsive = const [];
+  AudioLibraryFolder? _mediaLibraryRoot;
+  bool _mediaLibraryLoading = false;
+  String? _mediaLibraryError;
 
   final GlobalKey<RandomLabTabState> _randomLabKey =
       GlobalKey<RandomLabTabState>();
@@ -96,7 +103,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
     super.initState();
     _controller = widget.controller;
     // _controller.initialize(); // Already initialized or will be initialized via handler logic if needed
-    // However, the original code had _controller.initialize() here. 
+    // However, the original code had _controller.initialize() here.
     // Since it's a plugin demo, let's keep it but ensure it's idempotent.
     if (!_controller.isInitialized) {
       _controller.initialize();
@@ -153,6 +160,37 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
         _bandsResponsive = frame.values;
       });
     });
+
+    _bootstrapAudioLibrary();
+  }
+
+  Future<void> _bootstrapAudioLibrary() async {
+    if (!Platform.isAndroid) return;
+
+    setState(() {
+      _mediaLibraryLoading = true;
+      _mediaLibraryError = null;
+    });
+
+    try {
+      final granted = await _mediaLibraryApi.ensureAudioPermission();
+      if (!granted) {
+        throw StateError('Audio permission was not granted.');
+      }
+
+      final entries = await _mediaLibraryApi.scanAudioLibrary();
+      if (!mounted) return;
+      setState(() {
+        _mediaLibraryRoot = buildAudioLibraryTree(entries);
+        _mediaLibraryLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _mediaLibraryLoading = false;
+        _mediaLibraryError = e.toString();
+      });
+    }
   }
 
   Future<void> _pickAudio() async {
@@ -161,7 +199,31 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
       debugPrint('Controller not initialized, initializing now...');
       await _controller.initialize();
     }
-    debugPrint('Opening file picker...');
+
+    if (Platform.isAndroid) {
+      final root = _mediaLibraryRoot;
+      if (root == null) {
+        await _bootstrapAudioLibrary();
+      }
+
+      final refreshedRoot = _mediaLibraryRoot;
+      if (refreshedRoot == null) {
+        if (!mounted) return;
+        _showMediaLibrarySnack(
+          _mediaLibraryError ?? 'Audio library is not ready yet.',
+        );
+        return;
+      }
+
+      final selected = await _openAndroidMediaLibraryPicker(refreshedRoot);
+      if (selected == null) return;
+
+      await _registerImportedTracks([
+        selected.toAudioTrack(),
+      ], addToActivePlaylist: true);
+      return;
+    }
+
     final result = await FilePicker.platform.pickFiles(
       type: FileType.audio,
       allowMultiple: true,
@@ -187,6 +249,18 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
     }
 
     await _registerImportedTracks(tracks, addToActivePlaylist: true);
+  }
+
+  Future<AudioLibraryEntry?> _openAndroidMediaLibraryPicker(
+    AudioLibraryFolder root,
+  ) {
+    return showAndroidMediaLibraryPicker(context, root: root);
+  }
+
+  void _showMediaLibrarySnack(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   AudioTrack _makeTrack({
@@ -282,6 +356,21 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                   child: Column(
                     children: [
                       _buildPlayerControls(),
+                      if (Platform.isAndroid)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              _mediaLibraryLoading
+                                  ? 'Scanning system media library...'
+                                  : _mediaLibraryError == null
+                                  ? 'System media library ready'
+                                  : 'Library scan failed: $_mediaLibraryError',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                        ),
                       const SizedBox(height: 12),
                       _buildFileAndWaveform(),
                       const SizedBox(height: 16),
@@ -388,27 +477,30 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
 
                     final bytes = await File(path).readAsBytes();
                     final ext = result.files.single.extension?.toLowerCase();
-                    final mimeType = (ext == 'png') ? 'image/png' : 'image/jpeg';
+                    final mimeType = (ext == 'png')
+                        ? 'image/png'
+                        : 'image/jpeg';
 
-                    final success = await _controller.updateMetadata(
-                      track,
-                      (metadata) {
-                        metadata.setPictures([
-                          amr.Picture(
-                            bytes,
-                            mimeType,
-                            amr.PictureType.coverFront,
-                          )
-                        ]);
-                      },
-                    );
+                    final success = await _controller.updateMetadata(track, (
+                      metadata,
+                    ) {
+                      metadata.setPictures([
+                        amr.Picture(
+                          bytes,
+                          mimeType,
+                          amr.PictureType.coverFront,
+                        ),
+                      ]);
+                    });
 
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text(success
-                              ? 'Metadata updated successfully!'
-                              : 'Failed to update metadata.'),
+                          content: Text(
+                            success
+                                ? 'Metadata updated successfully!'
+                                : 'Failed to update metadata.',
+                          ),
                           backgroundColor: success ? Colors.green : Colors.red,
                         ),
                       );
@@ -446,7 +538,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                 border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
               ),
               child: SelectableText(
-                'Fingerprint: ${_controller.player.lastFingerprint!.length > 20 ? _controller.player.lastFingerprint!.substring(0, 20) + '...' : _controller.player.lastFingerprint}',
+                'Fingerprint: ${_controller.player.lastFingerprint!.length > 20 ? '${_controller.player.lastFingerprint!.substring(0, 20)}...' : _controller.player.lastFingerprint}',
                 style: const TextStyle(
                   fontSize: 10,
                   fontFamily: 'monospace',
