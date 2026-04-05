@@ -289,6 +289,11 @@ class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, Activ
                     ?: return result.error("INVALID_ARGUMENT", "Path is null", null)
                 val metadata = call.argument<Map<String, Any?>>("metadata")
                     ?: return result.error("INVALID_ARGUMENT", "Metadata is null", null)
+
+                // The Flutter side sends a normalized map of tag fields here.
+                // We keep the plugin layer thin: this method only handles the
+                // platform bridge, then delegates the real file rewrite work to
+                // AndroidMetadataWriter, which uses TagLib under the hood.
                 handleUpdateTrackMetadata(path, metadata, result)
                 return
             }
@@ -526,6 +531,13 @@ class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, Activ
         }
 
         try {
+            // This is the actual metadata rewrite step.
+            // AndroidMetadataWriter will:
+            // 1) open the file as a descriptor,
+            // 2) read current tags,
+            // 3) merge Flutter's updates,
+            // 4) call TagLib.savePropertyMap/savePictures,
+            // 5) throw recoverable security errors if Android needs user approval.
             val success = AndroidMetadataWriter.updateMetadata(safeContext, path, metadata)
             if (success) {
                 result.success(true)
@@ -606,6 +618,9 @@ class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, Activ
             ?.takeIf { it.isNotEmpty() }
         val requestUri = when {
             path.startsWith("content://") -> path
+            // If the player track uses a file path, we try to fall back to the
+            // MediaStore content URI. Android's permission dialog can approve
+            // rewrites against that URI on newer versions.
             fallbackMediaUri?.startsWith("content://") == true -> fallbackMediaUri
             else -> null
         }
@@ -621,8 +636,10 @@ class MyExoplayerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, Activ
 
         val uri = Uri.parse(requestUri)
         val intentSender = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11+ can request write access directly through MediaStore.
             MediaStore.createWriteRequest(safeContext.contentResolver, listOf(uri)).intentSender
         } else if (exception is android.app.RecoverableSecurityException) {
+            // Older versions use RecoverableSecurityException's built-in action.
             exception.userAction.actionIntent.intentSender
         } else {
             result.error(

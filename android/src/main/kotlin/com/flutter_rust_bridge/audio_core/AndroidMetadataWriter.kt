@@ -16,9 +16,22 @@ internal object AndroidMetadataWriter {
         metadata: Map<String, Any?>,
     ): Boolean {
         try {
+            // Step 1:
+            // Build the final tag map that will be written back to the file.
+            // We do not write only the changed fields blindly. Instead, we first
+            // read the current tags from the file and merge the new values on top.
+            // That keeps any fields we do not explicitly edit from being lost.
             val mergedPropertyMap = buildMergedPropertyMap(context, path, metadata)
+
+            // Step 2:
+            // Pictures are handled separately because TagLib exposes a dedicated
+            // savePictures() API. That mirrors the Metadator app's approach.
             val pictures = parsePictures(metadata["pictures"])
 
+            // Step 3:
+            // Open the audio file as a writable ParcelFileDescriptor.
+            // TagLib works with integer file descriptors, so we later detach the
+            // FD from the ParcelFileDescriptor and hand it to TagLib directly.
             val writableFile = openWritableFileDescriptor(context, path, metadata)
                 ?: throw MetadataWriteException(
                     code = "OPEN_FAILED",
@@ -27,10 +40,21 @@ internal object AndroidMetadataWriter {
                 )
 
             writableFile.use { pfd ->
+                // Step 4:
+                // Convert the ParcelFileDescriptor into a raw fd for TagLib.
+                // The duplicate() call gives TagLib its own handle so the wrapper
+                // can be closed safely without affecting the original descriptor.
                 val fd = pfd.detachForTagLib()
+
+                // Step 5:
+                // Write the text metadata (title, artist, album, lyrics, etc.).
+                // The property keys are the TagLib keys, such as TITLE or ARTIST.
                 TagLib.savePropertyMap(fd, propertyMap = mergedPropertyMap)
 
                 if (!pictures.isNullOrEmpty()) {
+                    // Step 6:
+                    // Artwork is written in a second pass. If no artwork was selected,
+                    // we simply leave the existing embedded pictures untouched.
                     val pictureFd = openWritableFileDescriptor(context, path, metadata)
                         ?: throw MetadataWriteException(
                             code = "OPEN_FAILED",
@@ -39,6 +63,10 @@ internal object AndroidMetadataWriter {
                         )
                     pictureFd.use { pfdForPictures ->
                         val picturesFd = pfdForPictures.detachForTagLib()
+
+                        // Step 7:
+                        // Each picture is converted into TagLib's Picture model and then
+                        // saved to the file as embedded artwork.
                         TagLib.savePictures(
                             picturesFd,
                             pictures = pictures.toTypedArray(),
@@ -72,17 +100,23 @@ internal object AndroidMetadataWriter {
         path: String,
         metadata: Map<String, Any?>,
     ): PropertyMap {
+        // Start with the existing tags from the file so we preserve fields that
+        // are not part of the current edit session.
         val merged = HashMap<String, Array<String>>()
         val currentPropertyMap = readCurrentPropertyMap(context, path, metadata)
         if (currentPropertyMap != null) {
             merged.putAll(currentPropertyMap)
         }
 
+        // These helpers map our Flutter-side keys to TagLib keys.
+        // If a field is absent in metadata, the existing value stays untouched.
         putTextField(merged, "TITLE", metadata, "title", "TITLE")
         putMultiField(merged, "ARTIST", metadata, "artist", "ARTIST")
         putTextField(merged, "ALBUM", metadata, "album", "ALBUM")
         putMultiField(merged, "ALBUMARTIST", metadata, "albumArtist", "ALBUMARTIST")
 
+        // Track number and total tracks are often stored together as "3/12".
+        // TagLib and many tag readers understand that representation.
         val trackNumber = firstPresent(metadata, "trackNumber", "TRACKNUMBER")
         val trackTotal = firstPresent(metadata, "trackTotal", "TRACKTOTAL")
         if (trackNumber != null) {
@@ -96,11 +130,16 @@ internal object AndroidMetadataWriter {
         }
 
         putTextField(merged, "DISCNUMBER", metadata, "discNumber", "DISCNUMBER")
-        putTextField(merged, "DATE", metadata, "date", "DATE")
-
-        val year = firstPresent(metadata, "year", "YEAR")
-        if (!year.isNullOrBlank()) {
-            merged["DATE"] = arrayOf(year.trim())
+        val date = firstPresent(metadata, "date", "DATE")
+        if (!date.isNullOrBlank()) {
+            // Keep the more specific date when it is available.
+            merged["DATE"] = arrayOf(date.trim())
+        } else {
+            // Some callers only provide a numeric year, so we normalize it to DATE.
+            val year = firstPresent(metadata, "year", "YEAR")
+            if (!year.isNullOrBlank()) {
+                merged["DATE"] = arrayOf(year.trim())
+            }
         }
 
         putMultiField(merged, "GENRE", metadata, "genres", "genre", "GENRE")
@@ -120,6 +159,9 @@ internal object AndroidMetadataWriter {
         path: String,
         metadata: Map<String, Any?>,
     ): PropertyMap? {
+        // Read mode is only used to obtain the current state of the tags.
+        // If this fails for any reason, we still allow the write to continue
+        // with the fields we were given from Flutter.
         val readable = openReadableFileDescriptor(context, path, metadata) ?: return null
         return try {
             readable.use { pfd ->
@@ -172,6 +214,8 @@ internal object AndroidMetadataWriter {
 
         val candidates = buildList {
             add(path)
+            // When the active playback path is a temporary/local alias, the media
+            // library URI is a fallback that can still be approved for writing.
             metadata["fallbackMediaUri"]
                 ?.toString()
                 ?.trim()
@@ -211,6 +255,8 @@ internal object AndroidMetadataWriter {
         metadata: Map<String, Any?>,
         vararg sourceKeys: String,
     ) {
+        // For single-value tags, write a one-element array because TagLib's
+        // property map format stores every field as Array<String>.
         val value = firstPresent(metadata, *sourceKeys)?.trim()?.takeIf { it.isNotEmpty() } ?: return
         target[tagKey] = arrayOf(value)
     }
@@ -231,6 +277,8 @@ internal object AndroidMetadataWriter {
         metadata: Map<String, Any?>,
         vararg sourceKeys: String,
     ): List<String> {
+        // Support both Flutter lists and comma-separated strings so callers can
+        // pass either structure without caring about the native storage format.
         for (sourceKey in sourceKeys) {
             val raw = metadata[sourceKey] ?: continue
             when (raw) {
@@ -285,6 +333,8 @@ internal object AndroidMetadataWriter {
     }
 
     private fun parsePictures(rawPictures: Any?): List<Picture>? {
+        // Pictures are passed from Flutter as a list of maps:
+        // { bytes, mimeType, pictureType, description }.
         val pictures = rawPictures as? List<*> ?: return null
         if (pictures.isEmpty()) return emptyList()
 
@@ -318,6 +368,8 @@ internal object AndroidMetadataWriter {
     }
 
     private fun ParcelFileDescriptor.detachForTagLib(): Int {
+        // TagLib expects a raw integer fd. We duplicate the descriptor first so
+        // the ParcelFileDescriptor can be closed independently after detaching.
         return dup()?.detachFd() ?: throw MetadataWriteException(
             code = "OPEN_FAILED",
             message = "Unable to detach file descriptor for TagLib.",
