@@ -8,8 +8,6 @@ environment:
   flutter: '>=3.3.0'
 
 dependencies:
-  audio_metadata_reader:
-    path: ./plugin/audio_metadata_reader
   desktop_drop: ^0.7.0
   flutter:
     sdk: flutter

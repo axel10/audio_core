@@ -46,8 +46,6 @@ dependencies:
   desktop_drop: ^0.7.0
   file_picker: ^10.3.10
   audio_service: ^0.18.18
-  audio_metadata_reader:
-    path: ../plugin/audio_metadata_reader
   media_scanner: ^2.2.1
 
 dev_dependencies:

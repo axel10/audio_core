@@ -1,8 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:audio_metadata_reader/audio_metadata_reader.dart' as amr;
-import 'package:audio_metadata_reader/audio_metadata_reader.dart'
-    show ParserTag;
+import 'android_metadata_models.dart';
 
 T? _firstOrNull<T>(Iterable<T> values) {
   final iterator = values.iterator;
@@ -114,10 +112,10 @@ class AndroidTrackMetadataUpdate {
       metadata.setPictures(
         pictures
             .map(
-              (picture) => amr.Picture(
+              (picture) => Picture(
                 picture.bytes,
                 picture.mimeType,
-                _pictureTypeToAudioMetadataReader(picture.pictureType),
+                _androidLabelToPictureType(picture.pictureType),
               ),
             )
             .toList(),
@@ -125,7 +123,7 @@ class AndroidTrackMetadataUpdate {
     }
 
     switch (metadata) {
-      case amr.Mp3Metadata m:
+      case Mp3Metadata m:
         if (albumArtist != null) m.bandOrOrchestra = albumArtist;
         if (lyrics != null) m.lyric = lyrics;
         if (composer != null) m.composer = composer;
@@ -134,13 +132,13 @@ class AndroidTrackMetadataUpdate {
         if (conductor != null) m.conductor = conductor;
         if (genres.isNotEmpty) m.genres = List<String>.from(genres);
         break;
-      case amr.Mp4Metadata m:
+      case Mp4Metadata m:
         if (lyrics != null) m.lyrics = lyrics;
         if (genres.isNotEmpty) {
           m.genre = genres.first;
         }
         break;
-      case amr.VorbisMetadata m:
+      case VorbisMetadata m:
         if (albumArtist != null && performer == null) {
           m.performer = [albumArtist!];
         }
@@ -151,7 +149,7 @@ class AndroidTrackMetadataUpdate {
         if (performer != null) m.performer = [performer!];
         if (genres.isNotEmpty) m.genres = List<String>.from(genres);
         break;
-      case amr.RiffMetadata m:
+      case RiffMetadata m:
         if (comment != null) m.comment = comment;
         if (lyrics != null) m.comment = lyrics;
         if (composer != null) m.encoder = composer;
@@ -173,7 +171,7 @@ class AndroidTrackMetadataUpdate {
 
   factory AndroidTrackMetadataUpdate.fromParserTag(ParserTag metadata) {
     switch (metadata) {
-      case amr.Mp3Metadata m:
+      case Mp3Metadata m:
         return AndroidTrackMetadataUpdate(
           title: m.songName,
           artist: m.leadPerformer,
@@ -195,7 +193,7 @@ class AndroidTrackMetadataUpdate {
               )
               .toList(),
         );
-      case amr.Mp4Metadata m:
+      case Mp4Metadata m:
         return AndroidTrackMetadataUpdate(
           title: m.title,
           artist: m.artist,
@@ -219,7 +217,7 @@ class AndroidTrackMetadataUpdate {
                   ),
                 ],
         );
-      case amr.VorbisMetadata m:
+      case VorbisMetadata m:
         return AndroidTrackMetadataUpdate(
           title: _firstOrNull(m.title),
           artist: _firstOrNull(m.artist),
@@ -245,7 +243,7 @@ class AndroidTrackMetadataUpdate {
               )
               .toList(),
         );
-      case amr.RiffMetadata m:
+      case RiffMetadata m:
         return AndroidTrackMetadataUpdate(
           title: m.title,
           artist: m.artist,
@@ -268,41 +266,41 @@ class AndroidTrackMetadataUpdate {
     }
   }
 
-  static String _pictureTypeToAndroidLabel(amr.PictureType type) {
+  static String _pictureTypeToAndroidLabel(PictureType type) {
     switch (type) {
-      case amr.PictureType.coverFront:
+      case PictureType.coverFront:
         return 'Front Cover';
-      case amr.PictureType.coverBack:
+      case PictureType.coverBack:
         return 'Back Cover';
-      case amr.PictureType.leafletPage:
+      case PictureType.leafletPage:
         return 'Leaflet Page';
-      case amr.PictureType.mediaLabelCD:
+      case PictureType.mediaLabelCD:
         return 'Media Label CD';
-      case amr.PictureType.artistPerformer:
+      case PictureType.artistPerformer:
         return 'Artist / Performer';
-      case amr.PictureType.bandArtistLogotype:
+      case PictureType.bandArtistLogotype:
         return 'Band Logo';
       default:
         return 'Other';
     }
   }
 
-  static amr.PictureType _pictureTypeToAudioMetadataReader(String type) {
+  static PictureType _androidLabelToPictureType(String type) {
     switch (type) {
       case 'Front Cover':
-        return amr.PictureType.coverFront;
+        return PictureType.coverFront;
       case 'Back Cover':
-        return amr.PictureType.coverBack;
+        return PictureType.coverBack;
       case 'Leaflet Page':
-        return amr.PictureType.leafletPage;
+        return PictureType.leafletPage;
       case 'Media Label CD':
-        return amr.PictureType.mediaLabelCD;
+        return PictureType.mediaLabelCD;
       case 'Artist / Performer':
-        return amr.PictureType.artistPerformer;
+        return PictureType.artistPerformer;
       case 'Band Logo':
-        return amr.PictureType.bandArtistLogotype;
+        return PictureType.bandArtistLogotype;
       default:
-        return amr.PictureType.other;
+        return PictureType.other;
     }
   }
 }
