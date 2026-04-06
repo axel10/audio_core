@@ -66,4 +66,6 @@ abstract class AudioEngine {
     required String path,
     required Map<String, Object?> metadata,
   });
+
+  Future<void> removeAllTags({String? path});
 }

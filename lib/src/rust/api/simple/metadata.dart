@@ -6,9 +6,7 @@
 import '../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_to_tag`, `ensure_editable_tag`, `normalize_non_negative_u32`, `parse_mime_type`, `parse_picture_type`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`
-// These functions are ignored (category: IgnoreBecauseNotAllowedOwner): `description_if_present`
 
 Future<void> updateTrackMetadata({
   required String path,
@@ -18,9 +16,8 @@ Future<void> updateTrackMetadata({
   metadata: metadata,
 );
 
-abstract class PictureBuilderExt {
-  Future<PictureBuilderExt> descriptionIfPresent({String? description});
-}
+Future<void> removeAllTags({required String path}) =>
+    RustLib.instance.api.crateApiSimpleMetadataRemoveAllTags(path: path);
 
 class TrackMetadataUpdate {
   final String? title;

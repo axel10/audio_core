@@ -483,6 +483,14 @@ class AudioCoreController extends ChangeNotifier
   List<double> getEqualizerBandCenters({int? bandCount}) =>
       equalizer.getBandCenters(bandCount: bandCount);
 
+  Future<void> removeAllTags({String? path}) async {
+    final targetPath = path ?? player.currentPath;
+    if (targetPath == null || targetPath.trim().isEmpty) {
+      throw StateError('No path provided and no current track is playing.');
+    }
+    await _engine.removeAllTags(path: targetPath.trim());
+  }
+
   String _resolveTrackPath(AudioTrack track) {
     final filePath = track.metadataValue<String>('filePath');
     final mediaUri = track.metadataValue<String>('mediaUri');

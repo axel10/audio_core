@@ -37,9 +37,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String dco_decode_String(dynamic raw);
 
   @protected
-  PictureBuilderExt dco_decode_TraitDef_PictureBuilderExt(dynamic raw);
-
-  @protected
   bool dco_decode_bool(dynamic raw);
 
   @protected

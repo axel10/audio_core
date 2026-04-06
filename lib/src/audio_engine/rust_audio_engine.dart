@@ -140,6 +140,15 @@ class RustAudioEngine implements AudioEngine {
     return true;
   }
 
+  @override
+  Future<void> removeAllTags({String? path}) async {
+    final targetPath = path?.trim();
+    if (targetPath == null || targetPath.isEmpty) {
+      throw ArgumentError.value(path, 'path', 'Path is required here.');
+    }
+    await rust.removeAllTags(path: targetPath);
+  }
+
   rust.TrackMetadataUpdate _trackMetadataUpdateFromMap(
     Map<String, Object?> metadata,
   ) {

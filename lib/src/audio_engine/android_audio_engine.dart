@@ -294,6 +294,11 @@ class AndroidAudioEngine implements AudioEngine {
     });
     return success ?? false;
   }
+
+  @override
+  Future<void> removeAllTags({String? path}) {
+    throw UnimplementedError('removeAllTags is not implemented on Android yet');
+  }
 }
 
 class _PendingAndroidEdit {

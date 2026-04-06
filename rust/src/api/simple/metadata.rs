@@ -1,7 +1,7 @@
 use lofty::config::WriteOptions;
 use lofty::prelude::*;
 use lofty::probe::Probe;
-use lofty::tag::{ItemKey, Tag};
+use lofty::tag::{ItemKey, Tag, TagType};
 
 #[derive(Debug, Clone, Default)]
 pub struct TrackPicture {
@@ -49,6 +49,15 @@ pub fn update_track_metadata(path: String, metadata: TrackMetadataUpdate) -> any
             }
         },
     };
+    
+    // 如果歌曲是 ID3v1，则将其转换为 ID3v2
+    if tag.tag_type() == TagType::Id3v1 {
+        println!("ID3v1 detected, converting to ID3v2...");
+        // 移除原始文件中的 ID3v1 标签 (可选，但符合“转换”直觉)
+        TagType::Id3v1.remove_from_path(&path)?;
+        // 将内存中的标签对象转换为 ID3v2，以便支持封面等现代特性
+        tag.re_map(TagType::Id3v2);
+    }
 
     // 3. 设置标签内容 (全部交给 lofty Accessor 和 ItemKey 处理)
     if let Some(v) = metadata.title { tag.set_title(v); }
