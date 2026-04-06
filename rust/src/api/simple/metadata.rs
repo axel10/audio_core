@@ -50,11 +50,9 @@ pub fn update_track_metadata(path: String, metadata: TrackMetadataUpdate) -> any
         },
     };
     
-    // 如果歌曲是 ID3v1，则将其转换为 ID3v2
+    // 如果歌曲是 ID3v1，则将其转换为 ID3v2，旧的 v1 标签保留在原处
     if tag.tag_type() == TagType::Id3v1 {
-        println!("ID3v1 detected, converting to ID3v2...");
-        // 移除原始文件中的 ID3v1 标签 (可选，但符合“转换”直觉)
-        TagType::Id3v1.remove_from_path(&path)?;
+        println!("ID3v1 detected, upgrading to ID3v2...");
         // 将内存中的标签对象转换为 ID3v2，以便支持封面等现代特性
         tag.re_map(TagType::Id3v2);
     }
