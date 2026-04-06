@@ -12,6 +12,7 @@ class PlayerController extends ChangeNotifier {
   String? _selectedPath;
   String? _error;
   Duration _duration = Duration.zero;
+  bool _durationReady = false;
   Duration _position = Duration.zero;
   bool _isPlaying = false;
   double _volume = 1.0;
@@ -26,7 +27,7 @@ class PlayerController extends ChangeNotifier {
   // --- Getters ---
   String? get currentPath => _selectedPath;
   String? get error => _error;
-  Duration get duration => _duration;
+  Duration get duration => _durationReady ? _duration : Duration.zero;
   Duration get position => _position;
   bool get isPlaying => _isPlaying;
   double get volume => _volume;
@@ -90,6 +91,8 @@ class PlayerController extends ChangeNotifier {
     }
 
     _playerState = PlayerState.buffering;
+    _durationReady = false;
+    _duration = Duration.zero;
     notifyListeners();
 
     try {
@@ -101,6 +104,7 @@ class PlayerController extends ChangeNotifier {
       _selectedPath = path;
       _position = Duration.zero;
       _duration = duration;
+      _durationReady = duration > Duration.zero;
       _lastCommandTime = DateTime.now();
       _isPlaying = false;
       _playerState = PlayerState.ready;
@@ -245,6 +249,7 @@ class PlayerController extends ChangeNotifier {
     _selectedPath = null;
     _position = Duration.zero;
     _duration = Duration.zero;
+    _durationReady = false;
     _isPlaying = false;
     _playerState = PlayerState.idle;
     _onTrackChanged(null);
@@ -271,10 +276,9 @@ class PlayerController extends ChangeNotifier {
     final recentlyCommanded =
         now.difference(_lastCommandTime) < const Duration(milliseconds: 500);
 
-    // Update duration and volume even if recently commanded
-    if (duration > Duration.zero) {
-      _duration = duration;
-    }
+    // Update duration and volume even if recently commanded.
+    _duration = duration;
+    _durationReady = duration > Duration.zero;
 
     if (!_trackFadeTransitionActive) {
       _volume = nativeVolume;
@@ -329,8 +333,9 @@ class PlayerController extends ChangeNotifier {
   @internal
   void updatePosition(Duration position) {
     if (DateTime.now().difference(_lastCommandTime) <
-        const Duration(milliseconds: 500))
+        const Duration(milliseconds: 500)) {
       return;
+    }
 
     _position = position;
     if (_duration > Duration.zero &&
@@ -344,6 +349,7 @@ class PlayerController extends ChangeNotifier {
   @internal
   void updateDuration(Duration duration) {
     _duration = duration;
+    _durationReady = duration > Duration.zero;
     notifyListeners();
   }
 
