@@ -98,6 +98,79 @@ class AndroidTrackMetadataUpdate {
     };
   }
 
+  void applyTo(ParserTag metadata) {
+    if (title != null) metadata.setTitle(title);
+    if (artist != null) metadata.setArtist(artist);
+    if (album != null) metadata.setAlbum(album);
+    if (trackNumber != null) metadata.setTrackNumber(trackNumber);
+    if (trackTotal != null) metadata.setTrackTotal(trackTotal);
+    if (discNumber != null) metadata.setCD(discNumber, null);
+
+    final resolvedDate = _resolveDateTime();
+    if (resolvedDate != null) {
+      metadata.setYear(resolvedDate);
+    }
+    if (pictures.isNotEmpty) {
+      metadata.setPictures(
+        pictures
+            .map(
+              (picture) => amr.Picture(
+                picture.bytes,
+                picture.mimeType,
+                _pictureTypeToAudioMetadataReader(picture.pictureType),
+              ),
+            )
+            .toList(),
+      );
+    }
+
+    switch (metadata) {
+      case amr.Mp3Metadata m:
+        if (albumArtist != null) m.bandOrOrchestra = albumArtist;
+        if (lyrics != null) m.lyric = lyrics;
+        if (composer != null) m.composer = composer;
+        if (lyricist != null) m.textWriter = lyricist;
+        if (performer != null) m.leadPerformer = performer;
+        if (conductor != null) m.conductor = conductor;
+        if (genres.isNotEmpty) m.genres = List<String>.from(genres);
+        break;
+      case amr.Mp4Metadata m:
+        if (lyrics != null) m.lyrics = lyrics;
+        if (genres.isNotEmpty) {
+          m.genre = genres.first;
+        }
+        break;
+      case amr.VorbisMetadata m:
+        if (albumArtist != null && performer == null) {
+          m.performer = [albumArtist!];
+        }
+        if (comment != null) m.comment = [comment!];
+        if (lyrics != null) m.lyric = lyrics;
+        if (composer != null) m.composer = [composer!];
+        if (lyricist != null) m.description = [lyricist!];
+        if (performer != null) m.performer = [performer!];
+        if (genres.isNotEmpty) m.genres = List<String>.from(genres);
+        break;
+      case amr.RiffMetadata m:
+        if (comment != null) m.comment = comment;
+        if (lyrics != null) m.comment = lyrics;
+        if (composer != null) m.encoder = composer;
+        if (genres.isNotEmpty) m.genre = genres.first;
+        break;
+    }
+  }
+
+  DateTime? _resolveDateTime() {
+    if (date != null && date!.trim().isNotEmpty) {
+      final parsed = DateTime.tryParse(date!);
+      if (parsed != null) return parsed;
+    }
+    if (year != null) {
+      return DateTime(year!);
+    }
+    return null;
+  }
+
   factory AndroidTrackMetadataUpdate.fromParserTag(ParserTag metadata) {
     switch (metadata) {
       case amr.Mp3Metadata m:
@@ -211,6 +284,25 @@ class AndroidTrackMetadataUpdate {
         return 'Band Logo';
       default:
         return 'Other';
+    }
+  }
+
+  static amr.PictureType _pictureTypeToAudioMetadataReader(String type) {
+    switch (type) {
+      case 'Front Cover':
+        return amr.PictureType.coverFront;
+      case 'Back Cover':
+        return amr.PictureType.coverBack;
+      case 'Leaflet Page':
+        return amr.PictureType.leafletPage;
+      case 'Media Label CD':
+        return amr.PictureType.mediaLabelCD;
+      case 'Artist / Performer':
+        return amr.PictureType.artistPerformer;
+      case 'Band Logo':
+        return amr.PictureType.bandArtistLogotype;
+      default:
+        return amr.PictureType.other;
     }
   }
 }

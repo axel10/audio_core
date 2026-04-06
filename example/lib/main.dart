@@ -457,37 +457,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
             },
           ),
           const SizedBox(width: 12),
-          // Batch cover update example:
-          //
-          // final batchResults = await _controller.updateMetadataBatch([
-          //   AndroidTrackMetadataUpdateRequest(
-          //     path: '/storage/emulated/0/Music/song_a.mp3',
-          //     metadata: AndroidTrackMetadataUpdate(
-          //       title: 'Song A',
-          //       artist: 'Artist A',
-          //       pictures: [
-          //         AndroidTrackPicture(
-          //           bytes: coverBytesA,
-          //           mimeType: 'image/jpeg',
-          //         ),
-          //       ],
-          //     ),
-          //   ),
-          //   AndroidTrackMetadataUpdateRequest(
-          //     path: '/storage/emulated/0/Music/song_b.mp3',
-          //     metadata: AndroidTrackMetadataUpdate(
-          //       title: 'Song B',
-          //       artist: 'Artist B',
-          //       pictures: [
-          //         AndroidTrackPicture(
-          //           bytes: coverBytesB,
-          //           mimeType: 'image/jpeg',
-          //         ),
-          //       ],
-          //     ),
-          //   ),
-          // ]);
-          // final allSucceeded = batchResults.every((item) => item);
+
           ElevatedButton.icon(
             onPressed: _controller.player.currentPath != null
                 ? () async {
@@ -514,7 +484,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
 
                     final success = await _controller.updateMetadata(
                       track,
-                      androidUpdate: AndroidTrackMetadataUpdate(
+                      metadata: AndroidTrackMetadataUpdate(
                         title: track.title,
                         artist: track.artist,
                         album: track.album,
