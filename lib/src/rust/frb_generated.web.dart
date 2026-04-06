@@ -10,6 +10,7 @@ import 'api/simple.dart';
 import 'api/simple/audio_fingerprint.dart';
 import 'api/simple/controller.dart';
 import 'api/simple/equalizer.dart';
+import 'api/simple/metadata.dart';
 import 'api/simple/waveform.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -36,6 +37,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String dco_decode_String(dynamic raw);
 
   @protected
+  PictureBuilderExt dco_decode_TraitDef_PictureBuilderExt(dynamic raw);
+
+  @protected
   bool dco_decode_bool(dynamic raw);
 
   @protected
@@ -43,6 +47,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FadeSettings dco_decode_box_autoadd_fade_settings(dynamic raw);
+
+  @protected
+  int dco_decode_box_autoadd_i_32(dynamic raw);
+
+  @protected
+  TrackMetadataUpdate dco_decode_box_autoadd_track_metadata_update(dynamic raw);
 
   @protected
   EqualizerConfig dco_decode_equalizer_config(dynamic raw);
@@ -63,16 +73,31 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64 dco_decode_i_64(dynamic raw);
 
   @protected
+  List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
   Float32List dco_decode_list_prim_f_32_strict(dynamic raw);
 
   @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
   @protected
+  List<TrackPicture> dco_decode_list_track_picture(dynamic raw);
+
+  @protected
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
+  int? dco_decode_opt_box_autoadd_i_32(dynamic raw);
+
+  @protected
   PlaybackState dco_decode_playback_state(dynamic raw);
+
+  @protected
+  TrackMetadataUpdate dco_decode_track_metadata_update(dynamic raw);
+
+  @protected
+  TrackPicture dco_decode_track_picture(dynamic raw);
 
   @protected
   int dco_decode_u_8(dynamic raw);
@@ -108,6 +133,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  int sse_decode_box_autoadd_i_32(SseDeserializer deserializer);
+
+  @protected
+  TrackMetadataUpdate sse_decode_box_autoadd_track_metadata_update(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   EqualizerConfig sse_decode_equalizer_config(SseDeserializer deserializer);
 
   @protected
@@ -126,16 +159,35 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64 sse_decode_i_64(SseDeserializer deserializer);
 
   @protected
+  List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
   Float32List sse_decode_list_prim_f_32_strict(SseDeserializer deserializer);
 
   @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
+  List<TrackPicture> sse_decode_list_track_picture(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
+  int? sse_decode_opt_box_autoadd_i_32(SseDeserializer deserializer);
+
+  @protected
   PlaybackState sse_decode_playback_state(SseDeserializer deserializer);
+
+  @protected
+  TrackMetadataUpdate sse_decode_track_metadata_update(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TrackPicture sse_decode_track_picture(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_8(SseDeserializer deserializer);
@@ -177,6 +229,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_i_32(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_track_metadata_update(
+    TrackMetadataUpdate self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_equalizer_config(
     EqualizerConfig self,
     SseSerializer serializer,
@@ -198,6 +259,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_prim_f_32_strict(
     Float32List self,
     SseSerializer serializer,
@@ -210,10 +274,28 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_track_picture(
+    List<TrackPicture> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_i_32(int? self, SseSerializer serializer);
+
+  @protected
   void sse_encode_playback_state(PlaybackState self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_track_metadata_update(
+    TrackMetadataUpdate self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_track_picture(TrackPicture self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_8(int self, SseSerializer serializer);

@@ -19,7 +19,6 @@ import 'audio_engine/android_audio_engine.dart';
 import 'audio_engine/rust_audio_engine.dart';
 import 'android_track_metadata.dart';
 import 'android_media_library.dart';
-import 'package:audio_metadata_reader/audio_metadata_reader.dart' as amr;
 
 export 'player_controller.dart';
 export 'playlist_controller.dart';
@@ -516,22 +515,19 @@ class AudioCoreController extends ChangeNotifier
         await Future.delayed(const Duration(milliseconds: 200));
       }
 
-      if (Platform.isAndroid) {
-        final success = await _engine.updateTrackMetadata(
-          path: path,
-          metadata: <String, Object?>{
-            ...metadata.toMap(),
-            'fallbackMediaUri': fallbackMediaUri,
-          },
+      final success = await _engine.updateTrackMetadata(
+        path: path,
+        metadata: <String, Object?>{
+          ...metadata.toMap(),
+          'fallbackMediaUri': fallbackMediaUri,
+        },
+      );
+      if (!success) {
+        throw StateError(
+          Platform.isAndroid
+              ? 'Android native metadata update failed.'
+              : 'Rust metadata update failed.',
         );
-        if (!success) {
-          throw StateError('Android native metadata update failed.');
-        }
-      } else {
-        if (file == null) {
-          throw StateError('File path is not available for metadata updates.');
-        }
-        amr.updateMetadata(file, (tag) => metadata.applyTo(tag));
       }
 
       if (managePlaybackSync && needsSync) {

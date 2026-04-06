@@ -1,13 +1,13 @@
 use super::equalizer::{EqSource, EqualizerConfig, EqualizerShared};
 use super::fft::{clear_fft_buffer, FftSource, RAW_FFT_BINS};
 use android_logger::Config;
-use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use log::{info, LevelFilter};
+use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -147,7 +147,10 @@ impl PlayerController {
 
         info!("[AudioDeviceMonitor] ensure_audio_output: opening new default output");
         let (sink, device_name) = Self::open_current_default_output()?;
-        info!("[AudioDeviceMonitor] ensure_audio_output: opened device '{}'", device_name);
+        info!(
+            "[AudioDeviceMonitor] ensure_audio_output: opened device '{}'",
+            device_name
+        );
         self.sink = Some(sink);
         self.active_output_device_name = Some(device_name);
         Ok(())
@@ -252,7 +255,9 @@ impl PlayerController {
 
         // 耗时操作：打开文件、构建系统层级组件 (大约耗时几十毫秒以上)
         let file = File::open(path).map_err(|e| format!("open file failed: {e}"))?;
-        let metadata = file.metadata().map_err(|e| format!("get metadata failed: {e}"))?;
+        let metadata = file
+            .metadata()
+            .map_err(|e| format!("get metadata failed: {e}"))?;
         let file_size = metadata.len();
 
         // 60MB 以下的文件使用内存缓存模式，60MB 以上使用流式读取
@@ -409,7 +414,14 @@ impl PlayerController {
         let master_volume_on_start = self.volume;
 
         thread::spawn(move || {
-            drive_volume_fade(generation, from, to, duration, master_volume_on_start, on_complete);
+            drive_volume_fade(
+                generation,
+                from,
+                to,
+                duration,
+                master_volume_on_start,
+                on_complete,
+            );
         });
     }
 
@@ -546,7 +558,8 @@ impl PlayerController {
             edit.path
         );
 
-        let deck = self.open_deck_from_path(&edit.path, edit.position, edit.was_playing, edit.gain)?;
+        let deck =
+            self.open_deck_from_path(&edit.path, edit.position, edit.was_playing, edit.gain)?;
         self.current_deck = Some(deck);
 
         if self.public_path() != Some(&edit.path) {
@@ -652,7 +665,7 @@ fn drive_volume_fade(
         let progress = step as f32 / steps as f32;
         let current_gain = from + (to - from) * progress;
         let master_volume = c.volume;
-        
+
         if let Some(deck) = c.current_deck.as_mut() {
             deck.gain = current_gain;
             deck.apply_master_volume(master_volume);
@@ -681,7 +694,10 @@ pub fn init_app() {
 
     if let Ok(mut c) = controller().lock() {
         let _ = c.ensure_audio_output();
-        info!("[AudioDeviceMonitor] initial audio output ensured, sink={}", c.sink.is_some());
+        info!(
+            "[AudioDeviceMonitor] initial audio output ensured, sink={}",
+            c.sink.is_some()
+        );
     }
 }
 
@@ -707,7 +723,7 @@ pub fn play_audio() -> Result<(), String> {
     if c.public_deck().is_none() {
         return Err("player is not initialized".to_string());
     }
-    
+
     if c.fade_settings.fade_on_pause_resume {
         let duration = Duration::from_millis(c.fade_settings.duration_ms.max(0) as u64);
         let master_volume = c.volume;

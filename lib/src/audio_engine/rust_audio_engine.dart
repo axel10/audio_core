@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 import '../rust/api/simple_api.dart' as rust;
 import '../rust/api/simple/equalizer.dart';
 import '../player_models.dart';
@@ -131,9 +132,91 @@ class RustAudioEngine implements AudioEngine {
   Future<bool> updateTrackMetadata({
     required String path,
     required Map<String, Object?> metadata,
-  }) {
-    throw UnsupportedError(
-      'Native Android metadata updates are only available on Android.',
+  }) async {
+    try {
+      await rust.updateTrackMetadata(
+        path: path,
+        metadata: _trackMetadataUpdateFromMap(metadata),
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  rust.TrackMetadataUpdate _trackMetadataUpdateFromMap(
+    Map<String, Object?> metadata,
+  ) {
+    return rust.TrackMetadataUpdate(
+      title: _asString(metadata['title']),
+      artist: _asString(metadata['artist']),
+      album: _asString(metadata['album']),
+      albumArtist: _asString(metadata['albumArtist']),
+      trackNumber: _asInt(metadata['trackNumber']),
+      trackTotal: _asInt(metadata['trackTotal']),
+      discNumber: _asInt(metadata['discNumber']),
+      date: _asString(metadata['date']),
+      year: _asInt(metadata['year']),
+      comment: _asString(metadata['comment']),
+      lyrics: _asString(metadata['lyrics']),
+      composer: _asString(metadata['composer']),
+      lyricist: _asString(metadata['lyricist']),
+      performer: _asString(metadata['performer']),
+      conductor: _asString(metadata['conductor']),
+      remixer: _asString(metadata['remixer']),
+      genres: _asStringList(metadata['genres']),
+      pictures: _asPictureList(metadata['pictures']),
     );
+  }
+
+  List<rust.TrackPicture> _asPictureList(Object? value) {
+    if (value is! List) return const <rust.TrackPicture>[];
+
+    final pictures = <rust.TrackPicture>[];
+    for (final entry in value) {
+      if (entry is Map<Object?, Object?>) {
+        pictures.add(_asPicture(entry.cast<String, Object?>()));
+      } else if (entry is Map) {
+        pictures.add(_asPicture(entry.cast<String, Object?>()));
+      }
+    }
+    return pictures;
+  }
+
+  rust.TrackPicture _asPicture(Map<String, Object?> map) {
+    final bytes = map['bytes'];
+    return rust.TrackPicture(
+      bytes: bytes is Uint8List
+          ? bytes
+          : bytes is List<int>
+          ? Uint8List.fromList(bytes)
+          : Uint8List(0),
+      mimeType: _asString(map['mimeType']) ?? 'image/jpeg',
+      pictureType: _asString(map['pictureType']) ?? 'Other',
+      description: _asString(map['description']),
+    );
+  }
+
+  List<String> _asStringList(Object? value) {
+    if (value is! List) return const <String>[];
+    return value
+        .whereType<Object?>()
+        .map(_asString)
+        .whereType<String>()
+        .toList(growable: false);
+  }
+
+  String? _asString(Object? value) {
+    if (value is String) {
+      final trimmed = value.trim();
+      return trimmed.isEmpty ? null : value;
+    }
+    return null;
+  }
+
+  int? _asInt(Object? value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return null;
   }
 }

@@ -103,19 +103,17 @@ impl EqualizerChain {
     }
 
     fn identity(sample_rate: u32) -> Self {
-        let mut protection = Box::new(
-            shape(ShapeFn(|x| {
-                let abs = x.abs();
-                if abs <= 0.95 {
-                    return x;
-                }
-                let sign = x.signum();
-                let normalized = ((abs - 0.95) / 0.05).clamp(0.0, 1.0);
-                let eased = normalized * normalized * (3.0 - 2.0 * normalized);
-                let limited = 0.95 + 0.05 * eased;
-                sign * limited.min(1.0)
-            }))
-        );
+        let mut protection = Box::new(shape(ShapeFn(|x| {
+            let abs = x.abs();
+            if abs <= 0.95 {
+                return x;
+            }
+            let sign = x.signum();
+            let normalized = ((abs - 0.95) / 0.05).clamp(0.0, 1.0);
+            let eased = normalized * normalized * (3.0 - 2.0 * normalized);
+            let limited = 0.95 + 0.05 * eased;
+            sign * limited.min(1.0)
+        })));
         protection.set_sample_rate(sample_rate as f64);
 
         Self {
@@ -135,19 +133,17 @@ impl EqualizerChain {
 
         // Update protection unit if sample rate changed
         if self.sample_rate != sample_rate {
-            let mut protection = Box::new(
-                shape(ShapeFn(|x| {
-                    let abs = x.abs();
-                    if abs <= 0.95 {
-                        return x;
-                    }
-                    let sign = x.signum();
-                    let normalized = ((abs - 0.95) / 0.05).clamp(0.0, 1.0);
-                    let eased = normalized * normalized * (3.0 - 2.0 * normalized);
-                    let limited = 0.95 + 0.05 * eased;
-                    sign * limited.min(1.0)
-                }))
-            );
+            let mut protection = Box::new(shape(ShapeFn(|x| {
+                let abs = x.abs();
+                if abs <= 0.95 {
+                    return x;
+                }
+                let sign = x.signum();
+                let normalized = ((abs - 0.95) / 0.05).clamp(0.0, 1.0);
+                let eased = normalized * normalized * (3.0 - 2.0 * normalized);
+                let limited = 0.95 + 0.05 * eased;
+                sign * limited.min(1.0)
+            })));
             protection.set_sample_rate(sample_rate as f64);
             self.protection_unit = protection;
             self.sample_rate = sample_rate;
@@ -172,7 +168,7 @@ impl EqualizerChain {
                 }
             }
         }
-        
+
         // Reduce preamp by `max_boost_db` to prevent digital clipping
         let actual_preamp_db = config.preamp_db - max_boost_db;
         let preamp_gain: f32 = db_amp(actual_preamp_db);
@@ -180,11 +176,14 @@ impl EqualizerChain {
 
         // Bass Boost
         if config.bass_boost_db.abs() > EPSILON_GAIN_DB {
-            node = Box::new(An(Unit::<U1, U1>::new(node)) >> lowshelf_hz(
-                config.bass_boost_frequency_hz,
-                config.bass_boost_q,
-                db_amp(config.bass_boost_db),
-            ));
+            node = Box::new(
+                An(Unit::<U1, U1>::new(node))
+                    >> lowshelf_hz(
+                        config.bass_boost_frequency_hz,
+                        config.bass_boost_q,
+                        db_amp(config.bass_boost_db),
+                    ),
+            );
         }
 
         // EQ Bands
@@ -193,7 +192,8 @@ impl EqualizerChain {
             let freq = band_center_frequency(i, band_count);
             let gain_db = config.band_gains_db.get(i).copied().unwrap_or(0.0);
             if gain_db.abs() > EPSILON_GAIN_DB {
-                node = Box::new(An(Unit::<U1, U1>::new(node)) >> bell_hz(freq, 1.0, db_amp(gain_db)));
+                node =
+                    Box::new(An(Unit::<U1, U1>::new(node)) >> bell_hz(freq, 1.0, db_amp(gain_db)));
             }
         }
 

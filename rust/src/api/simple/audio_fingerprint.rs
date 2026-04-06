@@ -1,6 +1,6 @@
-use std::path::Path;
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use rusty_chromaprint::{Configuration, FingerprintCompressor, Fingerprinter};
+use std::path::Path;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error as SymphoniaError;
@@ -29,8 +29,7 @@ fn get_raw_audio_fingerprint(path: &Path) -> anyhow::Result<Vec<u32>> {
     let meta_opts: MetadataOptions = Default::default();
     let fmt_opts: FormatOptions = Default::default();
 
-    let probed = symphonia::default::get_probe()
-        .format(&hint, mss, &fmt_opts, &meta_opts)?;
+    let probed = symphonia::default::get_probe().format(&hint, mss, &fmt_opts, &meta_opts)?;
 
     let mut format = probed.format;
 
@@ -65,20 +64,21 @@ fn get_raw_audio_fingerprint(path: &Path) -> anyhow::Result<Vec<u32>> {
             Ok(audio_buf) => {
                 if !is_printer_started {
                     let spec = *audio_buf.spec();
-                    printer.start(spec.rate, spec.channels.count() as u32)
+                    printer
+                        .start(spec.rate, spec.channels.count() as u32)
                         .map_err(|e| anyhow::anyhow!("printer start error: {:?}", e))?;
 
                     let duration = audio_buf.capacity() as u64;
                     sample_buf = Some(SampleBuffer::<i16>::new(duration, spec));
                     is_printer_started = true;
-                    
+
                     target_samples = (spec.rate as usize) * (spec.channels.count() as usize) * 20;
                 }
 
                 if let Some(buf) = &mut sample_buf {
                     buf.copy_interleaved_ref(audio_buf);
                     let samples = buf.samples();
-                    
+
                     let remaining = target_samples.saturating_sub(total_samples_processed);
                     if samples.len() >= remaining {
                         printer.consume(&samples[..remaining]);
