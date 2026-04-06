@@ -111,6 +111,7 @@ struct PlayerController {
     cached_channels: usize,
     cached_sample_rate: u32,
     pending_edit: Option<PendingEdit>,
+    pause_fade_in_progress: bool,
 }
 
 struct PendingEdit {
@@ -137,6 +138,7 @@ impl PlayerController {
             cached_channels: 0,
             cached_sample_rate: 0,
             pending_edit: None,
+            pause_fade_in_progress: false,
         }
     }
 
@@ -313,6 +315,7 @@ impl PlayerController {
         start_offset: Duration,
         auto_play: bool,
     ) -> Result<(), String> {
+        self.pause_fade_in_progress = false;
         let previous_public_path = self.public_path().map(str::to_string);
         let deck = self.open_deck_from_path(path, start_offset, auto_play, 1.0)?;
 
@@ -351,7 +354,10 @@ impl PlayerController {
 
     fn playback_state_snapshot(&self) -> PlaybackState {
         let public_deck = self.public_deck();
-        let is_playing = public_deck.map(PlaybackDeck::is_playing).unwrap_or(false);
+        let is_playing = public_deck
+            .map(PlaybackDeck::is_playing)
+            .unwrap_or(false)
+            && !self.pause_fade_in_progress;
 
         PlaybackState {
             position_ms: self.public_position().as_millis().min(i64::MAX as u128) as i64,
@@ -495,6 +501,7 @@ impl PlayerController {
 
     fn dispose_audio(&mut self) {
         self.transition_generation = self.transition_generation.wrapping_add(1);
+        self.pause_fade_in_progress = false;
         if let Some(incoming) = self.incoming_deck.take() {
             incoming.clear();
         }
@@ -677,6 +684,7 @@ fn drive_volume_fade(
             if c.volume_fade_generation == generation {
                 let master_volume = c.volume;
                 c.pause_all();
+                c.pause_fade_in_progress = false;
                 if let Some(deck) = c.current_deck.as_mut() {
                     deck.gain = 1.0;
                     deck.apply_master_volume(master_volume);
@@ -724,6 +732,7 @@ pub fn play_audio() -> Result<(), String> {
         return Err("player is not initialized".to_string());
     }
 
+    c.pause_fade_in_progress = false;
     if c.fade_settings.fade_on_pause_resume {
         let duration = Duration::from_millis(c.fade_settings.duration_ms.max(0) as u64);
         let master_volume = c.volume;
@@ -748,9 +757,11 @@ pub fn pause_audio() -> Result<(), String> {
     }
 
     if c.fade_settings.fade_on_pause_resume {
+        c.pause_fade_in_progress = true;
         let duration = Duration::from_millis(c.fade_settings.duration_ms.max(0) as u64);
         c.start_volume_fade(1.0, 0.0, duration, true);
     } else {
+        c.pause_fade_in_progress = false;
         c.pause_all();
     }
     Ok(())
@@ -761,6 +772,9 @@ pub fn set_audio_fade_settings(settings: FadeSettings) -> Result<(), String> {
         .lock()
         .map_err(|_| "player lock poisoned".to_string())?;
     c.fade_settings = settings;
+    if !settings.fade_on_pause_resume {
+        c.pause_fade_in_progress = false;
+    }
     Ok(())
 }
 
