@@ -214,3 +214,21 @@ class AndroidTrackMetadataUpdate {
     }
   }
 }
+
+/// A batch item for updating one track's Android metadata.
+class AndroidTrackMetadataUpdateRequest {
+  const AndroidTrackMetadataUpdateRequest({
+    required this.path,
+    required this.metadata,
+    this.fallbackMediaUri,
+  });
+
+  /// File path or content URI for the track to update.
+  final String path;
+
+  /// The metadata payload to write.
+  final AndroidTrackMetadataUpdate metadata;
+
+  /// Optional fallback media URI used by Android-native metadata writers.
+  final String? fallbackMediaUri;
+}

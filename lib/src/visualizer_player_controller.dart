@@ -407,21 +407,34 @@ class AudioCoreController extends ChangeNotifier
   List<double> getEqualizerBandCenters({int? bandCount}) =>
       equalizer.getBandCenters(bandCount: bandCount);
 
-  /// Updates the metadata of a given track using the provided [updateCallback].
-  ///
-  /// If the track is currently playing, it will call the engine's synchronization
-  /// methods to release file handles before writing.
-  Future<bool> updateMetadata(
-    AudioTrack track,
-    void Function(ParserTag metadata) updateCallback,
-  ) async {
-    final fallbackMediaUri = track.metadataValue<String>('mediaUri');
-    final path = track.metadataValue<String>('filePath')?.trim().isNotEmpty == true
-        ? track.metadataValue<String>('filePath')!
-        : (track.metadataValue<String>('mediaUri') ?? track.uri);
-    final isAndroidContentUri =
-        Platform.isAndroid && path.startsWith('content://');
-    final file = isAndroidContentUri ? null : File(path);
+  String _resolveTrackPath(AudioTrack track) {
+    final filePath = track.metadataValue<String>('filePath');
+    final mediaUri = track.metadataValue<String>('mediaUri');
+    if (filePath?.trim().isNotEmpty == true) {
+      return filePath!;
+    }
+    return mediaUri ?? track.uri;
+  }
+
+  Future<bool> _updateMetadataAtPath({
+    required String path,
+    String? fallbackMediaUri,
+    void Function(ParserTag metadata)? updateCallback,
+    AndroidTrackMetadataUpdate? androidUpdate,
+    bool managePlaybackSync = true,
+  }) async {
+    if (updateCallback != null && androidUpdate != null) {
+      throw ArgumentError(
+        'Provide either updateCallback or androidUpdate, not both.',
+      );
+    }
+    if (updateCallback == null && androidUpdate == null) {
+      throw ArgumentError(
+        'Either updateCallback or androidUpdate must be provided.',
+      );
+    }
+
+    final file = path.startsWith('content://') ? null : File(path);
     if (file != null && !file.existsSync()) {
       debugPrint('updateMetadata: File does not exist: $path');
       return false;
@@ -429,47 +442,73 @@ class AudioCoreController extends ChangeNotifier
 
     final isCurrentTrack = player.currentPath == path;
     final fileSize = file?.lengthSync() ?? 0;
-    // On Android, we release the active player before writing and restore it after.
-    // On other platforms (Windows), only files >= 60MB need this because smaller
-    // files are loaded into memory by the Rust engine.
     final needsSync =
         isCurrentTrack && (Platform.isAndroid || fileSize >= 60 * 1024 * 1024);
 
     try {
-      if (needsSync) {
+      if (managePlaybackSync && needsSync) {
         await _engine.prepareForFileWrite();
-        // Give the OS a moment to release the handle
         await Future.delayed(const Duration(milliseconds: 200));
       }
 
       if (Platform.isAndroid) {
-        if (file == null) {
-          throw StateError(
-            'Android content URI metadata updates should use updateAndroidMetadata.',
+        if (androidUpdate != null) {
+          final success = await _engine.updateTrackMetadata(
+            path: path,
+            metadata: <String, Object?>{
+              ...androidUpdate.toMap(),
+              'fallbackMediaUri': fallbackMediaUri,
+            },
           );
-        }
-        final metadata = amr.readAllMetadata(file);
-        updateCallback(metadata);
+          if (!success) {
+            throw StateError('Android native metadata update failed.');
+          }
+        } else {
+          if (file == null) {
+            throw StateError(
+              'Android content URI metadata updates should use Android metadata payloads.',
+            );
+          }
+          final metadata = amr.readAllMetadata(file);
+          if (updateCallback == null) {
+            throw ArgumentError(
+              'updateCallback is required when androidUpdate is not provided.',
+            );
+          }
+          updateCallback(metadata);
 
-        final nativeUpdate = AndroidTrackMetadataUpdate.fromParserTag(metadata);
-        final success = await _engine.updateTrackMetadata(
-          path: path,
-          metadata: <String, Object?>{
-            ...nativeUpdate.toMap(),
-            'fallbackMediaUri': fallbackMediaUri,
-          },
-        );
-        if (!success) {
-          throw StateError('Android native metadata update failed.');
+          final nativeUpdate = AndroidTrackMetadataUpdate.fromParserTag(
+            metadata,
+          );
+          final success = await _engine.updateTrackMetadata(
+            path: path,
+            metadata: <String, Object?>{
+              ...nativeUpdate.toMap(),
+              'fallbackMediaUri': fallbackMediaUri,
+            },
+          );
+          if (!success) {
+            throw StateError('Android native metadata update failed.');
+          }
         }
       } else {
+        if (androidUpdate != null) {
+          throw UnsupportedError(
+            'Android metadata payloads are only supported on Android.',
+          );
+        }
         if (file == null) {
           throw StateError('File path is not available for metadata updates.');
+        }
+        if (updateCallback == null) {
+          throw ArgumentError(
+            'updateCallback is required for non-Android metadata updates.',
+          );
         }
         amr.updateMetadata(file, updateCallback);
       }
 
-      if (needsSync) {
+      if (managePlaybackSync && needsSync) {
         await _engine.finishFileWrite();
       }
 
@@ -479,61 +518,75 @@ class AudioCoreController extends ChangeNotifier
       debugPrint('updateMetadata failed: $e');
       player.setError('Metadata update failed: $e');
 
-      // Try to restore playback state even if failed
-      if (needsSync) {
+      if (managePlaybackSync && needsSync) {
         await _engine.finishFileWrite().catchError((_) {});
       }
       return false;
     }
   }
 
-  Future<bool> updateAndroidMetadata(
-    AudioTrack track,
-    AndroidTrackMetadataUpdate update,
-  ) async {
-    if (!Platform.isAndroid) {
-      throw UnsupportedError(
-        'updateAndroidMetadata is only supported on Android.',
-      );
-    }
-
+  /// Updates the metadata of a given track.
+  ///
+  /// Use [updateCallback] to edit metadata in-place for cross-platform file tags.
+  /// Use [androidUpdate] to write Android-native metadata directly.
+  ///
+  /// If the track is currently playing, it will call the engine's synchronization
+  /// methods to release file handles before writing.
+  Future<bool> updateMetadata(
+    AudioTrack track, {
+    void Function(ParserTag metadata)? updateCallback,
+    AndroidTrackMetadataUpdate? androidUpdate,
+  }) async {
+    final path = _resolveTrackPath(track);
     final fallbackMediaUri = track.metadataValue<String>('mediaUri');
-    final path = track.metadataValue<String>('filePath')?.trim().isNotEmpty == true
-        ? track.metadataValue<String>('filePath')!
-        : (track.metadataValue<String>('mediaUri') ?? track.uri);
+    return _updateMetadataAtPath(
+      path: path,
+      fallbackMediaUri: fallbackMediaUri,
+      updateCallback: updateCallback,
+      androidUpdate: androidUpdate,
+    );
+  }
 
-    final isCurrentTrack = player.currentPath == path;
+  /// Updates metadata for multiple Android tracks in sequence.
+  Future<List<bool>> updateMetadataBatch(
+    List<AndroidTrackMetadataUpdateRequest> updates,
+  ) async {
+    final results = <bool>[];
+    final needsSync = updates.any((update) {
+      if (player.currentPath != update.path) {
+        return false;
+      }
+      if (Platform.isAndroid) {
+        return true;
+      }
+      final file = File(update.path);
+      return file.existsSync() && file.lengthSync() >= 60 * 1024 * 1024;
+    });
 
+    var preparedForWrite = false;
     try {
-      if (isCurrentTrack) {
+      if (needsSync) {
         await _engine.prepareForFileWrite();
         await Future.delayed(const Duration(milliseconds: 200));
+        preparedForWrite = true;
       }
 
-      final success = await _engine.updateTrackMetadata(
-        path: path,
-        metadata: <String, Object?>{
-          ...update.toMap(),
-          'fallbackMediaUri': fallbackMediaUri,
-        },
-      );
-      if (!success) {
-        throw StateError('Android native metadata update failed.');
+      for (final update in updates) {
+        results.add(
+          await _updateMetadataAtPath(
+            path: update.path,
+            fallbackMediaUri: update.fallbackMediaUri,
+            androidUpdate: update.metadata,
+            managePlaybackSync: false,
+          ),
+        );
       }
 
-      if (isCurrentTrack) {
-        await _engine.finishFileWrite();
-      }
-
-      notifyListeners();
-      return true;
-    } catch (e) {
-      debugPrint('updateAndroidMetadata failed: $e');
-      player.setError('Metadata update failed: $e');
-      if (isCurrentTrack) {
+      return results;
+    } finally {
+      if (preparedForWrite) {
         await _engine.finishFileWrite().catchError((_) {});
       }
-      return false;
     }
   }
 }
