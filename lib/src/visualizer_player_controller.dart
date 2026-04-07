@@ -248,7 +248,11 @@ class AudioCoreController extends ChangeNotifier
   void notifyListeners() => super.notifyListeners();
 
   @override
-  Future<void> loadTrack({required bool autoPlay, Duration? position}) async {
+  Future<void> loadTrack({
+    required bool autoPlay,
+    Duration? position,
+    PlaybackReason reason = PlaybackReason.playlistChanged,
+  }) async {
     final track = playlist.currentTrack;
     if (track == null) return;
 
@@ -256,6 +260,7 @@ class AudioCoreController extends ChangeNotifier
       uri: track.uri,
       autoPlay: autoPlay,
       position: position,
+      reason: reason,
       onStateChanged: (progressing) {
         _isTransitioning = progressing;
         notifyListeners();
@@ -337,7 +342,7 @@ class AudioCoreController extends ChangeNotifier
     }
 
     if (playlist.mode == PlaylistMode.singleLoop) {
-      await loadTrack(autoPlay: true);
+      await loadTrack(autoPlay: true, reason: PlaybackReason.autoNext);
       return;
     }
 

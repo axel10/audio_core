@@ -11,7 +11,6 @@ class AndroidAudioEngine implements AudioEngine {
   final _statusController = StreamController<AudioStatus>.broadcast();
   String? _currentPath;
   double _currentVolume = 1.0;
-  FadeSettings _fadeSettings = const FadeSettings();
   final String _activePlayerId = 'main';
   EqualizerConfig? _lastConfig;
   bool _isPlaying = false;
@@ -76,7 +75,7 @@ class AndroidAudioEngine implements AudioEngine {
       'url': path,
       'playerId': _activePlayerId,
     });
-    if (_fadeSettings.fadeOnSwitch) {
+    if (duration > Duration.zero) {
       await _channel.invokeMethod('play', {
         'playerId': _activePlayerId,
         'fadeDurationMs': duration.inMilliseconds,
@@ -88,11 +87,11 @@ class AndroidAudioEngine implements AudioEngine {
   }
 
   @override
-  Future<void> play() async {
-    if (_fadeSettings.fadeOnPauseResume) {
+  Future<void> play({Duration? fadeDuration}) async {
+    if (fadeDuration != null && fadeDuration > Duration.zero) {
       await _channel.invokeMethod('play', {
         'playerId': _activePlayerId,
-        'fadeDurationMs': _fadeSettings.duration.inMilliseconds,
+        'fadeDurationMs': fadeDuration.inMilliseconds,
         'targetVolume': _currentVolume,
       });
     } else {
@@ -101,11 +100,11 @@ class AndroidAudioEngine implements AudioEngine {
   }
 
   @override
-  Future<void> pause() async {
-    if (_fadeSettings.fadeOnPauseResume) {
+  Future<void> pause({Duration? fadeDuration}) async {
+    if (fadeDuration != null && fadeDuration > Duration.zero) {
       await _channel.invokeMethod('pause', {
         'playerId': _activePlayerId,
-        'fadeDurationMs': _fadeSettings.duration.inMilliseconds,
+        'fadeDurationMs': fadeDuration.inMilliseconds,
       });
     } else {
       await _channel.invokeMethod('pause', {'playerId': _activePlayerId});
@@ -217,9 +216,7 @@ class AndroidAudioEngine implements AudioEngine {
   bool get supportsCrossfade => true;
 
   @override
-  Future<void> setFadeSettings(FadeSettings settings) async {
-    _fadeSettings = settings;
-  }
+  Future<void> setFadeSettings(FadeSettings settings) async {}
 
   @override
   Future<String?> extractFingerprint(String path) async {

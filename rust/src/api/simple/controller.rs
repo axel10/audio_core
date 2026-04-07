@@ -722,7 +722,7 @@ pub fn crossfade_to_audio_file(path: String, duration_ms: i64) -> Result<(), Str
     c.start_crossfade(&path, duration)
 }
 
-pub fn play_audio() -> Result<(), String> {
+pub fn play_audio(fade_duration_ms: i64) -> Result<(), String> {
     let mut c = controller()
         .lock()
         .map_err(|_| "player lock poisoned".to_string())?;
@@ -731,8 +731,8 @@ pub fn play_audio() -> Result<(), String> {
     }
 
     c.pause_fade_in_progress = false;
-    if c.fade_settings.fade_on_pause_resume {
-        let duration = Duration::from_millis(c.fade_settings.duration_ms.max(0) as u64);
+    let duration = Duration::from_millis(fade_duration_ms.max(0) as u64);
+    if !duration.is_zero() {
         let master_volume = c.volume;
         c.play_all();
         if let Some(deck) = c.current_deck.as_mut() {
@@ -746,7 +746,7 @@ pub fn play_audio() -> Result<(), String> {
     Ok(())
 }
 
-pub fn pause_audio() -> Result<(), String> {
+pub fn pause_audio(fade_duration_ms: i64) -> Result<(), String> {
     let mut c = controller()
         .lock()
         .map_err(|_| "player lock poisoned".to_string())?;
@@ -754,9 +754,9 @@ pub fn pause_audio() -> Result<(), String> {
         return Err("player is not initialized".to_string());
     }
 
-    if c.fade_settings.fade_on_pause_resume {
+    let duration = Duration::from_millis(fade_duration_ms.max(0) as u64);
+    if !duration.is_zero() {
         c.pause_fade_in_progress = true;
-        let duration = Duration::from_millis(c.fade_settings.duration_ms.max(0) as u64);
         c.start_volume_fade(1.0, 0.0, duration, true);
     } else {
         c.pause_fade_in_progress = false;

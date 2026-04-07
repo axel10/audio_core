@@ -12,7 +12,11 @@ abstract class AudioVisualizerParent {
   AudioEngine get engine;
 
   /// Called when a track needs to be loaded (e.g., from playlist navigation).
-  Future<void> loadTrack({required bool autoPlay, Duration? position});
+  Future<void> loadTrack({
+    required bool autoPlay,
+    Duration? position,
+    PlaybackReason reason,
+  });
 
   /// Called when playback should be cleared.
   Future<void> clearPlayback();

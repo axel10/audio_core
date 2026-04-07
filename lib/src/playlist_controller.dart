@@ -120,7 +120,10 @@ class PlaylistController extends ChangeNotifier {
     final oldTrack = currentTrack;
     final isSamePlaylist = _activePlaylistId == id;
     if (isSamePlaylist && _currentIndex == startIndex) {
-      await _parent.loadTrack(autoPlay: autoPlay);
+      await _parent.loadTrack(
+        autoPlay: autoPlay,
+        reason: PlaybackReason.playlistChanged,
+      );
       return;
     }
 
@@ -248,7 +251,10 @@ class PlaylistController extends ChangeNotifier {
       if (current != null &&
           current.id == track.id &&
           current.uri != track.uri) {
-        await _parent.loadTrack(autoPlay: false);
+        await _parent.loadTrack(
+          autoPlay: false,
+          reason: PlaybackReason.playlistChanged,
+        );
       }
       notifyListeners();
     }
@@ -262,6 +268,7 @@ class PlaylistController extends ChangeNotifier {
     await _reconcile(
       oldTrack: oldTrack,
       autoPlay: reason != PlaybackReason.playlistChanged,
+      reason: reason,
     );
     return true;
   }
@@ -273,7 +280,11 @@ class PlaylistController extends ChangeNotifier {
     final resolution = _resolveAdjacentIndex(next: false);
     if (resolution == null) {
       if (_randomManager.policy != null && currentTrack != null) {
-        await _parent.loadTrack(autoPlay: true, position: Duration.zero);
+        await _parent.loadTrack(
+          autoPlay: true,
+          position: Duration.zero,
+          reason: reason,
+        );
         return true;
       }
       return false;
@@ -282,6 +293,7 @@ class PlaylistController extends ChangeNotifier {
     await _reconcile(
       oldTrack: oldTrack,
       autoPlay: reason != PlaybackReason.playlistChanged,
+      reason: reason,
     );
     return true;
   }
@@ -425,8 +437,9 @@ class PlaylistController extends ChangeNotifier {
   // --- Internal ---
 
   int? _resolveAdjacentIndex({required bool next, bool peek = false}) {
-    if (_activePlaylistTracks.isEmpty || _playlistMode == PlaylistMode.single)
+    if (_activePlaylistTracks.isEmpty || _playlistMode == PlaylistMode.single) {
       return null;
+    }
     if (_playlistMode == PlaylistMode.singleLoop) return _currentIndex ?? 0;
 
     if (_randomManager.policy != null) {
@@ -455,15 +468,17 @@ class PlaylistController extends ChangeNotifier {
     if (next) {
       if (cursor < _playOrder.length - 1) return _playOrder[cursor + 1];
       if (_playlistMode == PlaylistMode.queueLoop ||
-          _playlistMode == PlaylistMode.autoQueueLoop)
+          _playlistMode == PlaylistMode.autoQueueLoop) {
         return _playOrder[0];
+      }
       return null;
     }
 
     if (cursor > 0) return _playOrder[cursor - 1];
     if (_playlistMode == PlaylistMode.queueLoop ||
-        _playlistMode == PlaylistMode.autoQueueLoop)
+        _playlistMode == PlaylistMode.autoQueueLoop) {
       return _playOrder.last;
+    }
     return null;
   }
 
@@ -490,6 +505,7 @@ class PlaylistController extends ChangeNotifier {
     bool forceLoad = false,
     bool autoPlay = false,
     AudioTrack? oldTrack,
+    PlaybackReason reason = PlaybackReason.playlistChanged,
   }) async {
     _rebuildPlayOrder();
     _reconcileRandom();
@@ -506,7 +522,7 @@ class PlaylistController extends ChangeNotifier {
     }
 
     if (shouldLoad && track != null) {
-      await _parent.loadTrack(autoPlay: autoPlay);
+      await _parent.loadTrack(autoPlay: autoPlay, reason: reason);
     } else if (oldTrack != null && track == null) {
       await _parent.clearPlayback();
     }

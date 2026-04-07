@@ -130,9 +130,13 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiSimpleControllerLoadAudioFile({required String path});
 
-  Future<void> crateApiSimpleControllerPauseAudio();
+  Future<void> crateApiSimpleControllerPauseAudio({
+    required PlatformInt64 fadeDurationMs,
+  });
 
-  Future<void> crateApiSimpleControllerPlayAudio();
+  Future<void> crateApiSimpleControllerPlayAudio({
+    required PlatformInt64 fadeDurationMs,
+  });
 
   Future<void> crateApiSimpleControllerPrepareForFileWrite();
 
@@ -722,11 +726,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "load_audio_file", argNames: ["path"]);
 
   @override
-  Future<void> crateApiSimpleControllerPauseAudio() {
+  Future<void> crateApiSimpleControllerPauseAudio({
+    required PlatformInt64 fadeDurationMs,
+  }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(fadeDurationMs, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -739,21 +746,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiSimpleControllerPauseAudioConstMeta,
-        argValues: [],
+        argValues: [fadeDurationMs],
         apiImpl: this,
       ),
     );
   }
 
   TaskConstMeta get kCrateApiSimpleControllerPauseAudioConstMeta =>
-      const TaskConstMeta(debugName: "pause_audio", argNames: []);
+      const TaskConstMeta(
+        debugName: "pause_audio",
+        argNames: ["fadeDurationMs"],
+      );
 
   @override
-  Future<void> crateApiSimpleControllerPlayAudio() {
+  Future<void> crateApiSimpleControllerPlayAudio({
+    required PlatformInt64 fadeDurationMs,
+  }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(fadeDurationMs, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -766,14 +779,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiSimpleControllerPlayAudioConstMeta,
-        argValues: [],
+        argValues: [fadeDurationMs],
         apiImpl: this,
       ),
     );
   }
 
   TaskConstMeta get kCrateApiSimpleControllerPlayAudioConstMeta =>
-      const TaskConstMeta(debugName: "play_audio", argNames: []);
+      const TaskConstMeta(
+        debugName: "play_audio",
+        argNames: ["fadeDurationMs"],
+      );
 
   @override
   Future<void> crateApiSimpleControllerPrepareForFileWrite() {

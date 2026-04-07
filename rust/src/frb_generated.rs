@@ -713,10 +713,12 @@ fn wire__crate__api__simple__controller__pause_audio_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_fade_duration_ms = <i64>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::api::simple::controller::pause_audio()?;
+                    let output_ok =
+                        crate::api::simple::controller::pause_audio(api_fade_duration_ms)?;
                     Ok(output_ok)
                 })())
             }
@@ -745,10 +747,12 @@ fn wire__crate__api__simple__controller__play_audio_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_fade_duration_ms = <i64>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::api::simple::controller::play_audio()?;
+                    let output_ok =
+                        crate::api::simple::controller::play_audio(api_fade_duration_ms)?;
                     Ok(output_ok)
                 })())
             }

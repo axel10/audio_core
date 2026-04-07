@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'player_models.dart';
+import 'playlist_models.dart';
 
 /// Manages the actual audio engine session and transitions.
 class PlayerController extends ChangeNotifier {
@@ -47,18 +48,24 @@ class PlayerController extends ChangeNotifier {
     required String uri,
     required bool autoPlay,
     Duration? position,
+    required PlaybackReason reason,
     required void Function(bool progressing) onStateChanged,
   }) async {
     final isAutoTransition = _playerState == PlayerState.completed;
     final switchingTracks = _selectedPath != null && _selectedPath != uri;
+    final isActivelyPlaying = _isPlaying && _playerState == PlayerState.playing;
+    final shouldFade =
+        switchingTracks &&
+        !isAutoTransition &&
+        _fadeSettings.fadeOnSwitch &&
+        _fadeSettings.duration > Duration.zero &&
+        (reason == PlaybackReason.user || (autoPlay && isActivelyPlaying));
 
     PlaybackTransition strategy = const ImmediateTransition();
 
-    if (switchingTracks &&
-        !isAutoTransition &&
-        _fadeSettings.fadeOnSwitch &&
-        _fadeSettings.duration > Duration.zero) {
-      if (_fadeSettings.mode == FadeMode.crossfade &&
+    if (shouldFade) {
+      if (isActivelyPlaying &&
+          _fadeSettings.mode == FadeMode.crossfade &&
           _parent.engine.supportsCrossfade) {
         strategy = NativeCrossfadeTransition(duration: _fadeSettings.duration);
       } else {
@@ -108,7 +115,7 @@ class PlayerController extends ChangeNotifier {
       _lastCommandTime = DateTime.now();
       _isPlaying = false;
       _playerState = PlayerState.ready;
-      
+
       _onTrackChanged(path);
     } catch (e) {
       setError('Load failed: $e');
@@ -121,7 +128,7 @@ class PlayerController extends ChangeNotifier {
       _lastFingerprint = null;
       return;
     }
-    
+
     // Fetch fingerprint in background
     _lastFingerprint = null;
     // _parent.engine.extractFingerprint(path).then((value) {
@@ -142,9 +149,12 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  Future<void> pause() async {
+  Future<void> pause({bool withFade = true}) async {
     try {
-      await _parent.engine.pause();
+      final fadeDuration = _pauseResumeFadeDuration(
+        withFade: withFade && _isPlaying,
+      );
+      await _parent.engine.pause(fadeDuration: fadeDuration);
       _lastCommandTime = DateTime.now();
       _isPlaying = false;
       _playerState = PlayerState.paused;
@@ -154,7 +164,7 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> play() async {
+  Future<void> play({bool withFade = true}) async {
     if (_selectedPath == null) return;
 
     if (_playerState == PlayerState.completed) {
@@ -163,11 +173,14 @@ class PlayerController extends ChangeNotifier {
     }
 
     try {
+      final wasPaused = _playerState == PlayerState.paused;
       if (_playerState == PlayerState.completed) {
         await seek(Duration.zero);
       }
 
-      await _parent.engine.play();
+      await _parent.engine.play(
+        fadeDuration: _pauseResumeFadeDuration(withFade: withFade && wasPaused),
+      );
       _lastCommandTime = DateTime.now();
       _isPlaying = true;
       _playerState = PlayerState.playing;
@@ -199,8 +212,13 @@ class PlayerController extends ChangeNotifier {
 
   void setFadeSettings(FadeSettings settings) {
     _fadeSettings = settings;
-    unawaited(_parent.engine.setFadeSettings(settings));
     notifyListeners();
+  }
+
+  Duration? _pauseResumeFadeDuration({required bool withFade}) {
+    if (!withFade || !_fadeSettings.fadeOnPauseResume) return null;
+    if (_fadeSettings.duration <= Duration.zero) return null;
+    return _fadeSettings.duration;
   }
 
   @internal
@@ -411,7 +429,7 @@ class SequentialFadeTransition extends PlaybackTransition {
     if (autoPlay) {
       player.setFadeActive(true);
       try {
-        await player.play();
+        await player.play(withFade: false);
         await player.fadeNativeVolume(
           from: 0.0,
           to: targetVolume,
@@ -438,7 +456,7 @@ class ImmediateTransition extends PlaybackTransition {
     player.nextFadeSequence();
     await player.load(uri);
     if (position != null) await player.seek(position);
-    if (autoPlay) await player.play();
+    if (autoPlay) await player.play(withFade: false);
   }
 }
 

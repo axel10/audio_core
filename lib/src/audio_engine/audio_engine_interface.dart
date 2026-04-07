@@ -27,8 +27,8 @@ abstract class AudioEngine {
 
   Future<void> load(String path);
   Future<void> crossfade(String path, Duration duration);
-  Future<void> play();
-  Future<void> pause();
+  Future<void> play({Duration? fadeDuration});
+  Future<void> pause({Duration? fadeDuration});
   Future<void> seek(Duration position);
   Future<void> setVolume(double volume);
 

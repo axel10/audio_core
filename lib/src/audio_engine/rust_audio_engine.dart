@@ -43,10 +43,12 @@ class RustAudioEngine implements AudioEngine {
       .crossfadeToAudioFile(path: path, durationMs: duration.inMilliseconds);
 
   @override
-  Future<void> play() => rust.playAudio();
+  Future<void> play({Duration? fadeDuration}) =>
+      rust.playAudio(fadeDurationMs: fadeDuration?.inMilliseconds ?? 0);
 
   @override
-  Future<void> pause() => rust.pauseAudio();
+  Future<void> pause({Duration? fadeDuration}) =>
+      rust.pauseAudio(fadeDurationMs: fadeDuration?.inMilliseconds ?? 0);
 
   @override
   Future<void> seek(Duration position) =>
@@ -99,19 +101,7 @@ class RustAudioEngine implements AudioEngine {
   bool get supportsCrossfade => true;
 
   @override
-  Future<void> setFadeSettings(FadeSettings settings) async {
-    // Map our shared model to the Rust-generated model
-    await rust.setAudioFadeSettings(
-      settings: rust.FadeSettings(
-        fadeOnSwitch: settings.fadeOnSwitch,
-        fadeOnPauseResume: settings.fadeOnPauseResume,
-        durationMs: settings.duration.inMilliseconds.toInt(),
-        mode: settings.mode == FadeMode.crossfade
-            ? rust.FadeMode.crossfade
-            : rust.FadeMode.sequential,
-      ),
-    );
-  }
+  Future<void> setFadeSettings(FadeSettings settings) async {}
 
   @override
   Future<String?> extractFingerprint(String path) async {

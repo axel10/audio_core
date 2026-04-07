@@ -28,11 +28,15 @@ Future<void> crossfadeToAudioFile({
   durationMs: durationMs,
 );
 
-Future<void> playAudio() =>
-    RustLib.instance.api.crateApiSimpleControllerPlayAudio();
+Future<void> playAudio({required PlatformInt64 fadeDurationMs}) => RustLib
+    .instance
+    .api
+    .crateApiSimpleControllerPlayAudio(fadeDurationMs: fadeDurationMs);
 
-Future<void> pauseAudio() =>
-    RustLib.instance.api.crateApiSimpleControllerPauseAudio();
+Future<void> pauseAudio({required PlatformInt64 fadeDurationMs}) => RustLib
+    .instance
+    .api
+    .crateApiSimpleControllerPauseAudio(fadeDurationMs: fadeDurationMs);
 
 Future<void> setAudioFadeSettings({required FadeSettings settings}) => RustLib
     .instance
