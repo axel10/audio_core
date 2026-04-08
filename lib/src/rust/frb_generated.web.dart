@@ -43,9 +43,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   EqualizerConfig dco_decode_box_autoadd_equalizer_config(dynamic raw);
 
   @protected
-  FadeSettings dco_decode_box_autoadd_fade_settings(dynamic raw);
-
-  @protected
   int dco_decode_box_autoadd_i_32(dynamic raw);
 
   @protected
@@ -121,11 +118,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   EqualizerConfig sse_decode_box_autoadd_equalizer_config(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  FadeSettings sse_decode_box_autoadd_fade_settings(
     SseDeserializer deserializer,
   );
 
@@ -216,12 +208,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_equalizer_config(
     EqualizerConfig self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_box_autoadd_fade_settings(
-    FadeSettings self,
     SseSerializer serializer,
   );
 

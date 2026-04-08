@@ -1,6 +1,5 @@
 import 'dart:async';
 import '../rust/api/simple/equalizer.dart';
-import '../player_models.dart';
 
 /// Define a unified status update for all platforms.
 class AudioStatus {
@@ -49,7 +48,6 @@ abstract class AudioEngine {
 
   // Platform specific features (optional or capabilities-based)
   bool get supportsCrossfade;
-  Future<void> setFadeSettings(FadeSettings settings);
 
   // Audio Fingerprinting
   Future<String?> extractFingerprint(String path);

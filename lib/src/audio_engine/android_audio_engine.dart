@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import '../rust/api/simple/equalizer.dart';
-import '../player_models.dart';
 import 'audio_engine_interface.dart';
 
 class AndroidAudioEngine implements AudioEngine {
@@ -214,9 +213,6 @@ class AndroidAudioEngine implements AudioEngine {
 
   @override
   bool get supportsCrossfade => true;
-
-  @override
-  Future<void> setFadeSettings(FadeSettings settings) async {}
 
   @override
   Future<String?> extractFingerprint(String path) async {

@@ -38,11 +38,6 @@ Future<void> pauseAudio({required PlatformInt64 fadeDurationMs}) => RustLib
     .api
     .crateApiSimpleControllerPauseAudio(fadeDurationMs: fadeDurationMs);
 
-Future<void> setAudioFadeSettings({required FadeSettings settings}) => RustLib
-    .instance
-    .api
-    .crateApiSimpleControllerSetAudioFadeSettings(settings: settings);
-
 Future<bool> toggleAudio() =>
     RustLib.instance.api.crateApiSimpleControllerToggleAudio();
 

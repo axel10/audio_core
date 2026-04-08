@@ -103,7 +103,6 @@ struct PlayerController {
     incoming_deck: Option<PlaybackDeck>,
     equalizer: Arc<EqualizerShared>,
     volume: f32,
-    fade_settings: FadeSettings,
     transition_generation: u64,
     volume_fade_generation: u64,
     cached_path: Option<String>,
@@ -130,7 +129,6 @@ impl PlayerController {
             incoming_deck: None,
             equalizer: EqualizerShared::new(EqualizerConfig::default()),
             volume: 1.0,
-            fade_settings: FadeSettings::default(),
             transition_generation: 0,
             volume_fade_generation: 0,
             cached_path: None,
@@ -761,17 +759,6 @@ pub fn pause_audio(fade_duration_ms: i64) -> Result<(), String> {
     } else {
         c.pause_fade_in_progress = false;
         c.pause_all();
-    }
-    Ok(())
-}
-
-pub fn set_audio_fade_settings(settings: FadeSettings) -> Result<(), String> {
-    let mut c = controller()
-        .lock()
-        .map_err(|_| "player lock poisoned".to_string())?;
-    c.fade_settings = settings;
-    if !settings.fade_on_pause_resume {
-        c.pause_fade_in_progress = false;
     }
     Ok(())
 }
