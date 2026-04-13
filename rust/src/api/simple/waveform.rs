@@ -15,37 +15,126 @@ pub struct WaveformChunk {
     pub peak: f32,
 }
 
-fn fold_packet_peaks_to_chunks(
-    packet_peaks: &[(u64, f32)],
+// A slightly contrasty curve keeps very loud songs from turning into a flat block.
+const DISPLAY_GAMMA: f32 = 1.08;
+const DISPLAY_FLOOR: f32 = 0.04;
+const EPSILON: f32 = 1.0e-6;
+const DISPLAY_SCALE_QUANTILE: f32 = 0.92;
+
+fn time_to_chunk(ts: u64, total_ts: u64, expected_chunks: usize) -> usize {
+    if expected_chunks == 0 || total_ts == 0 {
+        return 0;
+    }
+
+    let idx = ((ts as u128 * expected_chunks as u128) / total_ts as u128) as usize;
+    idx.min(expected_chunks.saturating_sub(1))
+}
+
+fn chunk_bounds(chunk: usize, total_ts: u64, expected_chunks: usize) -> (u64, u64) {
+    if expected_chunks == 0 || total_ts == 0 {
+        return (0, 0);
+    }
+
+    let start = ((chunk as u128 * total_ts as u128) / expected_chunks as u128) as u64;
+    let end =
+        (((chunk.saturating_add(1)) as u128 * total_ts as u128) / expected_chunks as u128) as u64;
+    (start, end)
+}
+
+fn normalize_waveform_levels(waveform: &mut [f32]) {
+    let mut positive_values: Vec<f32> = waveform
+        .iter()
+        .copied()
+        .filter(|value| *value > EPSILON)
+        .collect();
+    if positive_values.is_empty() {
+        return;
+    }
+
+    positive_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let scale_index =
+        ((positive_values.len() as f32 * DISPLAY_SCALE_QUANTILE).floor() as usize)
+            .min(positive_values.len().saturating_sub(1));
+    let scale = positive_values[scale_index].max(EPSILON);
+
+    for value in waveform.iter_mut() {
+        if *value <= 0.0 {
+            continue;
+        }
+
+        let normalized = (*value / scale).clamp(0.0, 1.0);
+        let compressed = normalized.powf(DISPLAY_GAMMA);
+        *value = (DISPLAY_FLOOR + (1.0 - DISPLAY_FLOOR) * compressed).min(1.0);
+    }
+}
+
+fn fold_packet_energy_to_chunks(
+    packet_energies: &[(u64, u64, f32)],
     expected_chunks: usize,
     total_ts: Option<u64>,
 ) -> Vec<f32> {
     let mut waveform = vec![0.0f32; expected_chunks];
-    if packet_peaks.is_empty() {
+    if packet_energies.is_empty() {
         return waveform;
     }
 
     if let Some(ts_end) = total_ts.filter(|v| *v > 0) {
-        for (packet_end_ts, peak) in packet_peaks {
-            let ts = packet_end_ts.saturating_sub(1);
-            let idx = ((ts as u128 * expected_chunks as u128) / ts_end as u128) as usize;
-            let chunk = idx.min(expected_chunks.saturating_sub(1));
-            if *peak > waveform[chunk] {
-                waveform[chunk] = *peak;
+        for (packet_start_ts, packet_end_ts, energy) in packet_energies {
+            let packet_start = (*packet_start_ts).min(ts_end);
+            let packet_end = (*packet_end_ts).min(ts_end).max(packet_start);
+            if packet_end <= packet_start {
+                continue;
+            }
+
+            let first_chunk = time_to_chunk(packet_start, ts_end, expected_chunks);
+            let last_chunk = time_to_chunk(packet_end.saturating_sub(1), ts_end, expected_chunks);
+
+            for chunk in first_chunk..=last_chunk {
+                let (chunk_start, chunk_end) = chunk_bounds(chunk, ts_end, expected_chunks);
+                let overlap_start = packet_start.max(chunk_start);
+                let overlap_end = packet_end.min(chunk_end);
+
+                if overlap_end > overlap_start {
+                    waveform[chunk] = waveform[chunk].max(*energy);
+                }
             }
         }
-        return waveform;
-    }
-
-    let packet_count = packet_peaks.len().max(1);
-    for (i, (_, peak)) in packet_peaks.iter().enumerate() {
-        let idx = (i * expected_chunks) / packet_count;
-        let chunk = idx.min(expected_chunks.saturating_sub(1));
-        if *peak > waveform[chunk] {
-            waveform[chunk] = *peak;
+    } else {
+        let packet_count = packet_energies.len().max(1);
+        for (i, (_, _, energy)) in packet_energies.iter().enumerate() {
+            let idx = (i * expected_chunks) / packet_count;
+            let chunk = idx.min(expected_chunks.saturating_sub(1));
+            waveform[chunk] = waveform[chunk].max(*energy);
         }
     }
+
+    normalize_waveform_levels(&mut waveform);
     waveform
+}
+
+fn compute_packet_envelope(samples: &[f32], sample_stride: usize) -> f32 {
+    let sample_stride = sample_stride.max(1);
+    let mut sum = 0.0f64;
+    let mut count = 0usize;
+    let mut peak = 0.0f32;
+
+    for sample in samples.iter().step_by(sample_stride) {
+        let abs_sample = sample.abs();
+        if abs_sample > peak {
+            peak = abs_sample;
+        }
+        let value = *sample as f64;
+        sum += value * value;
+        count = count.saturating_add(1);
+    }
+
+    if count == 0 {
+        0.0
+    } else {
+        let rms = (sum / count as f64).sqrt() as f32;
+        // Blend RMS with the local peak so loud compressed tracks still show shape.
+        (rms * 0.45 + peak * 0.55).clamp(0.0, 1.0)
+    }
 }
 
 fn extract_waveform_from_path(
@@ -90,9 +179,11 @@ fn extract_waveform_from_path(
         .map_err(|e| format!("create decoder failed: {}", e))?;
 
     let mut sample_buf: Option<SampleBuffer<f32>> = None;
-    let mut packet_peaks: Vec<(u64, f32)> = Vec::new();
-    let mut packet_index = 0usize;
+    let mut packet_energies: Vec<(u64, u64, f32)> = Vec::new();
     let mut max_packet_end_ts = 0u64;
+    let mut track_packet_index = 0usize;
+    let mut previous_sampled_packet_ts: Option<u64> = None;
+    let mut previous_sampled_energy: Option<f32> = None;
 
     loop {
         let packet = match format.next_packet() {
@@ -111,20 +202,15 @@ fn extract_waveform_from_path(
         let packet_dur = packet.dur();
         let packet_ts = packet.ts();
 
-        let process_this_packet = packet_index % sample_stride == 0;
-        packet_index = packet_index.saturating_add(1);
-
-        if !process_this_packet {
-            let packet_end_ts = packet_ts.saturating_add(packet_dur.max(1));
-            if packet_end_ts > max_packet_end_ts {
-                max_packet_end_ts = packet_end_ts;
-            }
-            continue;
-        }
-
         let packet_end_ts = packet_ts.saturating_add(packet_dur.max(1));
         if packet_end_ts > max_packet_end_ts {
             max_packet_end_ts = packet_end_ts;
+        }
+
+        let should_sample = track_packet_index % sample_stride == 0;
+        track_packet_index = track_packet_index.saturating_add(1);
+        if !should_sample {
+            continue;
         }
 
         let decoded = match decoder.decode(&packet) {
@@ -143,20 +229,30 @@ fn extract_waveform_from_path(
 
         if let Some(buf) = sample_buf.as_mut() {
             buf.copy_interleaved_ref(decoded);
-            let mut peak = 0.0f32;
-            for sample in buf.samples() {
-                let abs_sample = sample.abs();
-                if abs_sample > peak {
-                    peak = abs_sample;
-                }
+            let energy = compute_packet_envelope(buf.samples(), sample_stride);
+
+            if let (Some(start_ts), Some(previous_energy)) =
+                (previous_sampled_packet_ts.take(), previous_sampled_energy.take())
+            {
+                let span_end = packet_ts.max(start_ts.saturating_add(1));
+                packet_energies.push((start_ts, span_end, previous_energy));
             }
-            packet_peaks.push((packet_end_ts, peak.min(1.0)));
+
+            previous_sampled_packet_ts = Some(packet_ts);
+            previous_sampled_energy = Some(energy);
         }
     }
 
+    if let (Some(start_ts), Some(energy)) =
+        (previous_sampled_packet_ts.take(), previous_sampled_energy.take())
+    {
+        let span_end = max_packet_end_ts.max(start_ts.saturating_add(1));
+        packet_energies.push((start_ts, span_end, energy));
+    }
+
     let effective_total_ts = total_ts.or(Some(max_packet_end_ts.max(1)));
-    Ok(fold_packet_peaks_to_chunks(
-        &packet_peaks,
+    Ok(fold_packet_energy_to_chunks(
+        &packet_energies,
         expected_chunks,
         effective_total_ts,
     ))
@@ -187,4 +283,47 @@ pub fn extract_waveform_for_path(
         return Err("path is empty".to_string());
     }
     extract_waveform_from_path(&path, expected_chunks, sample_stride)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_packet_envelope_uses_sample_stride() {
+        let samples = [1.0, 0.0, 1.0, 0.0];
+
+        let envelope_full = compute_packet_envelope(&samples, 1);
+        let envelope_sparse = compute_packet_envelope(&samples, 2);
+
+        assert!((envelope_full - 0.868_2).abs() < 1e-3);
+        assert!((envelope_sparse - 1.0).abs() < 1e-5);
+        assert!(envelope_sparse > envelope_full);
+    }
+
+    #[test]
+    fn normalize_waveform_levels_spreads_loud_values() {
+        let mut waveform = vec![0.82, 0.86, 0.91, 0.95];
+
+        normalize_waveform_levels(&mut waveform);
+
+        assert!(waveform[0] <= waveform[1]);
+        assert!(waveform[1] <= waveform[2]);
+        assert!(waveform[2] <= waveform[3]);
+        assert!(waveform[0] > 0.0);
+        assert!(waveform[3] <= 1.0);
+    }
+
+    #[test]
+    fn fold_packet_energy_to_chunks_prefers_louder_half() {
+        let packets = vec![(0, 50, 0.2), (50, 100, 0.8)];
+
+        let waveform = fold_packet_energy_to_chunks(&packets, 4, Some(100));
+
+        assert_eq!(waveform.len(), 4);
+        assert!(waveform[0] <= waveform[1]);
+        assert!(waveform[1] <= waveform[2]);
+        assert!(waveform[2] <= waveform[3]);
+        assert!(waveform[0] < waveform[3]);
+    }
 }

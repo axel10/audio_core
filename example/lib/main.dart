@@ -92,7 +92,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
       GlobalKey<RandomLabTabState>();
 
   List<double> _waveform = [];
-  final int _waveformChunks = 500;
+  final int _waveformChunks = 80;
   int _waveformStride = 2;
 
   @override
