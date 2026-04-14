@@ -19,6 +19,7 @@ import 'audio_engine/android_audio_engine.dart';
 import 'audio_engine/rust_audio_engine.dart';
 import 'android_track_metadata.dart';
 import 'android_media_library.dart';
+import 'track_metadata.dart';
 
 export 'player_controller.dart';
 export 'playlist_controller.dart';
@@ -625,7 +626,7 @@ class AudioCoreController extends ChangeNotifier
   ///
   /// If [path] is omitted, this uses the currently playing track.
   /// If [path] is provided, it reads metadata from that file instead.
-  Future<Map<String, Object?>> getTrackMetadata({String? path}) async {
+  Future<TrackMetadata> getTrackMetadata({String? path}) async {
     final targetPath = _resolveMetadataPath(path);
     if (targetPath == null) {
       throw StateError('No path provided and no current track is playing.');

@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:audio_core/audio_core.dart';
 import 'package:file_picker/file_picker.dart';
@@ -15,7 +14,7 @@ class MetadataTab extends StatefulWidget {
 }
 
 class _MetadataTabState extends State<MetadataTab> {
-  Future<Map<String, Object?>>? _metadataFuture;
+  Future<TrackMetadata>? _metadataFuture;
   String? _trackKey;
 
   @override
@@ -62,11 +61,15 @@ class _MetadataTabState extends State<MetadataTab> {
     await _metadataFuture;
   }
 
-  Future<Map<String, Object?>> _loadMetadata() async {
+  Future<TrackMetadata> _loadMetadata() async {
     try {
       return await widget.controller.getTrackMetadata();
     } catch (e) {
-      return <String, Object?>{'_error': e.toString()};
+      return TrackMetadata(
+        error: e.toString(),
+        genres: const <String>[],
+        pictures: const [],
+      );
     }
   }
 
@@ -90,13 +93,14 @@ class _MetadataTabState extends State<MetadataTab> {
     final ext = result.files.single.extension?.toLowerCase();
     final mimeType = ext == 'png' ? 'image/png' : 'image/jpeg';
 
-    final metadata = await _metadataFuture ?? <String, Object?>{};
+    final metadata = await _metadataFuture ??
+        const TrackMetadata(genres: <String>[], pictures: <TrackPicture>[]);
     final success = await widget.controller.updateMetadata(
       track,
       metadata: AndroidTrackMetadataUpdate(
-        title: _asString(metadata, ['title']) ?? track.title,
-        artist: _asString(metadata, ['artist']) ?? track.artist,
-        album: _asString(metadata, ['album']) ?? track.album,
+        title: metadata.title ?? track.title,
+        artist: metadata.artist ?? track.artist,
+        album: metadata.album ?? track.album,
         pictures: [AndroidTrackPicture(bytes: bytes, mimeType: mimeType)],
       ),
     );
@@ -115,29 +119,6 @@ class _MetadataTabState extends State<MetadataTab> {
     if (success) {
       await _refresh();
     }
-  }
-
-  String? _asString(Map<String, Object?> metadata, List<String> keys) {
-    for (final key in keys) {
-      final value = metadata[key];
-      if (value == null) continue;
-      final text = value.toString().trim();
-      if (text.isNotEmpty) return text;
-    }
-    return null;
-  }
-
-  List<String> _asStringList(Object? value) {
-    if (value is List) {
-      return value.map((item) => item.toString()).toList(growable: false);
-    }
-    return const <String>[];
-  }
-
-  Uint8List? _pictureBytes(Object? value) {
-    if (value is Uint8List) return value;
-    if (value is List<int>) return Uint8List.fromList(value);
-    return null;
   }
 
   String _prettyValue(Object? value) {
@@ -223,57 +204,57 @@ class _MetadataTabState extends State<MetadataTab> {
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                   )
-                : FutureBuilder<Map<String, Object?>>(
+                : FutureBuilder<TrackMetadata>(
                     future: _metadataFuture,
                     builder: (context, snapshot) {
-                      final metadata =
-                          snapshot.data ?? const <String, Object?>{};
-                      final pictures = metadata['pictures'];
-                      final pictureList = pictures is List
-                          ? pictures.cast<Object?>()
-                          : const <Object?>[];
-                      final genres = _asStringList(metadata['genres']);
-                      final errorText = metadata['_error']?.toString();
+                      final metadata = snapshot.data ??
+                          const TrackMetadata(
+                            genres: <String>[],
+                            pictures: <TrackPicture>[],
+                          );
+                      final pictureList = metadata.pictures;
+                      final genres = metadata.genres;
+                      final errorText = metadata.error;
 
                       return ListView(
                         children: [
                           _buildSection('Track', [
                             _buildFieldRow(
                               'Title',
-                              metadata['title'] ?? track.title,
+                              metadata.title ?? track.title,
                             ),
                             _buildFieldRow(
                               'Artist',
-                              metadata['artist'] ?? track.artist,
+                              metadata.artist ?? track.artist,
                             ),
                             _buildFieldRow(
                               'Album',
-                              metadata['album'] ?? track.album,
+                              metadata.album ?? track.album,
                             ),
                             _buildFieldRow(
                               'Album Artist',
-                              metadata['albumArtist'],
+                              metadata.albumArtist,
                             ),
                             _buildFieldRow(
                               'Track No.',
-                              metadata['trackNumber'],
+                              metadata.trackNumber,
                             ),
                             _buildFieldRow(
                               'Track Total',
-                              metadata['trackTotal'],
+                              metadata.trackTotal,
                             ),
-                            _buildFieldRow('Disc No.', metadata['discNumber']),
-                            _buildFieldRow('Date', metadata['date']),
-                            _buildFieldRow('Year', metadata['year']),
+                            _buildFieldRow('Disc No.', metadata.discNumber),
+                            _buildFieldRow('Date', metadata.date),
+                            _buildFieldRow('Year', metadata.year),
                           ]),
                           _buildSection('Extra', [
-                            _buildFieldRow('Comment', metadata['comment']),
-                            _buildFieldRow('Lyrics', metadata['lyrics']),
-                            _buildFieldRow('Composer', metadata['composer']),
-                            _buildFieldRow('Lyricist', metadata['lyricist']),
-                            _buildFieldRow('Performer', metadata['performer']),
-                            _buildFieldRow('Conductor', metadata['conductor']),
-                            _buildFieldRow('Remixer', metadata['remixer']),
+                            _buildFieldRow('Comment', metadata.comment),
+                            _buildFieldRow('Lyrics', metadata.lyrics),
+                            _buildFieldRow('Composer', metadata.composer),
+                            _buildFieldRow('Lyricist', metadata.lyricist),
+                            _buildFieldRow('Performer', metadata.performer),
+                            _buildFieldRow('Conductor', metadata.conductor),
+                            _buildFieldRow('Remixer', metadata.remixer),
                             _buildFieldRow(
                               'Genres',
                               genres.isEmpty ? null : genres.join(', '),
@@ -285,62 +266,43 @@ class _MetadataTabState extends State<MetadataTab> {
                               widget.controller.player.currentPath ?? track.uri,
                             ),
                             _buildFieldRow('Track Id', track.id),
-                            _buildFieldRow(
-                              'Metadata Type',
-                              metadata['metadataType'],
-                            ),
+                            _buildFieldRow('Metadata Type', metadata.metadataType),
                           ]),
                           if (pictureList.isNotEmpty)
                             _buildSection(
                               'Pictures (${pictureList.length})',
-                              pictureList
-                                  .map((picture) {
-                                    final pictureMap = picture is Map
-                                        ? picture.cast<String, Object?>()
-                                        : const <String, Object?>{};
-                                    final bytes = _pictureBytes(
-                                      pictureMap['bytes'],
-                                    );
-                                    final mimeType = pictureMap['mimeType'];
-                                    final pictureType =
-                                        pictureMap['pictureType'];
-                                    final description =
-                                        pictureMap['description'];
-
-                                    return Padding(
-                                      padding: const EdgeInsets.only(
-                                        bottom: 16,
-                                      ),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          if (bytes != null && bytes.isNotEmpty)
-                                            ClipRRect(
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                              child: Image.memory(
-                                                bytes,
-                                                height: 180,
-                                                fit: BoxFit.cover,
-                                                width: double.infinity,
-                                                filterQuality:
-                                                    FilterQuality.low,
-                                                cacheWidth: 960,
-                                              ),
-                                            ),
-                                          const SizedBox(height: 8),
-                                          _buildFieldRow('Type', pictureType),
-                                          _buildFieldRow('Mime', mimeType),
-                                          _buildFieldRow(
-                                            'Description',
-                                            description,
+                              pictureList.map((picture) {
+                                final bytes = picture.bytes;
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 16),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      if (bytes.isNotEmpty)
+                                        ClipRRect(
+                                          borderRadius:
+                                              BorderRadius.circular(12),
+                                          child: Image.memory(
+                                            bytes,
+                                            height: 180,
+                                            fit: BoxFit.cover,
+                                            width: double.infinity,
+                                            filterQuality: FilterQuality.low,
+                                            cacheWidth: 960,
                                           ),
-                                        ],
+                                        ),
+                                      const SizedBox(height: 8),
+                                      _buildFieldRow('Type', picture.pictureType),
+                                      _buildFieldRow('Mime', picture.mimeType),
+                                      _buildFieldRow(
+                                        'Description',
+                                        picture.description,
                                       ),
-                                    );
-                                  })
-                                  .toList(growable: false),
+                                    ],
+                                  ),
+                                );
+                              }).toList(growable: false),
                             ),
                           if (errorText != null && errorText.isNotEmpty)
                             _buildSection('Read Error', [

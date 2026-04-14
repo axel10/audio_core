@@ -1,5 +1,6 @@
 import 'dart:async';
 import '../rust/api/simple/equalizer.dart';
+import '../track_metadata.dart';
 
 /// Define a unified status update for all platforms.
 class AudioStatus {
@@ -65,7 +66,7 @@ abstract class AudioEngine {
     required Map<String, Object?> metadata,
   });
 
-  Future<Map<String, Object?>> getTrackMetadata({
+  Future<TrackMetadata> getTrackMetadata({
     required String path,
     String? fallbackMediaUri,
   }) async {

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import '../rust/api/simple/equalizer.dart';
+import '../track_metadata.dart';
 import 'audio_engine_interface.dart';
 
 class AndroidAudioEngine implements AudioEngine {
@@ -289,7 +290,7 @@ class AndroidAudioEngine implements AudioEngine {
   }
 
   @override
-  Future<Map<String, Object?>> getTrackMetadata({
+  Future<TrackMetadata> getTrackMetadata({
     required String path,
     String? fallbackMediaUri,
   }) async {
@@ -300,9 +301,15 @@ class AndroidAudioEngine implements AudioEngine {
         if (fallbackMediaUri != null && fallbackMediaUri.trim().isNotEmpty)
           'fallbackMediaUri': fallbackMediaUri.trim(),
       });
-      return result?.cast<String, Object?>() ?? <String, Object?>{};
+      return TrackMetadata.fromMap(
+        result?.cast<String, Object?>() ?? <String, Object?>{},
+      );
     } catch (e) {
-      return <String, Object?>{};
+      return TrackMetadata(
+        error: e.toString(),
+        genres: const <String>[],
+        pictures: const [],
+      );
     }
   }
 

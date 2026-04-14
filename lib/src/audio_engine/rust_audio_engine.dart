@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 import '../rust/api/simple_api.dart' as rust;
 import '../rust/api/simple/equalizer.dart';
+import '../track_metadata.dart';
 import 'audio_engine_interface.dart';
 
 class RustAudioEngine implements AudioEngine {
@@ -127,12 +128,12 @@ class RustAudioEngine implements AudioEngine {
   }
 
   @override
-  Future<Map<String, Object?>> getTrackMetadata({
+  Future<TrackMetadata> getTrackMetadata({
     required String path,
     String? fallbackMediaUri,
   }) async {
     final metadata = await rust.getTrackMetadata(path: path);
-    return _trackMetadataUpdateToMap(metadata);
+    return TrackMetadata.fromRust(metadata);
   }
 
   @override
@@ -204,38 +205,6 @@ class RustAudioEngine implements AudioEngine {
         .map(_asString)
         .whereType<String>()
         .toList(growable: false);
-  }
-
-  Map<String, Object?> _trackMetadataUpdateToMap(rust.TrackMetadataUpdate metadata) {
-    return <String, Object?>{
-      if (metadata.title != null) 'title': metadata.title,
-      if (metadata.artist != null) 'artist': metadata.artist,
-      if (metadata.album != null) 'album': metadata.album,
-      if (metadata.albumArtist != null) 'albumArtist': metadata.albumArtist,
-      if (metadata.trackNumber != null) 'trackNumber': metadata.trackNumber,
-      if (metadata.trackTotal != null) 'trackTotal': metadata.trackTotal,
-      if (metadata.discNumber != null) 'discNumber': metadata.discNumber,
-      if (metadata.date != null) 'date': metadata.date,
-      if (metadata.year != null) 'year': metadata.year,
-      if (metadata.comment != null) 'comment': metadata.comment,
-      if (metadata.lyrics != null) 'lyrics': metadata.lyrics,
-      if (metadata.composer != null) 'composer': metadata.composer,
-      if (metadata.lyricist != null) 'lyricist': metadata.lyricist,
-      if (metadata.performer != null) 'performer': metadata.performer,
-      if (metadata.conductor != null) 'conductor': metadata.conductor,
-      if (metadata.remixer != null) 'remixer': metadata.remixer,
-      'genres': List<String>.from(metadata.genres),
-      'pictures': metadata.pictures
-          .map(
-            (picture) => <String, Object?>{
-              'bytes': picture.bytes,
-              'mimeType': picture.mimeType,
-              'pictureType': picture.pictureType,
-              if (picture.description != null) 'description': picture.description,
-            },
-          )
-          .toList(growable: false),
-    };
   }
 
   String? _asString(Object? value) {
