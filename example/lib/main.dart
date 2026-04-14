@@ -6,6 +6,7 @@ import 'package:audio_core/audio_core.dart';
 import 'package:file_picker/file_picker.dart';
 import 'equalizer_panel.dart';
 import 'fade_demo_tab.dart';
+import 'metadata_tab.dart';
 import 'widgets.dart';
 import 'random_lab_tab.dart';
 import 'audio_handler.dart';
@@ -347,7 +348,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
       animation: _controller,
       builder: (context, _) {
         return DefaultTabController(
-          length: 4,
+          length: 5,
           child: Scaffold(
             appBar: AppBar(
               title: const Text('Audio Visualizer Player Plugin Demo'),
@@ -355,6 +356,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
               bottom: const TabBar(
                 tabs: [
                   Tab(icon: Icon(Icons.music_note), text: 'Player'),
+                  Tab(icon: Icon(Icons.info_outline), text: 'Metadata'),
                   Tab(icon: Icon(Icons.tune), text: 'Fade Demo'),
                   Tab(icon: Icon(Icons.shuffle), text: 'Random Lab'),
                   Tab(icon: Icon(Icons.equalizer), text: 'Equalizer'),
@@ -401,7 +403,9 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                     ],
                   ),
                 ),
-                // 第二页: 淡入淡出控制演示
+                // 第二页: 当前曲目信息 / 封面编辑
+                MetadataTab(controller: _controller),
+                // 第三页: 淡入淡出控制演示
                 FadeDemoTab(
                   controller: _controller,
                   onLoadMusicPressed: (fadeSetting) =>
@@ -409,9 +413,9 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                   onLoadMusicWithFadePressed: (fadeSetting) =>
                       _pickAudio(fadeSetting: fadeSetting),
                 ),
-                // 第二页: 随机播放实验台
+                // 第四页: 随机播放实验台
                 RandomLabTab(key: _randomLabKey, controller: _controller),
-                // 第四页: 均衡器界面
+                // 第五页: 均衡器界面
                 SingleChildScrollView(
                   padding: const EdgeInsets.all(16),
                   child: EqualizerPanel(controller: _controller),
@@ -479,59 +483,6 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
           ),
           const SizedBox(width: 12),
 
-          ElevatedButton.icon(
-            onPressed: _controller.player.currentPath != null
-                ? () async {
-                    final track = _controller.playlist.currentTrack;
-                    if (track == null) return;
-
-                    final result = await FilePicker.platform.pickFiles(
-                      type: FileType.image,
-                      allowMultiple: false,
-                    );
-
-                    if (result == null || result.files.isEmpty) {
-                      return;
-                    }
-
-                    final path = result.files.single.path;
-                    if (path == null) return;
-
-                    final bytes = await File(path).readAsBytes();
-                    final ext = result.files.single.extension?.toLowerCase();
-                    final mimeType = (ext == 'png')
-                        ? 'image/png'
-                        : 'image/jpeg';
-
-                    final success = await _controller.updateMetadata(
-                      track,
-                      metadata: AndroidTrackMetadataUpdate(
-                        title: track.title,
-                        artist: track.artist,
-                        album: track.album,
-                        pictures: [
-                          AndroidTrackPicture(bytes: bytes, mimeType: mimeType),
-                        ],
-                      ),
-                    );
-
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            success
-                                ? 'Metadata updated successfully!'
-                                : 'Failed to update metadata.',
-                          ),
-                          backgroundColor: success ? Colors.green : Colors.red,
-                        ),
-                      );
-                    }
-                  }
-                : null,
-            icon: const Icon(Icons.edit_note),
-            label: const Text('Change Cover'),
-          ),
         ],
       ),
     );

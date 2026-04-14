@@ -49,6 +49,14 @@ pub fn update_track_metadata(path: String, metadata: TrackMetadataUpdate) -> any
     update_track_metadata_with_lofty(path, metadata)
 }
 
+pub fn get_track_metadata(path: String) -> TrackMetadataUpdate {
+    if should_use_id3(&path) {
+        return read_track_metadata_with_id3(&path);
+    }
+
+    read_track_metadata_with_lofty(&path)
+}
+
 fn should_use_id3(path: &str) -> bool {
     matches!(
         Path::new(path)
@@ -258,6 +266,211 @@ fn update_track_metadata_with_lofty(
     tag.save_to_path(&path, WriteOptions::default())?;
 
     Ok(())
+}
+
+fn read_track_metadata_with_id3(path: &str) -> TrackMetadataUpdate {
+    let Ok(tag) = Id3Tag::read_from_path(path) else {
+        return TrackMetadataUpdate::default();
+    };
+
+    let title = tag.title().map(|v| v.to_string());
+    let artist = tag.artist().map(|v| v.to_string());
+    let album = tag.album().map(|v| v.to_string());
+    let album_artist = tag.album_artist().map(|v| v.to_string());
+    let track_number = tag.track().map(|v| v as i32);
+    let track_total = tag.total_tracks().map(|v| v as i32);
+    let disc_number = tag.disc().map(|v| v as i32);
+    let date = tag.date_recorded().map(|v| v.to_string());
+    let year = tag.year();
+    let comment = tag.comments().next().map(|comment| comment.text.clone());
+    let lyrics = tag.lyrics().next().map(|lyrics| lyrics.text.clone());
+    let composer = first_text_frame_value(&tag, "TCOM");
+    let lyricist = first_text_frame_value(&tag, "TEXT");
+    let performer = first_text_frame_value(&tag, "TPE3");
+    let conductor = first_extended_text_value(&tag, "CONDUCTOR");
+    let remixer = first_extended_text_value(&tag, "REMIXER");
+    let genres = tag
+        .genres_parsed()
+        .into_iter()
+        .map(|genre| genre.into_owned())
+        .collect::<Vec<_>>();
+    let pictures = tag
+        .pictures()
+        .map(|picture| TrackPicture {
+            bytes: picture.data.clone(),
+            mime_type: picture.mime_type.clone(),
+            picture_type: id3_picture_type_to_label(picture.picture_type),
+            description: if picture.description.is_empty() {
+                None
+            } else {
+                Some(picture.description.clone())
+            },
+        })
+        .collect::<Vec<_>>();
+
+    TrackMetadataUpdate {
+        title,
+        artist,
+        album,
+        album_artist,
+        track_number,
+        track_total,
+        disc_number,
+        date,
+        year,
+        comment,
+        lyrics,
+        composer,
+        lyricist,
+        performer,
+        conductor,
+        remixer,
+        genres,
+        pictures,
+    }
+}
+
+fn read_track_metadata_with_lofty(path: &str) -> TrackMetadataUpdate {
+    let Ok(tagged_file) = Probe::open(path).and_then(|probe| probe.read()) else {
+        return TrackMetadataUpdate::default();
+    };
+
+    let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) else {
+        return TrackMetadataUpdate::default();
+    };
+
+    let title = tag.title().map(|v| v.to_string());
+    let artist = tag.artist().map(|v| v.to_string());
+    let album = tag.album().map(|v| v.to_string());
+    let album_artist = first_tag_value(tag, ItemKey::AlbumArtist);
+    let track_number = tag.track().map(|v| v as i32);
+    let track_total = tag.track_total().map(|v| v as i32);
+    let disc_number = tag.disk().map(|v| v as i32);
+    let date = tag.date().map(|v| v.to_string());
+    let year = tag.date().map(|v| i32::from(v.year));
+    let comment = tag.comment().map(|v| v.to_string()).or_else(|| {
+        first_tag_value(tag, ItemKey::Comment)
+    });
+    let lyrics = first_tag_value(tag, ItemKey::UnsyncLyrics)
+        .or_else(|| first_tag_value(tag, ItemKey::Lyrics));
+    let composer = first_tag_value(tag, ItemKey::Composer);
+    let lyricist = first_tag_value(tag, ItemKey::Lyricist);
+    let performer = first_tag_value(tag, ItemKey::Performer);
+    let conductor = first_tag_value(tag, ItemKey::Conductor);
+    let remixer = first_tag_value(tag, ItemKey::Remixer);
+    let genres = tag
+        .get_strings(ItemKey::Genre)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let pictures = tag
+        .pictures()
+        .iter()
+        .map(|picture| TrackPicture {
+            bytes: picture.data().to_vec(),
+            mime_type: picture
+                .mime_type()
+                .map(|mime| mime.to_string())
+                .unwrap_or_else(|| "image/jpeg".to_string()),
+            picture_type: lofty_picture_type_to_label(picture.pic_type()),
+            description: picture.description().map(str::to_string),
+        })
+        .collect::<Vec<_>>();
+
+    TrackMetadataUpdate {
+        title,
+        artist,
+        album,
+        album_artist,
+        track_number,
+        track_total,
+        disc_number,
+        date,
+        year,
+        comment,
+        lyrics,
+        composer,
+        lyricist,
+        performer,
+        conductor,
+        remixer,
+        genres,
+        pictures,
+    }
+}
+
+fn first_tag_value(tag: &Tag, key: ItemKey) -> Option<String> {
+    tag.get_strings(key).next().map(str::to_string)
+}
+
+fn first_text_frame_value(tag: &Id3Tag, frame_id: &str) -> Option<String> {
+    tag.get(frame_id)
+        .and_then(|frame| frame.content().text())
+        .map(str::to_string)
+}
+
+fn first_extended_text_value(tag: &Id3Tag, description: &str) -> Option<String> {
+    tag.frames().find_map(|frame| {
+        let ext = frame.content().extended_text()?;
+        if ext.description.eq_ignore_ascii_case(description) {
+            Some(ext.value.clone())
+        } else {
+            None
+        }
+    })
+}
+
+fn id3_picture_type_to_label(picture_type: Id3PictureType) -> String {
+    match picture_type {
+        Id3PictureType::CoverFront => "Front Cover".to_string(),
+        Id3PictureType::CoverBack => "Back Cover".to_string(),
+        Id3PictureType::Leaflet => "Leaflet Page".to_string(),
+        Id3PictureType::Media => "Media Label CD".to_string(),
+        Id3PictureType::LeadArtist => "Lead Artist".to_string(),
+        Id3PictureType::Artist => "Artist / Performer".to_string(),
+        Id3PictureType::Conductor => "Conductor".to_string(),
+        Id3PictureType::Band => "Band Logo".to_string(),
+        Id3PictureType::BandLogo => "Band Logo".to_string(),
+        Id3PictureType::Composer => "Composer".to_string(),
+        Id3PictureType::Lyricist => "Lyricist".to_string(),
+        Id3PictureType::RecordingLocation => "Recording Location".to_string(),
+        Id3PictureType::DuringRecording => "During Recording".to_string(),
+        Id3PictureType::DuringPerformance => "During Performance".to_string(),
+        Id3PictureType::ScreenCapture => "Screen Capture".to_string(),
+        Id3PictureType::BrightFish => "Bright Fish".to_string(),
+        Id3PictureType::Illustration => "Illustration".to_string(),
+        Id3PictureType::PublisherLogo => "Publisher Logo".to_string(),
+        Id3PictureType::Other => "Other".to_string(),
+        Id3PictureType::OtherIcon => "Other Icon".to_string(),
+        Id3PictureType::Icon => "Icon".to_string(),
+        Id3PictureType::Undefined(v) => format!("Undefined({v})"),
+    }
+}
+
+fn lofty_picture_type_to_label(picture_type: lofty::picture::PictureType) -> String {
+    match picture_type {
+        lofty::picture::PictureType::CoverFront => "Front Cover".to_string(),
+        lofty::picture::PictureType::CoverBack => "Back Cover".to_string(),
+        lofty::picture::PictureType::Leaflet => "Leaflet Page".to_string(),
+        lofty::picture::PictureType::Media => "Media Label CD".to_string(),
+        lofty::picture::PictureType::LeadArtist => "Lead Artist".to_string(),
+        lofty::picture::PictureType::Artist => "Artist / Performer".to_string(),
+        lofty::picture::PictureType::Conductor => "Conductor".to_string(),
+        lofty::picture::PictureType::Band => "Band Logo".to_string(),
+        lofty::picture::PictureType::Composer => "Composer".to_string(),
+        lofty::picture::PictureType::Lyricist => "Lyricist".to_string(),
+        lofty::picture::PictureType::RecordingLocation => "Recording Location".to_string(),
+        lofty::picture::PictureType::DuringRecording => "During Recording".to_string(),
+        lofty::picture::PictureType::DuringPerformance => "During Performance".to_string(),
+        lofty::picture::PictureType::ScreenCapture => "Screen Capture".to_string(),
+        lofty::picture::PictureType::BrightFish => "Bright Fish".to_string(),
+        lofty::picture::PictureType::Illustration => "Illustration".to_string(),
+        lofty::picture::PictureType::PublisherLogo => "Publisher Logo".to_string(),
+        lofty::picture::PictureType::Other => "Other".to_string(),
+        lofty::picture::PictureType::Icon => "Icon".to_string(),
+        lofty::picture::PictureType::OtherIcon => "Other Icon".to_string(),
+        lofty::picture::PictureType::Undefined(v) => format!("Undefined({v})"),
+        _ => "Other".to_string(),
+    }
 }
 
 pub fn remove_all_tags(path: String) -> anyhow::Result<()> {

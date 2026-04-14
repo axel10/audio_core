@@ -16,7 +16,9 @@ pub use controller::{
     load_audio_file, pause_audio, play_audio, seek_audio_ms, set_audio_equalizer_config,
     set_audio_volume, toggle_audio, FadeMode, FadeSettings, PlaybackState,
 };
-pub use metadata::{remove_all_tags, update_track_metadata, TrackMetadataUpdate, TrackPicture};
+pub use metadata::{
+    get_track_metadata, remove_all_tags, update_track_metadata, TrackMetadataUpdate, TrackPicture,
+};
 pub use waveform::{extract_loaded_waveform, extract_waveform_for_path, WaveformChunk};
 
 const PLAYBACK_STATE_PUSH_INTERVAL: Duration = Duration::from_millis(500);

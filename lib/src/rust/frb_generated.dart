@@ -159,6 +159,10 @@ abstract class RustLibApi extends BaseApi {
   Future<TrackMetadataUpdate>
   crateApiSimpleMetadataTrackMetadataUpdateDefault();
 
+  Future<TrackMetadataUpdate> crateApiSimpleMetadataGetTrackMetadata({
+    required String path,
+  });
+
   Future<TrackPicture> crateApiSimpleMetadataTrackPictureDefault();
 
   Future<void> crateApiSimpleMetadataUpdateTrackMetadata({
@@ -1021,6 +1025,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         debugName: "track_metadata_update_default",
         argNames: [],
       );
+
+  @override
+  Future<TrackMetadataUpdate> crateApiSimpleMetadataGetTrackMetadata({
+    required String path,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(path, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 32,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_track_metadata_update,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSimpleMetadataGetTrackMetadataConstMeta,
+        argValues: [path],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSimpleMetadataGetTrackMetadataConstMeta =>
+      const TaskConstMeta(debugName: "get_track_metadata", argNames: ["path"]);
 
   @override
   Future<TrackPicture> crateApiSimpleMetadataTrackPictureDefault() {

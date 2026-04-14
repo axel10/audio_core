@@ -9,6 +9,9 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // These functions are ignored because they are not marked as `pub`: `should_use_id3`, `update_track_metadata_with_id3`, `update_track_metadata_with_lofty`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`
 
+Future<TrackMetadataUpdate> getTrackMetadata({required String path}) =>
+    RustLib.instance.api.crateApiSimpleMetadataGetTrackMetadata(path: path);
+
 Future<void> updateTrackMetadata({
   required String path,
   required TrackMetadataUpdate metadata,
