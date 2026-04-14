@@ -519,6 +519,26 @@ class AudioCoreController extends ChangeNotifier
     return mediaUri ?? track.uri;
   }
 
+  String? _resolveMetadataPath(String? path) {
+    final explicitPath = path?.trim();
+    if (explicitPath != null && explicitPath.isNotEmpty) {
+      return explicitPath;
+    }
+
+    final currentPath = player.currentPath?.trim();
+    if (currentPath != null && currentPath.isNotEmpty) {
+      return currentPath;
+    }
+
+    final currentTrack = playlist.currentTrack;
+    if (currentTrack == null) {
+      return null;
+    }
+
+    final resolvedTrackPath = _resolveTrackPath(currentTrack).trim();
+    return resolvedTrackPath.isEmpty ? null : resolvedTrackPath;
+  }
+
   Future<bool> _updateMetadataAtPath({
     required String path,
     String? fallbackMediaUri,
@@ -601,17 +621,17 @@ class AudioCoreController extends ChangeNotifier
     );
   }
 
-  /// Reads the metadata of a given track.
+  /// Reads metadata for the current track or an explicit file path.
   ///
-  /// The returned map is normalized for cross-platform use and may include
-  /// both parsed fields such as `title` / `artist` and the raw `propertyMap`.
-  Future<Map<String, Object?>> getTrackMetadata(AudioTrack track) async {
-    final path = _resolveTrackPath(track);
-    final fallbackMediaUri = track.metadataValue<String>('mediaUri');
-    return _engine.getTrackMetadata(
-      path: path,
-      fallbackMediaUri: fallbackMediaUri,
-    );
+  /// If [path] is omitted, this uses the currently playing track.
+  /// If [path] is provided, it reads metadata from that file instead.
+  Future<Map<String, Object?>> getTrackMetadata({String? path}) async {
+    final targetPath = _resolveMetadataPath(path);
+    if (targetPath == null) {
+      throw StateError('No path provided and no current track is playing.');
+    }
+
+    return _engine.getTrackMetadata(path: targetPath);
   }
 
   /// Updates metadata for multiple Android tracks in sequence.

@@ -45,9 +45,8 @@ class _MetadataTabState extends State<MetadataTab> {
   }
 
   void _reloadForCurrentTrack() {
-    final track = widget.controller.playlist.currentTrack;
     _trackKey = _currentTrackKey();
-    _metadataFuture = _loadMetadata(track);
+    _metadataFuture = _loadMetadata();
     if (mounted) {
       setState(() {});
     }
@@ -58,18 +57,14 @@ class _MetadataTabState extends State<MetadataTab> {
     if (track == null) return;
     _trackKey = _currentTrackKey();
     setState(() {
-      _metadataFuture = _loadMetadata(track);
+      _metadataFuture = _loadMetadata();
     });
     await _metadataFuture;
   }
 
-  Future<Map<String, Object?>> _loadMetadata(AudioTrack? track) async {
-    if (track == null) {
-      return <String, Object?>{};
-    }
-
+  Future<Map<String, Object?>> _loadMetadata() async {
     try {
-      return await widget.controller.getTrackMetadata(track);
+      return await widget.controller.getTrackMetadata();
     } catch (e) {
       return <String, Object?>{'_error': e.toString()};
     }
