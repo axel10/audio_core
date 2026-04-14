@@ -65,5 +65,12 @@ abstract class AudioEngine {
     required Map<String, Object?> metadata,
   });
 
+  Future<Map<String, Object?>> getTrackMetadata({
+    required String path,
+    String? fallbackMediaUri,
+  }) async {
+    throw UnimplementedError('getTrackMetadata is not implemented on this platform.');
+  }
+
   Future<void> removeAllTags({String? path});
 }

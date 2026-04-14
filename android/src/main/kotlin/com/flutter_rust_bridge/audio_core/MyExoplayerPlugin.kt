@@ -322,6 +322,44 @@ class MyExoplayerPlugin :
                 handleUpdateTrackMetadata(path, metadata, result)
                 return
             }
+            "getTrackMetadata" -> {
+                val path = call.argument<String>("path")
+                    ?: return result.error("INVALID_ARGUMENT", "Path is null", null)
+                val fallbackMediaUri = call.argument<String>("fallbackMediaUri")
+                val safeContext = context ?: return result.error(
+                    "INTERNAL_ERROR",
+                    "Context is null",
+                    null,
+                )
+
+                try {
+                    val metadata = AndroidMetadataWriter.readMetadata(
+                        safeContext,
+                        path,
+                        fallbackMediaUri,
+                    )
+                    result.success(metadata)
+                } catch (e: MetadataWriteException) {
+                    result.error(
+                        e.code,
+                        e.message,
+                        e.details + mapOf(
+                            "exception" to (e.cause?.javaClass?.name ?: e.javaClass.name),
+                        ),
+                    )
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    result.error(
+                        "READ_FAILED",
+                        e.message,
+                        mapOf(
+                            "path" to path,
+                            "exception" to e::class.java.name,
+                        ),
+                    )
+                }
+                return
+            }
         }
 
         val ctx = playerContexts[playerId] ?: if (playerId == "main") {

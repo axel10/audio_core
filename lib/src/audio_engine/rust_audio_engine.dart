@@ -127,6 +127,14 @@ class RustAudioEngine implements AudioEngine {
   }
 
   @override
+  Future<Map<String, Object?>> getTrackMetadata({
+    required String path,
+    String? fallbackMediaUri,
+  }) async {
+    return <String, Object?>{};
+  }
+
+  @override
   Future<void> removeAllTags({String? path}) async {
     final targetPath = path?.trim();
     if (targetPath == null || targetPath.isEmpty) {

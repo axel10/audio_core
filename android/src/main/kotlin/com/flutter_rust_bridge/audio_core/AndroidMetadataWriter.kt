@@ -3,6 +3,7 @@ package com.flutter_rust_bridge.audio_core
 import android.content.Context
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import com.kyant.taglib.Metadata
 import com.kyant.taglib.Picture
 import com.kyant.taglib.PropertyMap
 import com.kyant.taglib.TagLib
@@ -10,6 +11,37 @@ import java.io.File
 import java.util.Locale
 
 internal object AndroidMetadataWriter {
+    fun readMetadata(
+        context: Context,
+        path: String,
+        fallbackMediaUri: String? = null,
+    ): Map<String, Any?> {
+        val readableFile = openReadableFileDescriptor(
+            context,
+            path,
+            mapOf("fallbackMediaUri" to fallbackMediaUri),
+        ) ?: return emptyMap()
+
+        return try {
+            readableFile.use { pfd ->
+                val fd = pfd.detachForTagLib()
+                val metadata = TagLib.getMetadata(fd) ?: return emptyMap()
+                metadata.toMetadataMap()
+            }
+        } catch (e: Exception) {
+            throw MetadataWriteException(
+                code = "READ_FAILED",
+                message = e.message ?: "Unexpected metadata read failure.",
+                details = mapOf(
+                    "path" to path,
+                    "fallbackMediaUri" to fallbackMediaUri,
+                    "exception" to e::class.java.name,
+                ),
+                cause = e,
+            )
+        }
+    }
+
     fun updateMetadata(
         context: Context,
         path: String,
@@ -171,6 +203,82 @@ internal object AndroidMetadataWriter {
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun Metadata.toMetadataMap(): Map<String, Any?> {
+        val rawPropertyMap = propertyMap.entries.associate { (key, values) ->
+            key to values.toList()
+        }
+        val picturesList = pictures.map { picture ->
+            mapOf(
+                "bytes" to picture.data,
+                "mimeType" to picture.mimeType,
+                "pictureType" to picture.pictureType,
+                "description" to picture.description,
+            )
+        }
+
+        val title = firstProperty(rawPropertyMap, "TITLE")
+        val artist = firstProperty(rawPropertyMap, "ARTIST")
+        val album = firstProperty(rawPropertyMap, "ALBUM")
+        val albumArtist = firstProperty(rawPropertyMap, "ALBUMARTIST")
+        val trackNumberParts = splitNumberPair(firstProperty(rawPropertyMap, "TRACKNUMBER"))
+        val discNumberParts = splitNumberPair(firstProperty(rawPropertyMap, "DISCNUMBER"))
+        val date = firstProperty(rawPropertyMap, "DATE")
+        val year = firstProperty(rawPropertyMap, "YEAR")?.toIntOrNull()
+            ?: date?.take(4)?.toIntOrNull()
+
+        return mapOf(
+            "metadataType" to javaClass.simpleName,
+            "propertyMap" to rawPropertyMap,
+            "pictures" to picturesList,
+            "title" to title,
+            "artist" to artist,
+            "album" to album,
+            "albumArtist" to albumArtist,
+            "trackNumber" to trackNumberParts.first,
+            "trackTotal" to trackNumberParts.second,
+            "discNumber" to discNumberParts.first,
+            "date" to date,
+            "year" to year,
+            "comment" to firstProperty(rawPropertyMap, "COMMENT"),
+            "lyrics" to firstProperty(rawPropertyMap, "LYRICS"),
+            "composer" to firstProperty(rawPropertyMap, "COMPOSER"),
+            "lyricist" to firstProperty(rawPropertyMap, "LYRICIST"),
+            "performer" to firstProperty(rawPropertyMap, "PERFORMER"),
+            "conductor" to firstProperty(rawPropertyMap, "CONDUCTOR"),
+            "remixer" to firstProperty(rawPropertyMap, "REMIXER"),
+            "genres" to propertyValues(rawPropertyMap, "GENRE"),
+        )
+    }
+
+    private fun propertyValues(
+        propertyMap: Map<String, List<String>>,
+        key: String,
+    ): List<String> {
+        return propertyMap[key].orEmpty()
+    }
+
+    private fun firstProperty(
+        propertyMap: Map<String, List<String>>,
+        key: String,
+    ): String? {
+        return propertyMap[key]
+            ?.firstOrNull()
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+    }
+
+    private fun splitNumberPair(value: String?): Pair<Int?, Int?> {
+        if (value.isNullOrBlank()) {
+            return null to null
+        }
+
+        val cleaned = value.trim()
+        val parts = cleaned.split('/', limit = 2)
+        val first = parts.firstOrNull()?.trim()?.toIntOrNull()
+        val second = parts.getOrNull(1)?.trim()?.toIntOrNull()
+        return first to second
     }
 
     private fun openReadableFileDescriptor(

@@ -601,6 +601,19 @@ class AudioCoreController extends ChangeNotifier
     );
   }
 
+  /// Reads the metadata of a given track.
+  ///
+  /// The returned map is normalized for cross-platform use and may include
+  /// both parsed fields such as `title` / `artist` and the raw `propertyMap`.
+  Future<Map<String, Object?>> getTrackMetadata(AudioTrack track) async {
+    final path = _resolveTrackPath(track);
+    final fallbackMediaUri = track.metadataValue<String>('mediaUri');
+    return _engine.getTrackMetadata(
+      path: path,
+      fallbackMediaUri: fallbackMediaUri,
+    );
+  }
+
   /// Updates metadata for multiple Android tracks in sequence.
   Future<List<bool>> updateMetadataBatch(
     List<AndroidTrackMetadataUpdateRequest> updates,

@@ -289,6 +289,24 @@ class AndroidAudioEngine implements AudioEngine {
   }
 
   @override
+  Future<Map<String, Object?>> getTrackMetadata({
+    required String path,
+    String? fallbackMediaUri,
+  }) async {
+    try {
+      final Map<dynamic, dynamic>? result =
+          await _channel.invokeMethod<Map<dynamic, dynamic>>('getTrackMetadata', {
+        'path': path,
+        if (fallbackMediaUri != null && fallbackMediaUri.trim().isNotEmpty)
+          'fallbackMediaUri': fallbackMediaUri.trim(),
+      });
+      return result?.cast<String, Object?>() ?? <String, Object?>{};
+    } catch (e) {
+      return <String, Object?>{};
+    }
+  }
+
+  @override
   Future<void> removeAllTags({String? path}) {
     throw UnimplementedError('removeAllTags is not implemented on Android yet');
   }
