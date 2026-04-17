@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:audio_core/audio_core.dart';
 import 'package:cross_file/cross_file.dart';
@@ -106,7 +107,7 @@ class WaveformPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (waveform.isEmpty) return;
+    if (waveform.isEmpty || size.height <= 0) return;
 
     final barWidth = size.width / waveform.length;
     final maxBarHeight = size.height;
@@ -121,7 +122,10 @@ class WaveformPainter extends CustomPainter {
 
     for (var i = 0; i < waveform.length; i++) {
       final value = waveform[i];
-      final height = (value * maxBarHeight).clamp(2.0, maxBarHeight);
+      final height = (value * maxBarHeight).clamp(
+        math.min<double>(2.0, maxBarHeight),
+        maxBarHeight,
+      ).toDouble();
       final left = i * barWidth;
       final top = (maxBarHeight - height) / 2; // Center vertically
 
@@ -149,7 +153,7 @@ class DemoSpectrumPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (bands.isEmpty) {
+    if (bands.isEmpty || size.height <= 0) {
       return;
     }
     const safeTop = 6.0;
@@ -174,7 +178,10 @@ class DemoSpectrumPainter extends CustomPainter {
     canvas.clipRect(Rect.fromLTWH(0, safeTop, size.width, usableHeight));
     for (var i = 0; i < bands.length; i++) {
       final v = bands[i].clamp(0.0, 1.0);
-      final h = (v * usableHeight).clamp(minBarHeight, usableHeight);
+      final h = (v * usableHeight).clamp(
+        math.min<double>(minBarHeight, usableHeight),
+        usableHeight,
+      ).toDouble();
       final left = gap + i * (barWidth + gap);
       final top = baseline - h;
       final rect = RRect.fromRectAndRadius(
