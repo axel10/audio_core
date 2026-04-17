@@ -40,7 +40,7 @@ abstract class AudioEngine {
   Future<List<double>> getWaveform({
     required String path,
     required int expectedChunks,
-    int sampleStride = 1,
+    int sampleStride = 0,
   });
 
   // Effects

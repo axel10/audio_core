@@ -381,7 +381,7 @@ class AudioCoreController extends ChangeNotifier
 
   Future<List<double>> getWaveform({
     required int expectedChunks,
-    int sampleStride = 1,
+    int sampleStride = 0,
     String? filePath,
   }) async {
     final targetPath = filePath ?? player.currentPath;
@@ -393,19 +393,6 @@ class AudioCoreController extends ChangeNotifier
         sampleStride: sampleStride,
       );
 
-      if (finalData.isEmpty) return const [];
-
-      // 为统一视觉效果，如果最高值未达到 1.0，则等比例提升至 1.0
-      double maxVal = 0.0;
-      for (final v in finalData) {
-        if (v > maxVal) maxVal = v;
-      }
-
-      if (maxVal > 0 && maxVal < 1.0) {
-        final multiplier = 1.0 / maxVal;
-        return finalData.map((v) => v * multiplier).toList();
-      }
-
       return finalData;
     } catch (e) {
       player.setError('Waveform failed: $e');
@@ -416,8 +403,9 @@ class AudioCoreController extends ChangeNotifier
   /// Returns decoded PCM samples for the current track or a specific file path.
   ///
   /// If [path] is omitted, this uses the currently loaded track.
-  /// This API is available on the Rust-backed desktop platforms.
-  Future<Float32List> getAudioPcm({String? path}) async {
+  /// [sampleStride] skips packet groups while decoding on the Rust backend.
+  /// A value of `0` means no skipping.
+  Future<Float32List> getAudioPcm({String? path, int sampleStride = 0}) async {
     if (Platform.isAndroid) {
       throw UnsupportedError(
         'getAudioPcm is only available on the Rust-backed desktop platforms.',
@@ -432,7 +420,10 @@ class AudioCoreController extends ChangeNotifier
       throw StateError('AudioCoreController is not initialized.');
     }
 
-    return rust.getAudioPcm(path: path);
+    return rust.getAudioPcm(
+      path: path,
+      sampleStride: BigInt.from(sampleStride),
+    );
   }
 
   /// Requests Android audio library permission through the platform bridge.

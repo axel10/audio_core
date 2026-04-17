@@ -4,6 +4,7 @@ import '../rust/api/simple_api.dart' as rust;
 import '../rust/api/simple/equalizer.dart';
 import '../track_metadata.dart';
 import 'audio_engine_interface.dart';
+import '../waveform_pcm_processor.dart';
 
 class RustAudioEngine implements AudioEngine {
   final _statusController = StreamController<AudioStatus>.broadcast();
@@ -79,14 +80,19 @@ class RustAudioEngine implements AudioEngine {
   Future<List<double>> getWaveform({
     required String path,
     required int expectedChunks,
-    int sampleStride = 1,
+    int sampleStride = 0,
   }) async {
-    final data = await rust.extractWaveformForPath(
+    final pcm = await rust.getAudioPcm(
       path: path,
-      expectedChunks: BigInt.from(expectedChunks),
       sampleStride: BigInt.from(sampleStride),
     );
-    return data.toList();
+    final channels = await rust.getAudioPcmChannelCount(path: path);
+    const processor = WaveformPcmProcessor();
+    return processor.process(
+      pcm,
+      expectedChunks: expectedChunks,
+      channels: channels,
+    );
   }
 
   @override

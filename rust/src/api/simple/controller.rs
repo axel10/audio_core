@@ -10,6 +10,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
+use symphonia::core::audio::SampleBuffer;
+use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
+use symphonia::core::errors::Error as SymphoniaError;
+use symphonia::core::formats::FormatOptions;
+use symphonia::core::io::MediaSourceStream;
+use symphonia::core::meta::MetadataOptions;
+use symphonia::core::probe::Hint;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FadeMode {
@@ -209,15 +216,6 @@ impl PlayerController {
         self.cached_sample_rate = 0;
     }
 
-    fn decode_pcm_from_path(path: &str) -> Result<(Vec<f32>, usize, u32), String> {
-        let file = File::open(path).map_err(|e| format!("open file failed: {} - {}", path, e))?;
-        let source = Decoder::try_from(file).map_err(|e| format!("decode failed: {e}"))?;
-        let channels = source.channels().get() as usize;
-        let sample_rate = source.sample_rate().get();
-        let pcm: Vec<f32> = source.collect();
-        Ok((pcm, channels, sample_rate))
-    }
-
     fn warm_waveform_cache_for_public_path(&mut self) {
         let Some(path) = self.public_path().map(str::to_string) else {
             return;
@@ -230,16 +228,7 @@ impl PlayerController {
         self.invalidate_waveform_cache();
 
         thread::spawn(move || {
-            if let Ok((pcm, channels, sample_rate)) = Self::decode_pcm_from_path(&path) {
-                if let Ok(mut c) = controller().lock() {
-                    if c.public_path() == Some(path.as_str()) {
-                        c.cached_path = Some(path.clone());
-                        c.cached_pcm = Some(Arc::new(pcm));
-                        c.cached_channels = channels;
-                        c.cached_sample_rate = sample_rate;
-                    }
-                }
-            }
+            let _ = get_audio_pcm(Some(path), 0);
         });
     }
 
@@ -614,7 +603,8 @@ pub(super) fn snapshot_loaded_path() -> Option<String> {
         .and_then(|c| c.public_path().map(str::to_string))
 }
 
-pub fn get_audio_pcm(path: Option<String>) -> Result<Vec<f32>, String> {
+pub fn get_audio_pcm(path: Option<String>, sample_stride: usize) -> Result<Vec<f32>, String> {
+    let use_cache = sample_stride == 0;
     let (target_path, verify_loaded_path) = {
         let c = controller()
             .lock()
@@ -625,7 +615,7 @@ pub fn get_audio_pcm(path: Option<String>) -> Result<Vec<f32>, String> {
                 return Err("path is empty".to_string());
             }
             Some(explicit_path) => {
-                if c.cached_path.as_deref() == Some(explicit_path.as_str()) {
+                if use_cache && c.cached_path.as_deref() == Some(explicit_path.as_str()) {
                     if let Some(cached) = c.cached_pcm.as_ref() {
                         return Ok((**cached).clone());
                     }
@@ -637,7 +627,7 @@ pub fn get_audio_pcm(path: Option<String>) -> Result<Vec<f32>, String> {
                     return Err("no audio is currently loaded".to_string());
                 };
 
-                if c.cached_path.as_deref() == Some(public_path.as_str()) {
+                if use_cache && c.cached_path.as_deref() == Some(public_path.as_str()) {
                     if let Some(cached) = c.cached_pcm.as_ref() {
                         return Ok((**cached).clone());
                     }
@@ -648,7 +638,89 @@ pub fn get_audio_pcm(path: Option<String>) -> Result<Vec<f32>, String> {
         }
     };
 
-    let (pcm, channels, sample_rate) = PlayerController::decode_pcm_from_path(&target_path)?;
+    let file = File::open(&target_path)
+        .map_err(|e| format!("open file failed: {} - {}", target_path, e))?;
+    let mut hint = Hint::new();
+    if let Some(ext) = std::path::Path::new(&target_path)
+        .extension()
+        .and_then(|e| e.to_str())
+    {
+        hint.with_extension(ext);
+    }
+
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut format = symphonia::default::get_probe()
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
+        .map_err(|e| format!("probe format failed: {}", e))?
+        .format;
+
+    let track = format
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+        .or_else(|| format.default_track())
+        .ok_or_else(|| "No audio track found in loaded file".to_string())?;
+
+    let track_id = track.id;
+    let channels = track
+        .codec_params
+        .channels
+        .map(|c| c.count() as usize)
+        .unwrap_or(1);
+    let sample_rate = track.codec_params.sample_rate.unwrap_or(0);
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&track.codec_params, &DecoderOptions::default())
+        .map_err(|e| format!("create decoder failed: {}", e))?;
+
+    let sample_stride = sample_stride.max(1);
+    let mut sample_buf: Option<SampleBuffer<f32>> = None;
+    let mut pcm: Vec<f32> = Vec::new();
+    let mut track_packet_index = 0usize;
+
+    loop {
+        let packet = match format.next_packet() {
+            Ok(packet) => packet,
+            Err(SymphoniaError::IoError(_)) => break,
+            Err(SymphoniaError::ResetRequired) => {
+                return Err("stream reset required during pcm decode".to_string());
+            }
+            Err(err) => return Err(format!("read packet failed: {}", err)),
+        };
+
+        if packet.track_id() != track_id {
+            continue;
+        }
+
+        let should_sample = sample_stride == 1 || track_packet_index % sample_stride == 0;
+        track_packet_index = track_packet_index.saturating_add(1);
+        if !should_sample {
+            continue;
+        }
+
+        let decoded = match decoder.decode(&packet) {
+            Ok(decoded) => decoded,
+            Err(SymphoniaError::DecodeError(_)) => continue,
+            Err(SymphoniaError::IoError(_)) => continue,
+            Err(err) => return Err(format!("decode packet failed: {}", err)),
+        };
+
+        if sample_buf.is_none() {
+            sample_buf = Some(SampleBuffer::<f32>::new(
+                decoded.capacity() as u64,
+                *decoded.spec(),
+            ));
+        }
+
+        if let Some(buf) = sample_buf.as_mut() {
+            buf.copy_interleaved_ref(decoded);
+            pcm.extend_from_slice(buf.samples());
+        }
+    }
 
     if verify_loaded_path {
         let current_loaded_path = controller()
@@ -662,16 +734,84 @@ pub fn get_audio_pcm(path: Option<String>) -> Result<Vec<f32>, String> {
         }
     }
 
-    if let Ok(mut c) = controller().lock() {
-        if c.public_path() == Some(target_path.as_str()) {
-            c.cached_path = Some(target_path);
-            c.cached_pcm = Some(Arc::new(pcm.clone()));
-            c.cached_channels = channels;
-            c.cached_sample_rate = sample_rate;
+    if use_cache {
+        if let Ok(mut c) = controller().lock() {
+            if c.public_path() == Some(target_path.as_str()) {
+                c.cached_path = Some(target_path);
+                c.cached_pcm = Some(Arc::new(pcm.clone()));
+                c.cached_channels = channels;
+                c.cached_sample_rate = sample_rate;
+            }
         }
     }
 
     Ok(pcm)
+}
+
+pub fn get_audio_pcm_channel_count(path: Option<String>) -> Result<i32, String> {
+    let target_path = {
+        let c = controller()
+            .lock()
+            .map_err(|_| "player lock poisoned".to_string())?;
+
+        match path {
+            Some(ref explicit_path) if explicit_path.trim().is_empty() => {
+                return Err("path is empty".to_string());
+            }
+            Some(explicit_path) => {
+                if c.cached_path.as_deref() == Some(explicit_path.as_str()) && c.cached_channels > 0
+                {
+                    return Ok(c.cached_channels as i32);
+                }
+                explicit_path
+            }
+            None => {
+                let Some(public_path) = c.public_path().map(str::to_string) else {
+                    return Err("no audio is currently loaded".to_string());
+                };
+
+                if c.cached_path.as_deref() == Some(public_path.as_str()) && c.cached_channels > 0 {
+                    return Ok(c.cached_channels as i32);
+                }
+
+                public_path
+            }
+        }
+    };
+
+    let file = File::open(&target_path)
+        .map_err(|e| format!("open file failed: {} - {}", target_path, e))?;
+    let mut hint = Hint::new();
+    if let Some(ext) = std::path::Path::new(&target_path)
+        .extension()
+        .and_then(|e| e.to_str())
+    {
+        hint.with_extension(ext);
+    }
+
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let format = symphonia::default::get_probe()
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
+        .map_err(|e| format!("probe format failed: {}", e))?
+        .format;
+
+    let track = format
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+        .or_else(|| format.default_track())
+        .ok_or_else(|| "No audio track found in loaded file".to_string())?;
+
+    Ok(track
+        .codec_params
+        .channels
+        .map(|c| c.count() as i32)
+        .unwrap_or(1))
 }
 
 fn drive_crossfade(generation: u64, duration: Duration) {

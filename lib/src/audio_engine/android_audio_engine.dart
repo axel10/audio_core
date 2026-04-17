@@ -161,7 +161,7 @@ class AndroidAudioEngine implements AudioEngine {
   Future<List<double>> getWaveform({
     required String path,
     required int expectedChunks,
-    int sampleStride = 1,
+    int sampleStride = 0,
   }) async {
     try {
       // Direct native waveform extraction with downsampling
