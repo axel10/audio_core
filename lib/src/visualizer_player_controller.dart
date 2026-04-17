@@ -382,6 +382,7 @@ class AudioCoreController extends ChangeNotifier
   Future<List<double>> getWaveform({
     required int expectedChunks,
     int sampleStride = 0,
+    bool normalize = true,
     String? filePath,
   }) async {
     final targetPath = filePath ?? player.currentPath;
@@ -393,11 +394,32 @@ class AudioCoreController extends ChangeNotifier
         sampleStride: sampleStride,
       );
 
-      return finalData;
+      return normalize ? _normalizeWaveform(finalData) : finalData;
     } catch (e) {
       player.setError('Waveform failed: $e');
       return const [];
     }
+  }
+
+  List<double> _normalizeWaveform(List<double> waveform) {
+    if (waveform.isEmpty) {
+      return waveform;
+    }
+
+    var maxValue = 0.0;
+    for (final value in waveform) {
+      if (value > maxValue) {
+        maxValue = value;
+      }
+    }
+
+    if (maxValue <= 0.0) {
+      return waveform;
+    }
+
+    return waveform
+        .map((value) => (value / maxValue).clamp(0.0, 1.0))
+        .toList(growable: false);
   }
 
   /// Returns decoded PCM samples for the current track or a specific file path.
