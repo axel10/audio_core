@@ -7,6 +7,16 @@ import FlutterMacOS
 import Flutter
 #endif
 
+private struct AppleEqualizerConfig {
+  let enabled: Bool
+  let bandCount: Int
+  let preampDb: Double
+  let bassBoostDb: Double
+  let bassBoostFrequencyHz: Double
+  let bassBoostQ: Double
+  let bandGainsDb: [Double]
+}
+
 public final class AudioCorePlugin: NSObject, FlutterPlugin {
   private let fileAccess = SecurityScopedFileAccessCoordinator()
   private let engine: AppleAudioEngine
@@ -122,6 +132,15 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       } catch {
         result(FlutterError(code: "VOLUME_FAILED", message: error.localizedDescription, details: nil))
       }
+    case "setEqualizerConfig":
+      guard let config = Self.readEqualizerConfig(call.arguments) else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "Equalizer config is invalid", details: nil))
+        return
+      }
+      engine.setEqualizerConfig(config)
+      result(nil)
+    case "getEqualizerConfig":
+      result(Self.equalizerConfigPayload(engine.getEqualizerConfig()))
     case "getDuration":
       result(engine.getDurationMs())
     case "getCurrentPosition":
@@ -231,6 +250,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
     if let value = map[key] as? Int { return value }
     if let value = map[key] as? Int64 { return Int(value) }
     if let value = map[key] as? Double { return Int(value) }
+    if let value = map[key] as? NSNumber { return value.intValue }
     return nil
   }
 
@@ -239,6 +259,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
     if let value = map[key] as? Double { return value }
     if let value = map[key] as? Int { return Double(value) }
     if let value = map[key] as? Int64 { return Double(value) }
+    if let value = map[key] as? NSNumber { return value.doubleValue }
     return nil
   }
 
@@ -247,6 +268,54 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
     guard let value = map[key] as? String else { return nil }
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.isEmpty ? nil : trimmed
+  }
+
+  private static func readEqualizerConfig(_ arguments: Any?) -> AppleEqualizerConfig? {
+    guard let map = arguments as? [String: Any] else { return nil }
+    let bandCountLimit = 20
+
+    let enabled = (map["enabled"] as? Bool) ?? false
+    let bandCount = Self.readInt(arguments, key: "bandCount") ?? 0
+    let preampDb = Self.readDouble(arguments, key: "preampDb") ?? 0.0
+    let bassBoostDb = Self.readDouble(arguments, key: "bassBoostDb") ?? 0.0
+    let bassBoostFrequencyHz = Self.readDouble(arguments, key: "bassBoostFrequencyHz") ?? 80.0
+    let bassBoostQ = Self.readDouble(arguments, key: "bassBoostQ") ?? 0.75
+
+    let rawBands = map["bandGainsDb"] as? [Any] ?? []
+    var bandGainsDb = Array(repeating: 0.0, count: max(0, min(bandCount, bandCountLimit)))
+    for index in 0..<min(rawBands.count, bandGainsDb.count) {
+      if let value = rawBands[index] as? Double {
+        bandGainsDb[index] = value
+      } else if let value = rawBands[index] as? Int {
+        bandGainsDb[index] = Double(value)
+      } else if let value = rawBands[index] as? Int64 {
+        bandGainsDb[index] = Double(value)
+      } else if let value = rawBands[index] as? NSNumber {
+        bandGainsDb[index] = value.doubleValue
+      }
+    }
+
+    return AppleEqualizerConfig(
+      enabled: enabled,
+      bandCount: max(0, min(bandCount, bandCountLimit)),
+      preampDb: preampDb,
+      bassBoostDb: bassBoostDb,
+      bassBoostFrequencyHz: bassBoostFrequencyHz,
+      bassBoostQ: bassBoostQ,
+      bandGainsDb: bandGainsDb
+    )
+  }
+
+  private static func equalizerConfigPayload(_ config: AppleEqualizerConfig) -> [String: Any] {
+    [
+      "enabled": config.enabled,
+      "bandCount": config.bandCount,
+      "preampDb": config.preampDb,
+      "bassBoostDb": config.bassBoostDb,
+      "bassBoostFrequencyHz": config.bassBoostFrequencyHz,
+      "bassBoostQ": config.bassBoostQ,
+      "bandGainsDb": config.bandGainsDb,
+    ]
   }
 
 #if os(iOS)
@@ -362,19 +431,34 @@ private final class AppleAudioEngine {
     let volume: Double
   }
 
+  private struct EqualizerBandLayout {
+    static let bandCount = 20
+    static let bassBandIndex = 20
+    static let totalBandCount = 21
+  }
+
   private let fftSize = 1024
   private let fftBinCount = 512
   private let fileAccess: SecurityScopedFileAccessCoordinator
-  private var player: AVAudioPlayer?
+  private let engine = AVAudioEngine()
+  private let playerNode = AVAudioPlayerNode()
+  private let equalizerNode = AVAudioUnitEQ(numberOfBands: EqualizerBandLayout.totalBandCount)
   private var currentURL: URL?
+  private var currentFile: AVAudioFile?
   private var sampleRate: Double = 44_100
   private var latestVolume: Double = 1.0
+  private var latestEqualizerConfig = AppleAudioEngine.defaultEqualizerConfig()
   private var pendingEdit: PendingEdit?
   private var fadeTimer: Timer?
   private var preparedAccessPaths = Set<String>()
+  private var playbackFramePosition: AVAudioFramePosition = 0
+  private var isEngineConfigured = false
+  private var isPlaybackScheduled = false
 
   init(fileAccess: SecurityScopedFileAccessCoordinator) {
     self.fileAccess = fileAccess
+    configureEngineIfNeeded()
+    applyEqualizerConfig(latestEqualizerConfig)
   }
 
   func ensureReady() {
@@ -382,26 +466,20 @@ private final class AppleAudioEngine {
   }
 
   var isPlaying: Bool {
-    player?.isPlaying ?? false
+    playerNode.isPlaying
   }
 
   func load(path: String) throws {
-    if let currentURL {
-      fileAccess.releaseAccess(for: currentURL)
-    }
-    player?.stop()
-    player = nil
+    stopPlayback(releasingFile: true, preservePosition: false)
+    releaseCurrentAccessIfNeeded()
 
     let url = try fileAccess.acquireAccess(for: path)
-    let audioPlayer = try AVAudioPlayer(contentsOf: url)
-    audioPlayer.numberOfLoops = 0
-    audioPlayer.prepareToPlay()
-    audioPlayer.volume = Float(latestVolume)
-
     let file = try AVAudioFile(forReading: url)
     sampleRate = file.processingFormat.sampleRate
     currentURL = url
-    player = audioPlayer
+    currentFile = file
+    playbackFramePosition = 0
+    isPlaybackScheduled = false
     preparedAccessPaths.remove(url.path)
   }
 
@@ -411,7 +489,7 @@ private final class AppleAudioEngine {
   }
 
   func play(fadeDurationMs: Int, targetVolume: Double?) throws {
-    guard let player else {
+    guard currentFile != nil else {
       throw NSError(
         domain: "AudioCore",
         code: 1,
@@ -421,58 +499,68 @@ private final class AppleAudioEngine {
 
     let target = (targetVolume ?? latestVolume).clamped(to: 0.0...1.0)
     latestVolume = target
+    try startPlaybackIfNeeded(from: currentPlaybackFramePosition(), volume: target)
+
     if fadeDurationMs > 0 {
-      player.volume = 0.0
-      player.play()
+      playerNode.volume = 0.0
       fadeVolume(from: 0.0, to: target, durationMs: fadeDurationMs) { [weak self] in
-        self?.player?.volume = Float(target)
+        self?.playerNode.volume = Float(target)
       }
     } else {
-      player.volume = Float(target)
-      player.play()
+      playerNode.volume = Float(target)
     }
   }
 
   func pause(fadeDurationMs: Int) throws {
-    guard let player else { return }
+    guard playerNode.isPlaying else { return }
 
     if fadeDurationMs > 0 {
-      let originalVolume = Double(player.volume)
+      let originalVolume = Double(playerNode.volume)
       fadeVolume(from: originalVolume, to: 0.0, durationMs: fadeDurationMs) { [weak self] in
         guard let self else { return }
-        player.pause()
-        player.volume = Float(self.latestVolume)
+        self.playbackFramePosition = self.currentPlaybackFramePosition()
+        self.stopPlayback(releasingFile: false, preservePosition: true)
+        self.playerNode.volume = Float(self.latestVolume)
       }
     } else {
-      player.pause()
+      playbackFramePosition = currentPlaybackFramePosition()
+      stopPlayback(releasingFile: false, preservePosition: true)
     }
   }
 
   func seek(positionMs: Int) throws {
-    guard let player else {
+    guard let currentFile else {
       throw NSError(
         domain: "AudioCore",
         code: 2,
         userInfo: [NSLocalizedDescriptionKey: "audio is not loaded"]
       )
     }
-    player.currentTime = max(0.0, Double(positionMs) / 1000.0)
+
+    let targetFrame = framePosition(forMilliseconds: positionMs, sampleRate: sampleRate)
+    let clampedFrame = max(0, min(targetFrame, currentFile.length))
+    let wasPlaying = playerNode.isPlaying
+    playbackFramePosition = clampedFrame
+
+    if wasPlaying {
+      stopPlayback(releasingFile: false, preservePosition: true)
+      try startPlaybackIfNeeded(from: clampedFrame, volume: latestVolume)
+    }
   }
 
   func setVolume(_ volume: Double) throws {
     let clamped = volume.clamped(to: 0.0...1.0)
     latestVolume = clamped
-    player?.volume = Float(clamped)
+    playerNode.volume = Float(clamped)
   }
 
   func getDurationMs() -> Int {
-    guard let player else { return 0 }
-    return max(0, Int((player.duration * 1000.0).rounded()))
+    guard let currentFile else { return 0 }
+    return max(0, frameCountToMilliseconds(currentFile.length, sampleRate: sampleRate))
   }
 
   func getCurrentPositionMs() -> Int {
-    guard let player else { return 0 }
-    return max(0, Int((player.currentTime * 1000.0).rounded()))
+    return max(0, framePositionToMilliseconds(currentPlaybackFramePosition(), sampleRate: sampleRate))
   }
 
   func getLatestFft() throws -> [Double] {
@@ -539,7 +627,7 @@ private final class AppleAudioEngine {
       return
     }
 
-    let wasPlaying = player?.isPlaying ?? false
+    let wasPlaying = playerNode.isPlaying
     let positionMs = getCurrentPositionMs()
     let volume = latestVolume
     pendingEdit = PendingEdit(
@@ -548,9 +636,8 @@ private final class AppleAudioEngine {
       wasPlaying: wasPlaying,
       volume: volume
     )
+    stopPlayback(releasingFile: true, preservePosition: true)
     _ = try fileAccess.acquireAccess(for: path)
-    player?.stop()
-    player = nil
     preparedAccessPaths.insert(path)
   }
 
@@ -573,7 +660,6 @@ private final class AppleAudioEngine {
     }
     self.pendingEdit = nil
     preparedAccessPaths.remove(pendingEdit.path)
-    fileAccess.releaseAccess(for: pendingEdit.path)
   }
 
   func registerPersistentAccess(path: String) -> Bool {
@@ -597,10 +683,10 @@ private final class AppleAudioEngine {
     fadeTimer = nil
     pendingEdit = nil
     preparedAccessPaths.removeAll()
+    stopPlayback(releasingFile: true, preservePosition: false)
     fileAccess.releaseAllAccess()
-    player?.stop()
-    player = nil
     currentURL = nil
+    currentFile = nil
   }
 
   func statusPayload() -> [String: Any] {
@@ -608,7 +694,7 @@ private final class AppleAudioEngine {
       "playerId": "main",
       "position": getCurrentPositionMs(),
       "duration": getDurationMs(),
-      "isPlaying": player?.isPlaying ?? false,
+      "isPlaying": playerNode.isPlaying,
       "volume": latestVolume,
     ]
     if let path = currentURL?.path {
@@ -623,6 +709,188 @@ private final class AppleAudioEngine {
       return url.standardizedFileURL.resolvingSymlinksInPath().path
     }
     return URL(fileURLWithPath: trimmed).standardizedFileURL.resolvingSymlinksInPath().path
+  }
+
+  private func configureEngineIfNeeded() {
+    guard !isEngineConfigured else { return }
+    engine.attach(playerNode)
+    engine.attach(equalizerNode)
+    engine.connect(playerNode, to: equalizerNode, format: nil)
+    engine.connect(equalizerNode, to: engine.mainMixerNode, format: nil)
+    engine.prepare()
+    isEngineConfigured = true
+  }
+
+  private func applyEqualizerConfig(_ config: AppleEqualizerConfig) {
+    let availableBandCount = equalizerNode.bands.count
+    let userBandCount = min(EqualizerBandLayout.bandCount, max(0, availableBandCount - 1))
+    let clampedBandCount = max(0, min(config.bandCount, userBandCount))
+    let bandFrequencies = Self.bandCenterFrequencies(count: EqualizerBandLayout.bandCount)
+
+    equalizerNode.globalGain = Float(config.enabled ? config.preampDb : 0.0)
+
+    for index in 0..<userBandCount {
+      let band = equalizerNode.bands[index]
+      band.bypass = !config.enabled || index >= clampedBandCount
+      band.filterType = .parametric
+      band.frequency = Float(bandFrequencies[index])
+      band.gain = index < config.bandGainsDb.count ? Float(config.bandGainsDb[index]) : 0.0
+      band.bandwidth = Self.bandwidth(forQ: config.bassBoostQ)
+    }
+
+    if availableBandCount > userBandCount {
+      let bassBand = equalizerNode.bands[userBandCount]
+      bassBand.bypass = !config.enabled || config.bassBoostDb == 0.0
+      bassBand.filterType = .lowShelf
+      bassBand.frequency = Float(config.bassBoostFrequencyHz)
+      bassBand.gain = Float(config.bassBoostDb)
+      bassBand.bandwidth = Self.bandwidth(forQ: config.bassBoostQ)
+    }
+  }
+
+  private func startPlaybackIfNeeded(from framePosition: AVAudioFramePosition, volume: Double) throws {
+    guard let currentFile else {
+      throw NSError(
+        domain: "AudioCore",
+        code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "audio is not loaded"]
+      )
+    }
+
+    configureEngineIfNeeded()
+    applyEqualizerConfig(latestEqualizerConfig)
+
+    if playerNode.isPlaying {
+      playerNode.volume = Float(volume)
+      return
+    }
+
+    let clampedFrame = max(0, min(framePosition, currentFile.length))
+    guard clampedFrame < currentFile.length else {
+      playbackFramePosition = currentFile.length
+      return
+    }
+
+    if engine.isRunning == false {
+      try engine.start()
+    }
+
+    playerNode.stop()
+    let framesRemaining = AVAudioFrameCount(currentFile.length - clampedFrame)
+    playerNode.scheduleSegment(
+      currentFile,
+      startingFrame: clampedFrame,
+      frameCount: framesRemaining,
+      at: nil,
+      completionHandler: { [weak self] in
+        self?.handlePlaybackCompleted()
+      }
+    )
+    playbackFramePosition = clampedFrame
+    isPlaybackScheduled = true
+    playerNode.volume = Float(volume)
+    playerNode.play()
+  }
+
+  private func handlePlaybackCompleted() {
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      if let currentFile = self.currentFile {
+        self.playbackFramePosition = currentFile.length
+      }
+      self.isPlaybackScheduled = false
+    }
+  }
+
+  private func stopPlayback(releasingFile: Bool, preservePosition: Bool) {
+    fadeTimer?.invalidate()
+    fadeTimer = nil
+
+    if preservePosition {
+      playbackFramePosition = currentPlaybackFramePosition()
+    }
+
+    playerNode.stop()
+    isPlaybackScheduled = false
+
+    if releasingFile {
+      currentFile = nil
+    }
+  }
+
+  private func releaseCurrentAccessIfNeeded() {
+    guard let currentURL else { return }
+    fileAccess.releaseAccess(for: currentURL)
+    self.currentURL = nil
+  }
+
+  private func currentPlaybackFramePosition() -> AVAudioFramePosition {
+    guard let currentFile else { return playbackFramePosition }
+    guard playerNode.isPlaying,
+          let nodeTime = playerNode.lastRenderTime,
+          let playerTime = playerNode.playerTime(forNodeTime: nodeTime) else {
+      return max(0, min(playbackFramePosition, currentFile.length))
+    }
+
+    let renderedFrames = max(0, playerTime.sampleTime)
+    return max(0, min(playbackFramePosition + renderedFrames, currentFile.length))
+  }
+
+  private func framePosition(forMilliseconds ms: Int, sampleRate: Double) -> AVAudioFramePosition {
+    guard sampleRate > 0 else { return 0 }
+    let frame = (Double(ms) / 1000.0) * sampleRate
+    return AVAudioFramePosition(frame.rounded(.down))
+  }
+
+  private func framePositionToMilliseconds(_ frame: AVAudioFramePosition, sampleRate: Double) -> Int {
+    guard sampleRate > 0 else { return 0 }
+    return max(0, Int(((Double(frame) / sampleRate) * 1000.0).rounded()))
+  }
+
+  private func frameCountToMilliseconds(_ frameCount: AVAudioFramePosition, sampleRate: Double) -> Int {
+    framePositionToMilliseconds(frameCount, sampleRate: sampleRate)
+  }
+
+  private static func bandwidth(forQ q: Double) -> Float {
+    let safeQ = max(q, 0.0001)
+    let bandwidth = 1.0 / safeQ
+    return Float(max(0.1, min(bandwidth, 4.0)))
+  }
+
+  private static func bandCenterFrequencies(count: Int) -> [Double] {
+    let safeCount = max(count, 1)
+    if safeCount == 1 {
+      return [1000.0]
+    }
+
+    let minFrequency = 32.0
+    let maxFrequency = 16_000.0
+    let ratio = maxFrequency / minFrequency
+    return (0..<safeCount).map { index in
+      let exponent = Double(index) / Double(safeCount - 1)
+      return minFrequency * pow(ratio, exponent)
+    }
+  }
+
+  private static func defaultEqualizerConfig() -> AppleEqualizerConfig {
+    AppleEqualizerConfig(
+      enabled: false,
+      bandCount: EqualizerBandLayout.bandCount,
+      preampDb: 0.0,
+      bassBoostDb: 0.0,
+      bassBoostFrequencyHz: 80.0,
+      bassBoostQ: 0.75,
+      bandGainsDb: Array(repeating: 0.0, count: EqualizerBandLayout.bandCount)
+    )
+  }
+
+  func setEqualizerConfig(_ config: AppleEqualizerConfig) {
+    latestEqualizerConfig = config
+    applyEqualizerConfig(config)
+  }
+
+  func getEqualizerConfig() -> AppleEqualizerConfig {
+    latestEqualizerConfig
   }
 
   private func readInterleavedPCM(
@@ -789,7 +1057,7 @@ private final class AppleAudioEngine {
       step += 1
       let progress = min(1.0, Double(step) / Double(steps))
       let nextVolume = from + ((to - from) * progress)
-      self.player?.volume = Float(nextVolume.clamped(to: 0.0...1.0))
+      self.playerNode.volume = Float(nextVolume.clamped(to: 0.0...1.0))
       if progress >= 1.0 {
         timer.invalidate()
         self.fadeTimer = nil

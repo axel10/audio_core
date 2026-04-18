@@ -195,11 +195,30 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
 
   @override
   Future<void> setEqualizerConfig(EqualizerConfig config) async {
+    await _channel.invokeMethod(
+      'setEqualizerConfig',
+      _equalizerConfigToMap(config),
+    );
     _lastConfig = config;
   }
 
   @override
   Future<EqualizerConfig> getEqualizerConfig() async {
+    try {
+      final Map<dynamic, dynamic>? result = await _channel.invokeMethod(
+        'getEqualizerConfig',
+      );
+      if (result != null) {
+        final config = _equalizerConfigFromMap(
+          result.cast<Object?, Object?>(),
+        );
+        _lastConfig = config;
+        return config;
+      }
+    } catch (_) {
+      // Fall back to cached/default state if the native bridge is unavailable.
+    }
+
     if (_lastConfig != null) return _lastConfig!;
     return _defaultEqualizerConfig();
   }
@@ -399,6 +418,40 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
       bassBoostFrequencyHz: 80.0,
       bassBoostQ: 0.75,
       bandGainsDb: Float32List(bandCount),
+    );
+  }
+
+  Map<String, Object?> _equalizerConfigToMap(EqualizerConfig config) {
+    return <String, Object?>{
+      'enabled': config.enabled,
+      'bandCount': config.bandCount,
+      'preampDb': config.preampDb,
+      'bassBoostDb': config.bassBoostDb,
+      'bassBoostFrequencyHz': config.bassBoostFrequencyHz,
+      'bassBoostQ': config.bassBoostQ,
+      'bandGainsDb': config.bandGainsDb.toList(growable: false),
+    };
+  }
+
+  EqualizerConfig _equalizerConfigFromMap(Map<Object?, Object?> map) {
+    final rawGains = map['bandGainsDb'];
+    final gains = rawGains is List
+        ? Float32List.fromList(
+            rawGains
+                .map((entry) => (entry as num?)?.toDouble() ?? 0.0)
+                .toList(growable: false),
+          )
+        : Float32List(0);
+
+    return EqualizerConfig(
+      enabled: map['enabled'] as bool? ?? false,
+      bandCount: (map['bandCount'] as num?)?.toInt() ?? 0,
+      preampDb: (map['preampDb'] as num?)?.toDouble() ?? 0.0,
+      bassBoostDb: (map['bassBoostDb'] as num?)?.toDouble() ?? 0.0,
+      bassBoostFrequencyHz:
+          (map['bassBoostFrequencyHz'] as num?)?.toDouble() ?? 80.0,
+      bassBoostQ: (map['bassBoostQ'] as num?)?.toDouble() ?? 0.75,
+      bandGainsDb: gains,
     );
   }
 
