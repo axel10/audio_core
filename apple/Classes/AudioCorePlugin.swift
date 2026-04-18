@@ -11,10 +11,26 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
   private let fileAccess = SecurityScopedFileAccessCoordinator()
   private let engine: AppleAudioEngine
   private var channel: FlutterMethodChannel?
+  private var notificationTokens: [NSObjectProtocol] = []
+
+#if os(iOS)
+  private let audioSession = AVAudioSession.sharedInstance()
+  private var shouldResumeAfterInterruption = false
+#endif
 
   public override init() {
     self.engine = AppleAudioEngine(fileAccess: fileAccess)
     super.init()
+    #if os(iOS)
+    configureAudioSession()
+    registerAudioSessionObservers()
+    #endif
+  }
+
+  deinit {
+    let center = NotificationCenter.default
+    notificationTokens.forEach { center.removeObserver($0) }
+    notificationTokens.removeAll()
   }
 
   public static func register(with registrar: FlutterPluginRegistrar) {
@@ -30,6 +46,9 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
     case "sayHello":
+      #if os(iOS)
+      configureAudioSession()
+      #endif
       engine.ensureReady()
       sendPlayerState()
       result(nil)
@@ -54,6 +73,9 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       }
       let durationMs = Self.readInt(call.arguments, key: "durationMs") ?? 0
       do {
+        #if os(iOS)
+        try activateAudioSession()
+        #endif
         try engine.crossfade(path: path, durationMs: durationMs)
         sendPlayerState()
         result(nil)
@@ -64,6 +86,9 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       let fadeDurationMs = Self.readInt(call.arguments, key: "fadeDurationMs") ?? 0
       let targetVolume = Self.readDouble(call.arguments, key: "targetVolume")
       do {
+        #if os(iOS)
+        try activateAudioSession()
+        #endif
         try engine.play(fadeDurationMs: fadeDurationMs, targetVolume: targetVolume)
         sendPlayerState()
         result(nil)
@@ -183,6 +208,10 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       result(engine.listPersistentAccessPaths())
     case "dispose":
       engine.dispose()
+      #if os(iOS)
+      deactivateAudioSession()
+      shouldResumeAfterInterruption = false
+      #endif
       sendPlayerState()
       result(nil)
     default:
@@ -219,6 +248,110 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.isEmpty ? nil : trimmed
   }
+
+#if os(iOS)
+  private func configureAudioSession() {
+    do {
+      try audioSession.setCategory(
+        .playback,
+        mode: .default,
+        options: [.allowAirPlay, .allowBluetooth, .allowBluetoothA2DP]
+      )
+    } catch {
+      debugPrint("AudioCorePlugin: failed to configure AVAudioSession: \(error)")
+    }
+  }
+
+  private func activateAudioSession() throws {
+    try audioSession.setCategory(
+      .playback,
+      mode: .default,
+      options: [.allowAirPlay, .allowBluetooth, .allowBluetoothA2DP]
+    )
+    try audioSession.setActive(true, options: [])
+  }
+
+  private func deactivateAudioSession() {
+    do {
+      try audioSession.setActive(false, options: [.notifyOthersOnDeactivation])
+    } catch {
+      debugPrint("AudioCorePlugin: failed to deactivate AVAudioSession: \(error)")
+    }
+  }
+
+  private func registerAudioSessionObservers() {
+    let center = NotificationCenter.default
+    notificationTokens.append(
+      center.addObserver(
+        forName: AVAudioSession.interruptionNotification,
+        object: audioSession,
+        queue: .main
+      ) { [weak self] notification in
+        self?.handleInterruption(notification)
+      }
+    )
+    notificationTokens.append(
+      center.addObserver(
+        forName: AVAudioSession.routeChangeNotification,
+        object: audioSession,
+        queue: .main
+      ) { [weak self] notification in
+        self?.handleRouteChange(notification)
+      }
+    )
+  }
+
+  private func handleInterruption(_ notification: Notification) {
+    guard let userInfo = notification.userInfo,
+          let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+          let interruptionType = AVAudioSession.InterruptionType(rawValue: typeValue) else {
+      return
+    }
+
+    switch interruptionType {
+    case .began:
+      if engine.isPlaying {
+        shouldResumeAfterInterruption = true
+        try? engine.pause(fadeDurationMs: 0)
+        sendPlayerState()
+      } else {
+        shouldResumeAfterInterruption = false
+      }
+    case .ended:
+      let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+      let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+      let shouldResume = options.contains(.shouldResume)
+      if shouldResumeAfterInterruption && shouldResume {
+        do {
+          try activateAudioSession()
+          try engine.play(fadeDurationMs: 0, targetVolume: nil)
+        } catch {
+          debugPrint("AudioCorePlugin: failed to resume after interruption: \(error)")
+        }
+      }
+      shouldResumeAfterInterruption = false
+      sendPlayerState()
+    @unknown default:
+      shouldResumeAfterInterruption = false
+    }
+  }
+
+  private func handleRouteChange(_ notification: Notification) {
+    guard let userInfo = notification.userInfo,
+          let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
+          let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else {
+      return
+    }
+
+    guard reason == .oldDeviceUnavailable else { return }
+
+    if engine.isPlaying {
+      shouldResumeAfterInterruption = false
+      try? engine.pause(fadeDurationMs: 0)
+      sendPlayerState()
+    }
+  }
+#endif
 }
 
 private final class AppleAudioEngine {
@@ -246,6 +379,10 @@ private final class AppleAudioEngine {
 
   func ensureReady() {
     // The native engine is lazy; no-op here keeps the channel contract simple.
+  }
+
+  var isPlaying: Bool {
+    player?.isPlaying ?? false
   }
 
   func load(path: String) throws {
