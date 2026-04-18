@@ -224,7 +224,7 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
   }
 
   @override
-  bool get supportsCrossfade => false;
+  bool get supportsCrossfade => true;
 
   @override
   Future<String?> extractFingerprint(String path) async {

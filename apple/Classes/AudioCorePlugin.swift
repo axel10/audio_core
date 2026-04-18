@@ -423,6 +423,45 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
 #endif
 }
 
+private final class PlaybackDeck {
+  var playerNode = AVAudioPlayerNode()
+  var loadedURL: URL?
+  var loadedFile: AVAudioFile?
+  var sampleRate: Double = 44_100
+  var playbackFramePosition: AVAudioFramePosition = 0
+  var isPlaybackScheduled = false
+  var gain: Double = 1.0
+
+  var isLoaded: Bool {
+    loadedFile != nil
+  }
+
+  var isPlaying: Bool {
+    playerNode.isPlaying
+  }
+
+  func currentPlaybackFramePosition() -> AVAudioFramePosition {
+    guard let currentFile = loadedFile else { return playbackFramePosition }
+    guard playerNode.isPlaying,
+          let nodeTime = playerNode.lastRenderTime,
+          let playerTime = playerNode.playerTime(forNodeTime: nodeTime) else {
+      return max(0, min(playbackFramePosition, currentFile.length))
+    }
+
+    let renderedFrames = max(0, playerTime.sampleTime)
+    return max(0, min(playbackFramePosition + renderedFrames, currentFile.length))
+  }
+
+  func clear(releasingFile: Bool) {
+    playerNode.stop()
+    isPlaybackScheduled = false
+    if releasingFile {
+      loadedURL = nil
+      loadedFile = nil
+    }
+  }
+}
+
 private final class AppleAudioEngine {
   private struct PendingEdit {
     let path: String
@@ -441,19 +480,17 @@ private final class AppleAudioEngine {
   private let fftBinCount = 512
   private let fileAccess: SecurityScopedFileAccessCoordinator
   private let engine = AVAudioEngine()
-  private let playerNode = AVAudioPlayerNode()
+  private let deckMixerNode = AVAudioMixerNode()
   private let equalizerNode = AVAudioUnitEQ(numberOfBands: EqualizerBandLayout.totalBandCount)
-  private var currentURL: URL?
-  private var currentFile: AVAudioFile?
-  private var sampleRate: Double = 44_100
+  private let currentDeck = PlaybackDeck()
+  private let incomingDeck = PlaybackDeck()
   private var latestVolume: Double = 1.0
   private var latestEqualizerConfig = AppleAudioEngine.defaultEqualizerConfig()
   private var pendingEdit: PendingEdit?
   private var fadeTimer: Timer?
+  private var fadeGeneration: UInt64 = 0
   private var preparedAccessPaths = Set<String>()
-  private var playbackFramePosition: AVAudioFramePosition = 0
   private var isEngineConfigured = false
-  private var isPlaybackScheduled = false
 
   init(fileAccess: SecurityScopedFileAccessCoordinator) {
     self.fileAccess = fileAccess
@@ -466,7 +503,7 @@ private final class AppleAudioEngine {
   }
 
   var isPlaying: Bool {
-    playerNode.isPlaying
+    publicDeck()?.isPlaying ?? false
   }
 
   func load(path: String) throws {
@@ -475,21 +512,28 @@ private final class AppleAudioEngine {
 
     let url = try fileAccess.acquireAccess(for: path)
     let file = try AVAudioFile(forReading: url)
-    sampleRate = file.processingFormat.sampleRate
-    currentURL = url
-    currentFile = file
-    playbackFramePosition = 0
-    isPlaybackScheduled = false
+    currentDeck.sampleRate = file.processingFormat.sampleRate
+    currentDeck.loadedURL = url
+    currentDeck.loadedFile = file
+    currentDeck.playbackFramePosition = 0
+    currentDeck.isPlaybackScheduled = false
+    currentDeck.gain = 1.0
     preparedAccessPaths.remove(url.path)
   }
 
   func crossfade(path: String, durationMs: Int) throws {
-    try load(path: path)
-    try play(fadeDurationMs: durationMs, targetVolume: latestVolume)
+    let duration = max(0, durationMs)
+    guard currentDeck.isLoaded, currentDeck.isPlaying, duration > 0 else {
+      try load(path: path)
+      try play(fadeDurationMs: duration, targetVolume: latestVolume)
+      return
+    }
+
+    try startCrossfade(path: path, durationMs: duration)
   }
 
   func play(fadeDurationMs: Int, targetVolume: Double?) throws {
-    guard currentFile != nil else {
+    guard let activeDeck = publicDeck() else {
       throw NSError(
         domain: "AudioCore",
         code: 1,
@@ -499,37 +543,53 @@ private final class AppleAudioEngine {
 
     let target = (targetVolume ?? latestVolume).clamped(to: 0.0...1.0)
     latestVolume = target
-    try startPlaybackIfNeeded(from: currentPlaybackFramePosition(), volume: target)
+    try startPlaybackIfNeeded(on: activeDeck, from: activeDeck.currentPlaybackFramePosition(), volume: target)
 
     if fadeDurationMs > 0 {
-      playerNode.volume = 0.0
-      fadeVolume(from: 0.0, to: target, durationMs: fadeDurationMs) { [weak self] in
-        self?.playerNode.volume = Float(target)
-      }
+      activeDeck.playerNode.volume = 0.0
+      fadeVolume(
+        from: 0.0,
+        to: target,
+        durationMs: fadeDurationMs,
+        update: { nextVolume in
+          activeDeck.playerNode.volume = Float(nextVolume)
+        },
+        completion: {
+          activeDeck.playerNode.volume = Float(target)
+        }
+      )
     } else {
-      playerNode.volume = Float(target)
+      activeDeck.playerNode.volume = Float(target)
     }
   }
 
   func pause(fadeDurationMs: Int) throws {
-    guard playerNode.isPlaying else { return }
+    guard let activeDeck = publicDeck(), activeDeck.isPlaying else { return }
 
     if fadeDurationMs > 0 {
-      let originalVolume = Double(playerNode.volume)
-      fadeVolume(from: originalVolume, to: 0.0, durationMs: fadeDurationMs) { [weak self] in
-        guard let self else { return }
-        self.playbackFramePosition = self.currentPlaybackFramePosition()
-        self.stopPlayback(releasingFile: false, preservePosition: true)
-        self.playerNode.volume = Float(self.latestVolume)
-      }
+      let originalVolume = Double(activeDeck.playerNode.volume)
+      fadeVolume(
+        from: originalVolume,
+        to: 0.0,
+        durationMs: fadeDurationMs,
+        update: { nextVolume in
+          activeDeck.playerNode.volume = Float(nextVolume)
+        },
+        completion: { [weak self] in
+          guard let self else { return }
+          activeDeck.playbackFramePosition = activeDeck.currentPlaybackFramePosition()
+          self.stopPlayback(releasingFile: false, preservePosition: true)
+          activeDeck.playerNode.volume = Float(self.latestVolume)
+        }
+      )
     } else {
-      playbackFramePosition = currentPlaybackFramePosition()
+      activeDeck.playbackFramePosition = activeDeck.currentPlaybackFramePosition()
       stopPlayback(releasingFile: false, preservePosition: true)
     }
   }
 
   func seek(positionMs: Int) throws {
-    guard let currentFile else {
+    guard let currentFile = publicFile() else {
       throw NSError(
         domain: "AudioCore",
         code: 2,
@@ -537,39 +597,50 @@ private final class AppleAudioEngine {
       )
     }
 
-    let targetFrame = framePosition(forMilliseconds: positionMs, sampleRate: sampleRate)
+    let targetDeck = publicDeck()
+    let targetFrame = framePosition(forMilliseconds: positionMs, sampleRate: publicSampleRate())
     let clampedFrame = max(0, min(targetFrame, currentFile.length))
-    let wasPlaying = playerNode.isPlaying
-    playbackFramePosition = clampedFrame
+    let wasPlaying = targetDeck?.isPlaying ?? false
+    if let deck = targetDeck {
+      deck.playbackFramePosition = clampedFrame
+    }
 
     if wasPlaying {
       stopPlayback(releasingFile: false, preservePosition: true)
-      try startPlaybackIfNeeded(from: clampedFrame, volume: latestVolume)
+      if let deck = targetDeck {
+        try startPlaybackIfNeeded(on: deck, from: clampedFrame, volume: latestVolume)
+      }
     }
   }
 
   func setVolume(_ volume: Double) throws {
     let clamped = volume.clamped(to: 0.0...1.0)
     latestVolume = clamped
-    playerNode.volume = Float(clamped)
+    if currentDeck.isLoaded {
+      currentDeck.playerNode.volume = Float(clamped * currentDeck.gain)
+    }
+    if incomingDeck.isLoaded {
+      incomingDeck.playerNode.volume = Float(clamped * incomingDeck.gain)
+    }
   }
 
   func getDurationMs() -> Int {
-    guard let currentFile else { return 0 }
-    return max(0, frameCountToMilliseconds(currentFile.length, sampleRate: sampleRate))
+    guard let currentFile = publicFile() else { return 0 }
+    return max(0, frameCountToMilliseconds(currentFile.length, sampleRate: publicSampleRate()))
   }
 
   func getCurrentPositionMs() -> Int {
-    return max(0, framePositionToMilliseconds(currentPlaybackFramePosition(), sampleRate: sampleRate))
+    guard let deck = publicDeck() else { return 0 }
+    return max(0, framePositionToMilliseconds(deck.currentPlaybackFramePosition(), sampleRate: deck.sampleRate))
   }
 
   func getLatestFft() throws -> [Double] {
-    guard let url = currentURL else {
+    guard let url = publicURL() else {
       return Array(repeating: 0.0, count: fftBinCount)
     }
 
     let positionMs = getCurrentPositionMs()
-    let centerFrame = AVAudioFramePosition((Double(positionMs) / 1000.0) * sampleRate)
+    let centerFrame = AVAudioFramePosition((Double(positionMs) / 1000.0) * publicSampleRate())
     let startFrame = max(0, centerFrame - AVAudioFramePosition(fftSize / 2))
     let monoSamples = try readMonoWindow(
       url: url,
@@ -615,19 +686,19 @@ private final class AppleAudioEngine {
         return
       }
 
-      if currentURL?.path != normalizedPath {
+      if currentDeck.loadedURL?.path != normalizedPath {
         _ = try fileAccess.acquireAccess(for: normalizedPath)
         preparedAccessPaths.insert(normalizedPath)
         return
       }
     }
 
-    guard let path = currentURL?.path else { return }
+    guard let path = currentDeck.loadedURL?.path else { return }
     if preparedAccessPaths.contains(path) {
       return
     }
 
-    let wasPlaying = playerNode.isPlaying
+    let wasPlaying = currentDeck.isPlaying
     let positionMs = getCurrentPositionMs()
     let volume = latestVolume
     pendingEdit = PendingEdit(
@@ -644,7 +715,7 @@ private final class AppleAudioEngine {
   func finishFileWrite(path: String? = nil) throws {
     if let path {
       let normalizedPath = normalizedFilePath(path)
-      if currentURL?.path != normalizedPath {
+      if currentDeck.loadedURL?.path != normalizedPath {
         fileAccess.releaseAccess(for: normalizedPath)
         preparedAccessPaths.remove(normalizedPath)
         return
@@ -685,8 +756,10 @@ private final class AppleAudioEngine {
     preparedAccessPaths.removeAll()
     stopPlayback(releasingFile: true, preservePosition: false)
     fileAccess.releaseAllAccess()
-    currentURL = nil
-    currentFile = nil
+    currentDeck.loadedURL = nil
+    currentDeck.loadedFile = nil
+    incomingDeck.loadedURL = nil
+    incomingDeck.loadedFile = nil
   }
 
   func statusPayload() -> [String: Any] {
@@ -694,10 +767,10 @@ private final class AppleAudioEngine {
       "playerId": "main",
       "position": getCurrentPositionMs(),
       "duration": getDurationMs(),
-      "isPlaying": playerNode.isPlaying,
+      "isPlaying": publicDeck()?.isPlaying ?? false,
       "volume": latestVolume,
     ]
-    if let path = currentURL?.path {
+    if let path = publicURL()?.path {
       payload["path"] = path
     }
     return payload
@@ -711,11 +784,37 @@ private final class AppleAudioEngine {
     return URL(fileURLWithPath: trimmed).standardizedFileURL.resolvingSymlinksInPath().path
   }
 
+  private func publicDeck() -> PlaybackDeck? {
+    if incomingDeck.isLoaded {
+      return incomingDeck
+    }
+    if currentDeck.isLoaded {
+      return currentDeck
+    }
+    return nil
+  }
+
+  private func publicURL() -> URL? {
+    publicDeck()?.loadedURL
+  }
+
+  private func publicFile() -> AVAudioFile? {
+    publicDeck()?.loadedFile
+  }
+
+  private func publicSampleRate() -> Double {
+    publicDeck()?.sampleRate ?? 44_100
+  }
+
   private func configureEngineIfNeeded() {
     guard !isEngineConfigured else { return }
-    engine.attach(playerNode)
+    engine.attach(currentDeck.playerNode)
+    engine.attach(incomingDeck.playerNode)
+    engine.attach(deckMixerNode)
     engine.attach(equalizerNode)
-    engine.connect(playerNode, to: equalizerNode, format: nil)
+    engine.connect(currentDeck.playerNode, to: deckMixerNode, format: nil)
+    engine.connect(incomingDeck.playerNode, to: deckMixerNode, format: nil)
+    engine.connect(deckMixerNode, to: equalizerNode, format: nil)
     engine.connect(equalizerNode, to: engine.mainMixerNode, format: nil)
     engine.prepare()
     isEngineConfigured = true
@@ -748,8 +847,12 @@ private final class AppleAudioEngine {
     }
   }
 
-  private func startPlaybackIfNeeded(from framePosition: AVAudioFramePosition, volume: Double) throws {
-    guard let currentFile else {
+  private func startPlaybackIfNeeded(
+    on deck: PlaybackDeck,
+    from framePosition: AVAudioFramePosition,
+    volume: Double
+  ) throws {
+    guard let currentFile = deck.loadedFile else {
       throw NSError(
         domain: "AudioCore",
         code: 1,
@@ -760,14 +863,14 @@ private final class AppleAudioEngine {
     configureEngineIfNeeded()
     applyEqualizerConfig(latestEqualizerConfig)
 
-    if playerNode.isPlaying {
-      playerNode.volume = Float(volume)
+    if deck.playerNode.isPlaying {
+      deck.playerNode.volume = Float(volume)
       return
     }
 
     let clampedFrame = max(0, min(framePosition, currentFile.length))
     guard clampedFrame < currentFile.length else {
-      playbackFramePosition = currentFile.length
+      deck.playbackFramePosition = currentFile.length
       return
     }
 
@@ -775,65 +878,164 @@ private final class AppleAudioEngine {
       try engine.start()
     }
 
-    playerNode.stop()
+    deck.playerNode.stop()
     let framesRemaining = AVAudioFrameCount(currentFile.length - clampedFrame)
-    playerNode.scheduleSegment(
+    deck.playerNode.scheduleSegment(
       currentFile,
       startingFrame: clampedFrame,
       frameCount: framesRemaining,
       at: nil,
       completionHandler: { [weak self] in
-        self?.handlePlaybackCompleted()
+        self?.handlePlaybackCompleted(deck: deck)
       }
     )
-    playbackFramePosition = clampedFrame
-    isPlaybackScheduled = true
-    playerNode.volume = Float(volume)
-    playerNode.play()
+    deck.playbackFramePosition = clampedFrame
+    deck.isPlaybackScheduled = true
+    deck.playerNode.volume = Float(volume)
+    deck.playerNode.play()
   }
 
-  private func handlePlaybackCompleted() {
+  private func handlePlaybackCompleted(deck: PlaybackDeck) {
     DispatchQueue.main.async { [weak self] in
       guard let self else { return }
-      if let currentFile = self.currentFile {
-        self.playbackFramePosition = currentFile.length
+      if let currentFile = deck.loadedFile {
+        deck.playbackFramePosition = currentFile.length
       }
-      self.isPlaybackScheduled = false
+      deck.isPlaybackScheduled = false
     }
   }
 
   private func stopPlayback(releasingFile: Bool, preservePosition: Bool) {
     fadeTimer?.invalidate()
     fadeTimer = nil
+    fadeGeneration &+= 1
 
     if preservePosition {
-      playbackFramePosition = currentPlaybackFramePosition()
+      if let deck = publicDeck() {
+        deck.playbackFramePosition = deck.currentPlaybackFramePosition()
+      }
     }
 
-    playerNode.stop()
-    isPlaybackScheduled = false
+    if releasingFile {
+      if let currentURL = currentDeck.loadedURL {
+        fileAccess.releaseAccess(for: currentURL)
+      }
+      if let incomingURL = incomingDeck.loadedURL {
+        fileAccess.releaseAccess(for: incomingURL)
+      }
+    }
+
+    currentDeck.clear(releasingFile: releasingFile)
+    incomingDeck.clear(releasingFile: releasingFile)
 
     if releasingFile {
-      currentFile = nil
+      currentDeck.playbackFramePosition = 0
+      incomingDeck.playbackFramePosition = 0
     }
   }
 
   private func releaseCurrentAccessIfNeeded() {
-    guard let currentURL else { return }
+    guard let currentURL = currentDeck.loadedURL else { return }
     fileAccess.releaseAccess(for: currentURL)
-    self.currentURL = nil
+    currentDeck.loadedURL = nil
   }
 
-  private func currentPlaybackFramePosition() -> AVAudioFramePosition {
-    guard let currentFile else { return playbackFramePosition }
-    guard playerNode.isPlaying,
-          let nodeTime = playerNode.lastRenderTime,
-          let playerTime = playerNode.playerTime(forNodeTime: nodeTime) else {
-      return max(0, min(playbackFramePosition, currentFile.length))
+  private func startCrossfade(path: String, durationMs: Int) throws {
+    guard currentDeck.loadedFile != nil else {
+      try load(path: path)
+      try play(fadeDurationMs: durationMs, targetVolume: latestVolume)
+      return
     }
 
-    let renderedFrames = max(0, playerTime.sampleTime)
-    return max(0, min(playbackFramePosition + renderedFrames, currentFile.length))
+    configureEngineIfNeeded()
+    applyEqualizerConfig(latestEqualizerConfig)
+
+    if incomingDeck.loadedURL != nil {
+      if let oldIncomingURL = incomingDeck.loadedURL {
+        fileAccess.releaseAccess(for: oldIncomingURL)
+      }
+      incomingDeck.clear(releasingFile: true)
+    }
+
+    let incomingURL = try fileAccess.acquireAccess(for: path)
+    let incomingFile = try AVAudioFile(forReading: incomingURL)
+    incomingDeck.sampleRate = incomingFile.processingFormat.sampleRate
+    incomingDeck.loadedURL = incomingURL
+    incomingDeck.loadedFile = incomingFile
+    incomingDeck.playbackFramePosition = 0
+    incomingDeck.isPlaybackScheduled = false
+    incomingDeck.gain = 0.0
+
+    currentDeck.playbackFramePosition = currentDeck.currentPlaybackFramePosition()
+    currentDeck.gain = 1.0
+    currentDeck.playerNode.volume = Float(latestVolume)
+
+    try startPlaybackIfNeeded(on: incomingDeck, from: 0, volume: 0.0)
+    incomingDeck.playerNode.volume = 0.0
+    currentDeck.playerNode.volume = Float(latestVolume)
+
+    fadeTimer?.invalidate()
+    fadeTimer = nil
+    fadeGeneration &+= 1
+    let generation = fadeGeneration
+    let steps = max(1, durationMs / 16)
+    var step = 0
+    let stepDurationSeconds = Double(durationMs) / Double(steps) / 1000.0
+
+    fadeTimer = Timer.scheduledTimer(withTimeInterval: stepDurationSeconds, repeats: true) { [weak self] timer in
+      guard let self else {
+        timer.invalidate()
+        return
+      }
+
+      guard self.fadeGeneration == generation else {
+        timer.invalidate()
+        return
+      }
+
+      step += 1
+      let progress = min(1.0, Double(step) / Double(steps))
+      let currentGain = 1.0 - progress
+      let incomingGain = progress
+
+      self.currentDeck.gain = currentGain
+      self.incomingDeck.gain = incomingGain
+      self.currentDeck.playerNode.volume = Float((self.latestVolume * currentGain).clamped(to: 0.0...1.0))
+      self.incomingDeck.playerNode.volume = Float((self.latestVolume * incomingGain).clamped(to: 0.0...1.0))
+
+      if progress >= 1.0 {
+        timer.invalidate()
+        self.fadeTimer = nil
+        self.settleCrossfade()
+      }
+    }
+
+    RunLoop.main.add(fadeTimer!, forMode: .common)
+  }
+
+  private func settleCrossfade() {
+    guard incomingDeck.loadedFile != nil else { return }
+
+    if let oldURL = currentDeck.loadedURL {
+      fileAccess.releaseAccess(for: oldURL)
+    }
+
+    swap(&currentDeck.playerNode, &incomingDeck.playerNode)
+    swap(&currentDeck.loadedURL, &incomingDeck.loadedURL)
+    swap(&currentDeck.loadedFile, &incomingDeck.loadedFile)
+    swap(&currentDeck.sampleRate, &incomingDeck.sampleRate)
+    swap(&currentDeck.playbackFramePosition, &incomingDeck.playbackFramePosition)
+    swap(&currentDeck.isPlaybackScheduled, &incomingDeck.isPlaybackScheduled)
+    swap(&currentDeck.gain, &incomingDeck.gain)
+
+    currentDeck.gain = 1.0
+    currentDeck.playerNode.volume = Float(latestVolume)
+    currentDeck.playbackFramePosition = currentDeck.currentPlaybackFramePosition()
+
+    incomingDeck.clear(releasingFile: true)
+    if let currentURL = currentDeck.loadedURL {
+      preparedAccessPaths.remove(currentURL.path)
+    }
   }
 
   private func framePosition(forMilliseconds ms: Int, sampleRate: Double) -> AVAudioFramePosition {
@@ -1040,9 +1242,12 @@ private final class AppleAudioEngine {
     from: Double,
     to: Double,
     durationMs: Int,
+    update: @escaping (Double) -> Void,
     completion: @escaping () -> Void
   ) {
     fadeTimer?.invalidate()
+    fadeGeneration &+= 1
+    let generation = fadeGeneration
     let steps = max(1, durationMs / 16)
     var step = 0
     let stepDurationSeconds = Double(durationMs) / Double(steps) / 1000.0
@@ -1054,10 +1259,14 @@ private final class AppleAudioEngine {
         timer.invalidate()
         return
       }
+      guard self.fadeGeneration == generation else {
+        timer.invalidate()
+        return
+      }
       step += 1
       let progress = min(1.0, Double(step) / Double(steps))
       let nextVolume = from + ((to - from) * progress)
-      self.playerNode.volume = Float(nextVolume.clamped(to: 0.0...1.0))
+      update(nextVolume.clamped(to: 0.0...1.0))
       if progress >= 1.0 {
         timer.invalidate()
         self.fadeTimer = nil
