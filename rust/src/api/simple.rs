@@ -1,8 +1,123 @@
 pub mod audio_fingerprint;
+#[cfg(not(any(target_os = "ios", target_os = "macos")))]
 pub mod controller;
+#[cfg(not(any(target_os = "ios", target_os = "macos")))]
 pub mod equalizer;
+#[cfg(not(any(target_os = "ios", target_os = "macos")))]
 pub mod fft;
+
 pub mod metadata;
+
+// Remove the audio_fingerprint stub as we now compile the real one everywhere
+#[cfg(any(target_os = "ios", target_os = "macos"))]
+pub mod equalizer {
+    #[derive(Debug, Clone, Default)]
+    pub struct EqualizerConfig {
+        pub enabled: bool,
+        pub band_count: i32,
+        pub preamp_db: f32,
+        pub bass_boost_db: f32,
+        pub bass_boost_frequency_hz: f32,
+        pub bass_boost_q: f32,
+        pub band_gains_db: Vec<f32>,
+    }
+}
+
+#[cfg(any(target_os = "ios", target_os = "macos"))]
+pub mod controller {
+    use super::equalizer::EqualizerConfig;
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub enum FadeMode {
+        Sequential,
+        Crossfade,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub struct FadeSettings {
+        pub fade_on_switch: bool,
+        pub fade_on_pause_resume: bool,
+        pub duration_ms: i64,
+        pub mode: FadeMode,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    pub struct PlaybackState {
+        pub position_ms: i64,
+        pub duration_ms: i64,
+        pub is_playing: bool,
+        pub volume: f32,
+        pub path: Option<String>,
+        pub error: Option<String>,
+    }
+
+    pub fn init_app() {}
+    pub fn load_audio_file(_path: String) -> Result<(), String> {
+        Ok(())
+    }
+    pub fn crossfade_to_audio_file(_path: String, _duration_ms: i64) -> Result<(), String> {
+        Ok(())
+    }
+    pub fn play_audio(_fade_ms: i64) -> Result<(), String> {
+        Ok(())
+    }
+    pub fn pause_audio(_fade_ms: i64) -> Result<(), String> {
+        Ok(())
+    }
+    pub fn toggle_audio() -> Result<bool, String> {
+        Ok(false)
+    }
+    pub fn seek_audio_ms(_ms: i64) -> Result<(), String> {
+        Ok(())
+    }
+    pub fn set_audio_volume(_volume: f32) -> Result<(), String> {
+        Ok(())
+    }
+    pub fn get_audio_position_ms() -> i64 {
+        0
+    }
+    pub fn get_audio_duration_ms() -> i64 {
+        0
+    }
+    pub fn is_audio_playing() -> bool {
+        false
+    }
+    pub fn get_loaded_audio_path() -> Option<String> {
+        None
+    }
+    pub fn get_latest_fft() -> Vec<f32> {
+        vec![]
+    }
+    pub fn get_audio_pcm(_path: Option<String>, _stride: usize) -> Result<Vec<f32>, String> {
+        Err("Not supported".to_string())
+    }
+    pub fn set_audio_equalizer_config(_config: EqualizerConfig) -> Result<(), String> {
+        Ok(())
+    }
+    pub fn get_audio_equalizer_config() -> EqualizerConfig {
+        EqualizerConfig::default()
+    }
+    pub fn dispose_audio() -> Result<(), String> {
+        Ok(())
+    }
+    pub fn snapshot_playback_state() -> PlaybackState {
+        PlaybackState::default()
+    }
+    pub fn prepare_for_file_write() -> Result<(), String> {
+        Ok(())
+    }
+    pub fn finish_file_write() -> Result<(), String> {
+        Ok(())
+    }
+    pub fn handle_device_changed() -> Result<(), String> {
+        Ok(())
+    }
+}
+
+#[cfg(any(target_os = "ios", target_os = "macos"))]
+pub mod fft {
+    pub const RAW_FFT_BINS: usize = 0;
+}
 
 use crate::frb_generated::StreamSink;
 use std::thread;
@@ -54,3 +169,4 @@ pub fn subscribe_playback_state(
         }
     });
 }
+

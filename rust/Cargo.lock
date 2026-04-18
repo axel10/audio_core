@@ -122,7 +122,6 @@ checksum = "c59bdb34bc650a32731b31bd8f0829cc15d24a708ee31559e0bb34f2bc320cba"
 name = "audio_core"
 version = "0.1.0"
 dependencies = [
- "android_logger",
  "anyhow",
  "base64",
  "cpal 0.17.3",
@@ -130,10 +129,8 @@ dependencies = [
  "flutter_rust_bridge",
  "fundsp",
  "id3",
- "jni",
  "lofty",
  "log",
- "ndk-context",
  "realfft",
  "ringbuf",
  "rodio",

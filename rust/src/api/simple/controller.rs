@@ -1,6 +1,5 @@
 use super::equalizer::{EqSource, EqualizerConfig, EqualizerShared};
 use super::fft::{clear_fft_buffer, FftSource, RAW_FFT_BINS};
-use android_logger::Config;
 use log::{info, LevelFilter};
 use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
@@ -43,9 +42,6 @@ impl Default for FadeSettings {
     }
 }
 
-pub fn init_logger() {
-    android_logger::init_once(Config::default().with_max_level(LevelFilter::Debug));
-}
 
 const DEFAULT_OUTPUT_POLL_INTERVAL: Duration = Duration::from_millis(1000);
 const CROSSFADE_TICK_INTERVAL: Duration = Duration::from_millis(16);
@@ -896,7 +892,6 @@ fn drive_volume_fade(
 
 pub fn init_app() {
     flutter_rust_bridge::setup_default_user_utils();
-    init_logger();
     info!("[AudioDeviceMonitor] init_app called, starting monitor thread...");
     start_default_output_monitor();
 
