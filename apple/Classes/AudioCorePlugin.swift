@@ -124,6 +124,18 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       } catch {
         result(FlutterError(code: "PCM_FAILED", message: error.localizedDescription, details: nil))
       }
+    case "getFingerprintPcm":
+      guard let args = call.arguments as? [String: Any],
+            let path = args["path"] as? String else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
+        return
+      }
+      let maxDurationMs = Self.readInt(call.arguments, key: "maxDurationMs") ?? 20_000
+      do {
+        result(try engine.getFingerprintPcm(path: path, maxDurationMs: maxDurationMs))
+      } catch {
+        result(FlutterError(code: "PCM_FAILED", message: error.localizedDescription, details: nil))
+      }
     case "prepareForFileWrite":
       do {
         try engine.prepareForFileWrite()
@@ -304,6 +316,21 @@ private final class AppleAudioEngine {
     return Int(file.processingFormat.channelCount)
   }
 
+  func getFingerprintPcm(path: String, maxDurationMs: Int) throws -> [String: Any] {
+    let url = try resolveURL(path)
+    let file = try AVAudioFile(forReading: url)
+    let format = file.processingFormat
+    return [
+      "samples": try readInterleavedPCM(
+        url: url,
+        sampleStride: 0,
+        maxDurationMs: maxDurationMs
+      ),
+      "sampleRate": Int(format.sampleRate.rounded()),
+      "channels": Int(format.channelCount),
+    ]
+  }
+
   func prepareForFileWrite() throws {
     guard let path = currentURL?.path else { return }
     let wasPlaying = player?.isPlaying ?? false
@@ -371,12 +398,30 @@ private final class AppleAudioEngine {
     return URL(fileURLWithPath: trimmed)
   }
 
-  private func readInterleavedPCM(url: URL, sampleStride: Int) throws -> [Float] {
+  private func readInterleavedPCM(
+    url: URL,
+    sampleStride: Int,
+    maxDurationMs: Int = 0
+  ) throws -> [Float] {
     let file = try AVAudioFile(forReading: url)
     let format = file.processingFormat
     let channels = Int(format.channelCount)
     let stride = max(sampleStride, 1)
     let bufferCapacity: AVAudioFrameCount = 4096
+    let maxFrames = maxDurationMs > 0
+      ? AVAudioFrameCount(
+        min(
+          file.length,
+          AVAudioFramePosition(
+            (format.sampleRate * Double(maxDurationMs) / 1000.0).rounded(.down)
+          )
+        )
+      )
+      : file.length
+    let endFrame = min(file.length, maxFrames)
+    guard file.framePosition < endFrame else {
+      return []
+    }
     guard let buffer = AVAudioPCMBuffer(
       pcmFormat: format,
       frameCapacity: bufferCapacity
@@ -386,8 +431,8 @@ private final class AppleAudioEngine {
 
     var samples: [Float] = []
     var frameIndex = 0
-    while file.framePosition < file.length {
-      let framesRemaining = AVAudioFrameCount(file.length - file.framePosition)
+    while file.framePosition < endFrame {
+      let framesRemaining = AVAudioFrameCount(endFrame - file.framePosition)
       let framesToRead = min(bufferCapacity, framesRemaining)
       try file.read(into: buffer, frameCount: framesToRead)
       let frameLength = Int(buffer.frameLength)

@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:dart_chromaprint/dart_chromaprint.dart';
 
 import '../rust/api/simple/equalizer.dart';
 import '../rust/api/simple_api.dart' as rust;
@@ -203,7 +206,24 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
   @override
   Future<String?> extractFingerprint(String path) async {
     try {
-      return await rust.getAudioFingerprint(path: path);
+      final result = await _channel.invokeMethod<Map<Object?, Object?>>(
+        'getFingerprintPcm',
+        <String, Object?>{'path': path, 'maxDurationMs': 20_000},
+      );
+      if (result == null) return null;
+
+      final samples = _int16SamplesFromFingerprintResult(result);
+      final sampleRate = (result['sampleRate'] as num?)?.toInt() ?? 0;
+      final channels = (result['channels'] as num?)?.toInt() ?? 0;
+      if (samples.isEmpty || sampleRate <= 0 || channels <= 0) {
+        return null;
+      }
+
+      return fingerprintFromPcm(
+        pcm: samples,
+        sampleRate: sampleRate,
+        channels: channels,
+      );
     } catch (e) {
       debugPrint('Fingerprint extraction failed: $e');
       return null;
@@ -275,5 +295,19 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
       bassBoostQ: 0.75,
       bandGainsDb: Float32List(bandCount),
     );
+  }
+
+  Int16List _int16SamplesFromFingerprintResult(Map<Object?, Object?> result) {
+    final rawSamples = result['samples'];
+    if (rawSamples is! List) {
+      return Int16List(0);
+    }
+
+    final samples = Int16List(rawSamples.length);
+    for (var i = 0; i < rawSamples.length; i++) {
+      final value = (rawSamples[i] as num?)?.toDouble() ?? 0.0;
+      samples[i] = (value * 32767.0).round().clamp(-32768, 32767);
+    }
+    return samples;
   }
 }
