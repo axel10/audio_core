@@ -536,7 +536,13 @@ class MyExoplayerPlugin :
     }
 
     private fun handleEnsureAudioPermission(result: Result) {
+        android.util.Log.d(
+            "AudioCore",
+            "handleEnsureAudioPermission start sdk=${Build.VERSION.SDK_INT} " +
+                "activityPresent=${activity != null} contextPresent=${context != null}",
+        )
         if (hasAudioPermission()) {
+            android.util.Log.d("AudioCore", "handleEnsureAudioPermission already granted")
             result.success(true)
             return
         }
@@ -560,6 +566,11 @@ class MyExoplayerPlugin :
         }
 
         pendingMediaLibraryPermissionResult = result
+        android.util.Log.d(
+            "AudioCore",
+            "handleEnsureAudioPermission requesting permissions=" +
+                requiredPermissions().joinToString(","),
+        )
         ActivityCompat.requestPermissions(
             safeActivity,
             requiredPermissions(),
@@ -568,6 +579,11 @@ class MyExoplayerPlugin :
     }
 
     private fun handleScanAudioLibrary(result: Result) {
+        android.util.Log.d(
+            "AudioCore",
+            "handleScanAudioLibrary start sdk=${Build.VERSION.SDK_INT} " +
+                "permission=${hasAudioPermission()}",
+        )
         if (!hasAudioPermission()) {
             result.error(
                 "PERMISSION_DENIED",
@@ -596,14 +612,18 @@ class MyExoplayerPlugin :
             MediaStore.Audio.Media.DATA,
         )
 
-        val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
         val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC"
         val items = mutableListOf<Map<String, Any?>>()
+        android.util.Log.d(
+            "AudioCore",
+            "handleScanAudioLibrary query uri=${MediaStore.Audio.Media.EXTERNAL_CONTENT_URI} " +
+                "sortOrder=$sortOrder projectionSize=${projection.size}",
+        )
 
         safeContext.contentResolver.query(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
             projection,
-            selection,
+            null,
             null,
             sortOrder,
         )?.use { cursor ->
@@ -621,6 +641,14 @@ class MyExoplayerPlugin :
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idIndex)
+                val mimeType = if (mimeTypeIndex >= 0) cursor.getString(mimeTypeIndex) else null
+                val durationMs = cursor.getLong(durationIndex)
+                val isPlayableAudio =
+                    (mimeType?.startsWith("audio/") == true) || durationMs > 0L
+                if (!isPlayableAudio) {
+                    continue
+                }
+
                 val contentUri = Uri.withAppendedPath(
                     MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                     id.toString(),
@@ -640,14 +668,26 @@ class MyExoplayerPlugin :
                         "displayName" to cursor.getString(displayNameIndex),
                         "artist" to cursor.getString(artistIndex),
                         "album" to cursor.getString(albumIndex),
-                        "durationMs" to cursor.getLong(durationIndex),
+                        "durationMs" to durationMs,
                         "relativePath" to folderPath,
                         "bucketDisplayName" to if (bucketNameIndex >= 0) cursor.getString(bucketNameIndex) else null,
-                        "mimeType" to if (mimeTypeIndex >= 0) cursor.getString(mimeTypeIndex) else null,
+                        "mimeType" to mimeType,
                         "dateAddedSeconds" to if (dateAddedIndex >= 0) cursor.getLong(dateAddedIndex) else null,
                     ),
                 )
             }
+        }
+
+        android.util.Log.d(
+            "AudioCore",
+            "handleScanAudioLibrary finished count=${items.size} " +
+                "permission=${hasAudioPermission()}",
+        )
+        if (items.isEmpty()) {
+            android.util.Log.w(
+                "AudioCore",
+                "MediaStore query returned no playable audio items. Permission granted=${hasAudioPermission()}",
+            )
         }
 
         result.success(items)

@@ -487,8 +487,12 @@ class AudioCoreController extends ChangeNotifier
   Future<bool> ensureAndroidMediaLibraryPermission() async {
     if (!Platform.isAndroid) return false;
     try {
+      debugPrint('[AudioCore][MediaLibrary] ensure permission start');
       final granted = await _androidMediaLibraryChannel.invokeMethod<bool>(
         'ensureAudioPermission',
+      );
+      debugPrint(
+        '[AudioCore][MediaLibrary] ensure permission result=$granted',
       );
       return granted ?? false;
     } catch (e) {
@@ -510,6 +514,9 @@ class AudioCoreController extends ChangeNotifier
     }
 
     final granted = await ensureAndroidMediaLibraryPermission();
+    debugPrint(
+      '[AudioCore][MediaLibrary] scan request permissionGranted=$granted',
+    );
     if (!granted) {
       return const AndroidMediaLibraryScanResult(
         permissionGranted: false,
@@ -520,8 +527,13 @@ class AudioCoreController extends ChangeNotifier
     }
 
     try {
+      debugPrint('[AudioCore][MediaLibrary] scanAudioLibrary start');
       final rawResult = await _androidMediaLibraryChannel
           .invokeMethod<List<Object?>>('scanAudioLibrary');
+      debugPrint(
+        '[AudioCore][MediaLibrary] scanAudioLibrary rawCount='
+        '${rawResult?.length ?? 0}',
+      );
       final entries = <AndroidMediaLibraryEntry>[];
       for (final item in rawResult ?? const <Object?>[]) {
         if (item is Map<Object?, Object?>) {
@@ -533,12 +545,18 @@ class AudioCoreController extends ChangeNotifier
         }
       }
 
+      debugPrint(
+        '[AudioCore][MediaLibrary] scanAudioLibrary parsedCount=${entries.length}',
+      );
       return AndroidMediaLibraryScanResult(
         permissionGranted: true,
         entries: entries,
       );
     } on PlatformException catch (e) {
-      debugPrint('scanAndroidMediaLibrary failed: ${e.code} ${e.message}');
+      debugPrint(
+        'scanAndroidMediaLibrary failed: ${e.code} ${e.message} '
+        'details=${e.details}',
+      );
       return AndroidMediaLibraryScanResult(
         permissionGranted: true,
         entries: const <AndroidMediaLibraryEntry>[],
