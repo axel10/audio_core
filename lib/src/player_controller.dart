@@ -20,8 +20,6 @@ class PlayerController extends ChangeNotifier {
   String? _lastFingerprint;
 
   FadeSettings _fadeSettings = const FadeSettings();
-  int _fadeSequence = 0;
-  bool _trackFadeTransitionActive = false;
   PlayerState _playerState = PlayerState.idle;
   DateTime _lastCommandTime = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -35,11 +33,6 @@ class PlayerController extends ChangeNotifier {
   String? get lastFingerprint => _lastFingerprint;
   PlayerState get currentState => _playerState;
   FadeSettings get fadeSettings => _fadeSettings;
-  bool get isFadeActive => _trackFadeTransitionActive;
-  int get fadeSequence => _fadeSequence;
-
-  @internal
-  void nextFadeSequence() => _fadeSequence++;
 
   // --- Actions ---
 
@@ -236,9 +229,7 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> setVolume(double volume) async {
     _volume = volume.clamp(0.0, 1.0);
-    if (!_trackFadeTransitionActive) {
-      await applyNativeVolume(_volume);
-    }
+    await applyNativeVolume(_volume);
     notifyListeners();
   }
 
@@ -288,48 +279,6 @@ class PlayerController extends ChangeNotifier {
     await _parent.engine.setVolume(volume.clamp(0.0, 1.0));
   }
 
-  Future<bool> fadeNativeVolume({
-    required double from,
-    required double to,
-    required Duration duration,
-    required int sequence,
-    bool followTargetVolume = false,
-  }) async {
-    debugPrint(
-      '[PlayerController] fadeNativeVolume from=$from to=$to '
-      'durationMs=${duration.inMilliseconds} sequence=$sequence '
-      'followTargetVolume=$followTargetVolume currentVolume=$_volume',
-    );
-    if (duration <= Duration.zero) {
-      if (_fadeSequence != sequence) return false;
-      await applyNativeVolume(followTargetVolume ? _volume : to);
-      return _fadeSequence == sequence;
-    }
-
-    final steps = (duration.inMilliseconds / 16).round().clamp(1, 1000);
-    final stepDelay = Duration(
-      microseconds: (duration.inMicroseconds / steps).round(),
-    );
-
-    for (var i = 1; i <= steps; i++) {
-      if (_fadeSequence != sequence) return false;
-      final progress = i / steps;
-      final endVolume = followTargetVolume ? _volume : to;
-      final nextVolume = from + ((endVolume - from) * progress);
-      await applyNativeVolume(nextVolume);
-      if (i < steps) {
-        await Future<void>.delayed(stepDelay);
-      }
-    }
-    return _fadeSequence == sequence;
-  }
-
-  @internal
-  void setFadeActive(bool active) {
-    _trackFadeTransitionActive = active;
-    notifyListeners();
-  }
-
   Future<void> stopPlayback() async {
     _selectedPath = null;
     _position = Duration.zero;
@@ -366,9 +315,7 @@ class PlayerController extends ChangeNotifier {
     _duration = duration;
     _durationReady = duration > Duration.zero;
 
-    if (!_trackFadeTransitionActive) {
-      _volume = nativeVolume;
-    }
+    _volume = nativeVolume;
 
     // Guard position and playing state to avoid "jumping" back to old state during command processing
     if (recentlyCommanded) {
@@ -509,7 +456,6 @@ class ImmediateTransition extends PlaybackTransition {
     required bool autoPlay,
     Duration? position,
   }) async {
-    player.nextFadeSequence();
     await player.load(uri);
     if (position != null) await player.seek(position);
     if (autoPlay) await player.play(withFade: false);

@@ -145,7 +145,7 @@ class AudioCoreController extends ChangeNotifier
     previousTrack: playlist.previousTrack,
     error: player.error,
     equalizerConfig: equalizer.config,
-    isTransitioning: _isTransitioning || player.isFadeActive,
+    isTransitioning: _isTransitioning,
   );
 
   @override
@@ -568,7 +568,6 @@ class AudioCoreController extends ChangeNotifier
   Future<void> resetPlaybackState() async {
     await _engine.stop();
     player.stopPlayback();
-    player.setFadeActive(false);
     visualizer.resetState();
     await playlist.resetPlaybackState();
     _latestFftCache = const [];
@@ -829,7 +828,9 @@ class AudioCoreController extends ChangeNotifier
         errorMessage: e.message,
       );
     } catch (e) {
-      debugPrint('[AudioCore][MediaLibrary] scanAndroidMediaLibrary failed: $e');
+      debugPrint(
+        '[AudioCore][MediaLibrary] scanAndroidMediaLibrary failed: $e',
+      );
       return AndroidMediaLibraryScanResult(
         permissionGranted: true,
         entries: const <AndroidMediaLibraryEntry>[],
@@ -921,7 +922,9 @@ class AudioCoreController extends ChangeNotifier
   }) async {
     final file = path.startsWith('content://') ? null : File(path);
     if (file != null && !file.existsSync()) {
-      debugPrint('[AudioCore][Metadata] updateMetadata: File does not exist: $path');
+      debugPrint(
+        '[AudioCore][Metadata] updateMetadata: File does not exist: $path',
+      );
       return false;
     }
 
