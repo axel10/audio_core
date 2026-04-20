@@ -61,7 +61,17 @@ class PlayerController extends ChangeNotifier {
         !isAutoTransition &&
         effectiveFadeSettings.fadeOnSwitch &&
         effectiveFadeSettings.duration > Duration.zero &&
-        (reason == PlaybackReason.user || (autoPlay && isActivelyPlaying));
+        (reason == PlaybackReason.user || autoPlay);
+
+    debugPrint(
+      '[PlayerController] performTransition uri=$uri autoPlay=$autoPlay '
+      'reason=$reason current=$_selectedPath posMs=${position?.inMilliseconds} '
+      'state=$_playerState isPlaying=$_isPlaying switching=$switchingTracks '
+      'autoCompleted=$isAutoTransition fadeOnSwitch=${effectiveFadeSettings.fadeOnSwitch} '
+      'mode=${effectiveFadeSettings.mode} durationMs=${effectiveFadeSettings.duration.inMilliseconds} '
+      'shouldFade=$shouldFade nativeCrossfadeCandidate='
+      '${shouldFade && isActivelyPlaying && effectiveFadeSettings.mode == FadeMode.crossfade && _parent.engine.supportsCrossfade}',
+    );
 
     PlaybackTransition strategy = const ImmediateTransition();
 
@@ -69,11 +79,16 @@ class PlayerController extends ChangeNotifier {
       if (isActivelyPlaying &&
           effectiveFadeSettings.mode == FadeMode.crossfade &&
           _parent.engine.supportsCrossfade) {
+        debugPrint('[PlayerController] transition strategy=NativeCrossfade');
         strategy = NativeCrossfadeTransition(
           duration: effectiveFadeSettings.duration,
         );
       } else {
         // Fallback to sequential fade
+        debugPrint(
+          '[PlayerController] transition strategy=SequentialFade '
+          'isActivelyPlaying=$isActivelyPlaying supportsCrossfade=${_parent.engine.supportsCrossfade}',
+        );
         strategy = SequentialFadeTransition(
           duration: effectiveFadeSettings.duration,
           targetVolume: _volume,
@@ -107,6 +122,9 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
 
     try {
+      debugPrint(
+        '[PlayerController] load path=$path nativeVolume=${nativeVolume ?? _volume}',
+      );
       await _parent.engine.load(path);
       if (nativeVolume != null || _volume != 1.0) {
         await applyNativeVolume(nativeVolume ?? _volume);
@@ -190,6 +208,11 @@ class PlayerController extends ChangeNotifier {
         wasReady: wasReady,
         fadeSetting: fadeSetting,
       );
+      debugPrint(
+        '[PlayerController] play withFade=$withFade wasPaused=$wasPaused '
+        'wasReady=$wasReady fadeDurationMs=${fadeDuration?.inMilliseconds ?? 0} '
+        'current=$_selectedPath',
+      );
       await _parent.engine.play(fadeDuration: fadeDuration);
       _lastCommandTime = DateTime.now();
       _isPlaying = true;
@@ -203,6 +226,7 @@ class PlayerController extends ChangeNotifier {
   Future<void> seek(Duration target) async {
     if (_selectedPath == null) return;
     try {
+      debugPrint('[PlayerController] seek targetMs=${target.inMilliseconds}');
       await _parent.engine.seek(target);
       _lastCommandTime = DateTime.now();
       _position = target;
@@ -273,6 +297,11 @@ class PlayerController extends ChangeNotifier {
     required int sequence,
     bool followTargetVolume = false,
   }) async {
+    debugPrint(
+      '[PlayerController] fadeNativeVolume from=$from to=$to '
+      'durationMs=${duration.inMilliseconds} sequence=$sequence '
+      'followTargetVolume=$followTargetVolume currentVolume=$_volume',
+    );
     if (duration <= Duration.zero) {
       if (_fadeSequence != sequence) return false;
       await applyNativeVolume(followTargetVolume ? _volume : to);
@@ -446,6 +475,11 @@ class SequentialFadeTransition extends PlaybackTransition {
   }) async {
     player.nextFadeSequence();
     final seq = player.fadeSequence;
+    debugPrint(
+      '[SequentialFadeTransition] start uri=$uri autoPlay=$autoPlay '
+      'positionMs=${position?.inMilliseconds} durationMs=${duration.inMilliseconds} '
+      'initialIsPlaying=${player.isPlaying} currentVolume=${player.volume}',
+    );
 
     if (player.isPlaying) {
       player.setFadeActive(true);
@@ -463,6 +497,10 @@ class SequentialFadeTransition extends PlaybackTransition {
     }
 
     await player.load(uri, nativeVolume: autoPlay ? 0.0 : player.volume);
+    debugPrint(
+      '[SequentialFadeTransition] afterLoad uri=$uri seq=$seq '
+      'selected=${player.currentPath} isPlaying=${player.isPlaying}',
+    );
     if (player.fadeSequence != seq) return;
     if (position != null) await player.seek(position);
 
@@ -513,6 +551,10 @@ class NativeCrossfadeTransition extends PlaybackTransition {
   }) async {
     // Native crossfade handles current deck management internally in Rust.
     // It starts the new track immediately while the old one keeps playing (fading out).
+    debugPrint(
+      '[NativeCrossfadeTransition] start uri=$uri autoPlay=$autoPlay '
+      'positionMs=${position?.inMilliseconds} durationMs=${duration.inMilliseconds}',
+    );
     await player._parent.engine.crossfade(
       uri,
       duration,
@@ -528,5 +570,9 @@ class NativeCrossfadeTransition extends PlaybackTransition {
     }
     player._onTrackChanged(uri);
     player.notifyListeners();
+    debugPrint(
+      '[NativeCrossfadeTransition] done uri=$uri selected=${player.currentPath} '
+      'isPlaying=${player.isPlaying} state=${player.currentState}',
+    );
   }
 }

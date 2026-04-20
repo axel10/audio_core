@@ -45,7 +45,7 @@ class MyExoplayerPlugin :
     ActivityResultListener,
     RequestPermissionsResultListener {
     private class PlayerContext(
-        val id: String,
+        var id: String,
         val player: ExoPlayer,
         val fftProcessor: FFTAudioProcessor,
         val cppEqualizerProcessor: CppEqualizerProcessor,
@@ -59,6 +59,8 @@ class MyExoplayerPlugin :
     companion object {
         private var instance: MyExoplayerPlugin? = null
         private val playerContexts = mutableMapOf<String, PlayerContext>()
+        private const val MAIN_PLAYER_ID = "main"
+        private const val CROSSFADE_PLAYER_ID = "crossfade"
         private const val REQUEST_WRITE_MEDIA = 43041
         private const val REQUEST_READ_MEDIA = 4892
 
@@ -66,21 +68,37 @@ class MyExoplayerPlugin :
             System.loadLibrary("my_exoplayer")
         }
 
-        private fun createPlayerListener(id: String) = object : Player.Listener {
+        private fun createPlayerListener(ctxRef: PlayerContext) = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
+                android.util.Log.d(
+                    "AudioCore",
+                    "listener onPlaybackStateChanged id=${ctxRef.id} state=$state " +
+                        "isPlaying=${ctxRef.player.isPlaying} playWhenReady=${ctxRef.player.playWhenReady} " +
+                        "pos=${ctxRef.player.currentPosition} duration=${ctxRef.player.duration}",
+                )
                 if (state == Player.STATE_READY) {
-                    instance?.ensureAudioEffects(id)
+                    instance?.ensureAudioEffects(ctxRef.id)
                 }
-                sendPlayerState(id)
+                sendPlayerState(ctxRef.id)
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                sendPlayerState(id)
+                android.util.Log.d(
+                    "AudioCore",
+                    "listener onPlayerError id=${ctxRef.id} error=${error.message}",
+                )
+                sendPlayerState(ctxRef.id)
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                playerContexts[id]?.fftProcessor?.isPaused = !isPlaying
-                sendPlayerState(id)
+                android.util.Log.d(
+                    "AudioCore",
+                    "listener onIsPlayingChanged id=${ctxRef.id} isPlaying=$isPlaying " +
+                        "playWhenReady=${ctxRef.player.playWhenReady} state=${ctxRef.player.playbackState} " +
+                        "pos=${ctxRef.player.currentPosition}",
+                )
+                playerContexts[ctxRef.id]?.fftProcessor?.isPaused = !isPlaying
+                sendPlayerState(ctxRef.id)
             }
 
             override fun onPositionDiscontinuity(
@@ -88,7 +106,13 @@ class MyExoplayerPlugin :
                 newPosition: Player.PositionInfo,
                 reason: Int
             ) {
-                sendPlayerState(id)
+                android.util.Log.d(
+                    "AudioCore",
+                    "listener onPositionDiscontinuity id=${ctxRef.id} reason=$reason " +
+                        "old=${oldPosition.positionMs} new=${newPosition.positionMs} " +
+                        "state=${ctxRef.player.playbackState} isPlaying=${ctxRef.player.isPlaying}",
+                )
+                sendPlayerState(ctxRef.id)
             }
         }
 
@@ -113,6 +137,13 @@ class MyExoplayerPlugin :
                 "position" to p.currentPosition,
                 "error" to p.playerError?.message
             )
+            android.util.Log.d(
+                "AudioCore",
+                "sendPlayerState id=$id state=${stateMap["state"]} " +
+                    "isPlaying=${stateMap["isPlaying"]} playWhenReady=${p.playWhenReady} " +
+                    "volume=${p.volume} position=${stateMap["position"]} duration=$clampedDuration " +
+                    "error=${stateMap["error"]}",
+            )
             inst.channel.invokeMethod("onPlayerStateChanged", stateMap)
         }
 
@@ -132,6 +163,15 @@ class MyExoplayerPlugin :
     private var amplituda: Amplituda? = null
     private var pendingMetadataWrite: PendingMetadataWrite? = null
     private var pendingMediaLibraryPermissionResult: Result? = null
+    private var crossfadeAnimator: ValueAnimator? = null
+    private var crossfadeGeneration: Long = 0L
+    private var activeCrossfadeSession: CrossfadeSession? = null
+
+    private data class CrossfadeSession(
+        val generation: Long,
+        val baseVolume: Float,
+        val targetVolume: Float,
+    )
 
     private data class PendingMetadataWrite(
         val path: String,
@@ -156,7 +196,10 @@ class MyExoplayerPlugin :
     }
 
     @OptIn(UnstableApi::class)
-    private fun getOrCreatePlayerContext(id: String): PlayerContext {
+    private fun getOrCreatePlayerContext(
+        id: String,
+        handleAudioFocus: Boolean = true,
+    ): PlayerContext {
         playerContexts[id]?.let { return it }
 
         val safeContext = context!!
@@ -183,16 +226,21 @@ class MyExoplayerPlugin :
             .build()
 
         val player = ExoPlayer.Builder(safeContext, renderersFactory)
-            .setAudioAttributes(audioAttributes, true)
+            .setAudioAttributes(audioAttributes, handleAudioFocus)
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(androidx.media3.common.C.WAKE_MODE_LOCAL)
             .build()
+
+        android.util.Log.d(
+            "AudioCore",
+            "createPlayerContext id=$id handleAudioFocus=$handleAudioFocus",
+        )
         
         player.addAnalyticsListener(EventLogger())
         cppEqualizerProcessor.setNumBands(10)
         
         val ctx = PlayerContext(id, player, fftProcessor, cppEqualizerProcessor, cppFingerprintProcessor)
-        player.addListener(createPlayerListener(id))
+        player.addListener(createPlayerListener(ctx))
         playerContexts[id] = ctx
         return ctx
     }
@@ -242,8 +290,19 @@ class MyExoplayerPlugin :
     override fun onMethodCall(call: MethodCall, originalResult: Result) {
         val result = MainThreadResult(originalResult)
         val playerId = call.argument<String>("playerId") ?: "main"
-//        android.util.Log.d("MyExoplayer", "onMethodCall: ${call.method} for $playerId")
-        
+        if(call.method != "getLatestFft"){
+            android.util.Log.d(
+                "AudioCore",
+                "onMethodCall method=${call.method} playerId=$playerId args=${call.arguments}",
+            )
+        }
+
+//        android.util.Log.d(
+//            "AudioCore",
+//            "onMethodCall method=${call.method} playerId=$playerId args=${call.arguments}",
+//        )
+
+
         when (call.method) {
             "sayHello" -> {
                 result.success(null)
@@ -299,13 +358,32 @@ class MyExoplayerPlugin :
                 }.start()
                 return
             }
+            "crossfade" -> {
+                val path = call.argument<String>("path")
+                    ?: return result.error("INVALID_ARGUMENT", "Path is null", null)
+                val durationMs = call.argument<Int>("durationMs")?.toLong() ?: 0L
+                val positionMs = call.argument<Int>("positionMs")?.toLong()
+                handleCrossfade(path, durationMs, positionMs, result)
+                return
+            }
             "load" -> {
                 val url = call.argument<String>("url") ?: return result.error("INVALID_ARGUMENT", "URL is null", null)
                 val ctx = getOrCreatePlayerContext(playerId)
+                cancelActiveCrossfade()
+                android.util.Log.d(
+                    "AudioCore",
+                    "load start playerId=$playerId url=$url currentCtx=${ctx.id} " +
+                        "playWhenReady=${ctx.player.playWhenReady} isPlaying=${ctx.player.isPlaying}",
+                )
                 val mediaItem = MediaItem.fromUri(Uri.parse(url))
                 ctx.player.setMediaItem(mediaItem)
                 ctx.player.playWhenReady = false
                 ctx.player.prepare()
+                android.util.Log.d(
+                    "AudioCore",
+                    "load prepared playerId=$playerId url=$url state=${ctx.player.playbackState} " +
+                        "isPlaying=${ctx.player.isPlaying} playWhenReady=${ctx.player.playWhenReady}",
+                )
                 result.success(null)
                 return
             }
@@ -388,7 +466,15 @@ class MyExoplayerPlugin :
             "play" -> {
                 val fadeDurationMs = call.argument<Int>("fadeDurationMs")?.toLong() ?: 0L
                 val targetVolume = call.argument<Double>("targetVolume")?.toFloat() ?: ctx.player.volume
+                cancelActiveCrossfade()
                 val commandGeneration = beginVolumeCommand(ctx)
+                android.util.Log.d(
+                    "AudioCore",
+                    "play start playerId=$playerId fadeDurationMs=$fadeDurationMs " +
+                        "targetVolume=$targetVolume state=${ctx.player.playbackState} " +
+                        "isPlaying=${ctx.player.isPlaying} playWhenReady=${ctx.player.playWhenReady} " +
+                        "volume=${ctx.player.volume}",
+                )
                 if (fadeDurationMs > 0) {
                     ctx.player.volume = 0f
                     ctx.player.play()
@@ -396,11 +482,24 @@ class MyExoplayerPlugin :
                 } else {
                     ctx.player.play()
                 }
+                android.util.Log.d(
+                    "AudioCore",
+                    "play issued playerId=$playerId state=${ctx.player.playbackState} " +
+                        "isPlaying=${ctx.player.isPlaying} playWhenReady=${ctx.player.playWhenReady} " +
+                        "volume=${ctx.player.volume}",
+                )
                 result.success(null)
             }
             "pause" -> {
                 val fadeDurationMs = call.argument<Int>("fadeDurationMs")?.toLong() ?: 0L
+                cancelActiveCrossfade()
                 val commandGeneration = beginVolumeCommand(ctx)
+                android.util.Log.d(
+                    "AudioCore",
+                    "pause start playerId=$playerId fadeDurationMs=$fadeDurationMs " +
+                        "state=${ctx.player.playbackState} isPlaying=${ctx.player.isPlaying} " +
+                        "playWhenReady=${ctx.player.playWhenReady} volume=${ctx.player.volume}",
+                )
                 if (fadeDurationMs > 0) {
                     val originalVolume = ctx.player.volume
                     fadeVolumeTo(ctx, 0f, fadeDurationMs, commandGeneration) {
@@ -411,15 +510,33 @@ class MyExoplayerPlugin :
                 } else {
                     ctx.player.pause()
                 }
+                android.util.Log.d(
+                    "AudioCore",
+                    "pause issued playerId=$playerId state=${ctx.player.playbackState} " +
+                        "isPlaying=${ctx.player.isPlaying} playWhenReady=${ctx.player.playWhenReady} " +
+                        "volume=${ctx.player.volume}",
+                )
                 result.success(null)
             }
             "seek" -> {
                 val positionMs = call.argument<Int>("position")?.toLong() ?: 0L
+                cancelActiveCrossfade()
+                android.util.Log.d(
+                    "AudioCore",
+                    "seek playerId=$playerId positionMs=$positionMs state=${ctx.player.playbackState} " +
+                        "isPlaying=${ctx.player.isPlaying} playWhenReady=${ctx.player.playWhenReady}",
+                )
                 ctx.player.seekTo(positionMs)
                 result.success(null)
             }
             "prepareForFileWrite" -> {
+                cancelActiveCrossfade()
                 beginVolumeCommand(ctx)
+                android.util.Log.d(
+                    "AudioCore",
+                    "prepareForFileWrite playerId=$playerId state=${ctx.player.playbackState} " +
+                        "isPlaying=${ctx.player.isPlaying} playWhenReady=${ctx.player.playWhenReady}",
+                )
                 ctx.player.playWhenReady = false
                 ctx.player.stop()
                 ctx.player.clearMediaItems()
@@ -430,7 +547,14 @@ class MyExoplayerPlugin :
             "setVolume" -> {
                 val volume = call.argument<Double>("volume")?.toFloat() ?: 1.0f
                 val fadeDurationMs = call.argument<Int>("fadeDurationMs")?.toLong() ?: 0L
+                cancelActiveCrossfade()
                 val commandGeneration = beginVolumeCommand(ctx)
+                android.util.Log.d(
+                    "AudioCore",
+                    "setVolume playerId=$playerId volume=$volume fadeDurationMs=$fadeDurationMs " +
+                        "state=${ctx.player.playbackState} isPlaying=${ctx.player.isPlaying} " +
+                        "playWhenReady=${ctx.player.playWhenReady}",
+                )
                 if (fadeDurationMs > 0) {
                     fadeVolumeTo(ctx, volume, fadeDurationMs, commandGeneration)
                 } else {
@@ -530,8 +654,20 @@ class MyExoplayerPlugin :
                 result.success(params)
             }
             "dispose" -> {
-                playerContexts.remove(playerId)
-                releasePlayerContext(ctx)
+                val activeCrossfadeContext = playerId == CROSSFADE_PLAYER_ID && activeCrossfadeSession != null
+                android.util.Log.d(
+                    "AudioCore",
+                    "dispose playerId=$playerId activeCrossfade=$activeCrossfadeContext " +
+                        "currentContexts=${playerContexts.keys}",
+                )
+                if (playerId == MAIN_PLAYER_ID || playerId == CROSSFADE_PLAYER_ID) {
+                    cancelActiveCrossfade()
+                }
+                if (playerContexts.remove(playerId) != null && !activeCrossfadeContext) {
+                    releasePlayerContext(ctx)
+                } else if (!activeCrossfadeContext && playerId != MAIN_PLAYER_ID && playerId != CROSSFADE_PLAYER_ID) {
+                    releasePlayerContext(ctx)
+                }
                 result.success(null)
             }
             else -> {
@@ -738,6 +874,11 @@ class MyExoplayerPlugin :
         commandGeneration: Long,
         onEnd: (() -> Unit)? = null
     ) {
+        android.util.Log.d(
+            "AudioCore",
+            "fadeVolumeTo start id=${ctx.id} from=${ctx.player.volume} target=$targetVolume " +
+                "durationMs=$durationMs generation=$commandGeneration",
+        )
         ctx.volumeAnimator?.cancel()
         val startVolume = ctx.player.volume
         val animator = ValueAnimator.ofFloat(startVolume, targetVolume)
@@ -751,6 +892,11 @@ class MyExoplayerPlugin :
         }
         animator.addListener(object : android.animation.AnimatorListenerAdapter() {
             override fun onAnimationCancel(animation: android.animation.Animator) {
+                android.util.Log.d(
+                    "AudioCore",
+                    "fadeVolumeTo cancel id=${ctx.id} generation=$commandGeneration " +
+                        "currentGeneration=${ctx.volumeCommandGeneration}",
+                )
                 if (ctx.volumeAnimator === animator) {
                     ctx.volumeAnimator = null
                 }
@@ -761,6 +907,10 @@ class MyExoplayerPlugin :
                 if (ctx.volumeAnimator === animator) {
                     ctx.volumeAnimator = null
                 }
+                android.util.Log.d(
+                    "AudioCore",
+                    "fadeVolumeTo end id=${ctx.id} target=$targetVolume generation=$commandGeneration",
+                )
                 onEnd?.invoke()
             }
         })
@@ -771,7 +921,208 @@ class MyExoplayerPlugin :
         }
     }
 
+    private fun handleCrossfade(
+        path: String,
+        durationMs: Long,
+        positionMs: Long?,
+        result: Result,
+    ) {
+        try {
+            val mainCtx = playerContexts[MAIN_PLAYER_ID] ?: run {
+                result.error("PLAYER_NOT_FOUND", "Main player context not found.", null)
+                return
+            }
+
+            android.util.Log.d(
+                "AudioCore",
+                "handleCrossfade start path=$path durationMs=$durationMs positionMs=$positionMs " +
+                    "mainState=${mainCtx.player.playbackState} mainIsPlaying=${mainCtx.player.isPlaying} " +
+                    "mainPlayWhenReady=${mainCtx.player.playWhenReady} mainVolume=${mainCtx.player.volume} " +
+                    "contexts=${playerContexts.keys}",
+            )
+
+            // ExoPlayer may briefly report isPlaying=false during a normal
+            // handoff even though the session is still intended to keep
+            // playing. `playWhenReady` is a better signal here because it
+            // stays true for active playback and avoids downgrading to an
+            // abrupt swap when the state lags by a frame.
+            if (durationMs <= 0L || !mainCtx.player.playWhenReady) {
+                android.util.Log.d(
+                    "AudioCore",
+                    "handleCrossfade fallback immediate path=$path durationMs=$durationMs " +
+                        "reason=${if (durationMs <= 0L) "zeroDuration" else "playWhenReadyFalse"}",
+                )
+                cancelActiveCrossfade()
+                val mediaItem = MediaItem.fromUri(Uri.parse(path))
+                mainCtx.player.setMediaItem(mediaItem)
+                mainCtx.player.playWhenReady = true
+                mainCtx.player.prepare()
+                if (positionMs != null) {
+                    mainCtx.player.seekTo(positionMs)
+                }
+                mainCtx.player.play()
+                result.success(null)
+                return
+            }
+
+            cancelActiveCrossfade()
+
+            val incomingCtx = getOrCreatePlayerContext(
+                CROSSFADE_PLAYER_ID,
+                handleAudioFocus = false,
+            )
+            incomingCtx.id = CROSSFADE_PLAYER_ID
+            incomingCtx.volumeAnimator?.cancel()
+            incomingCtx.volumeAnimator = null
+
+            val baseVolume = mainCtx.player.volume
+            val mediaItem = MediaItem.fromUri(Uri.parse(path))
+
+            android.util.Log.d(
+                "AudioCore",
+                "handleCrossfade deckSetup baseVolume=$baseVolume incomingId=${incomingCtx.id} " +
+                    "incomingState=${incomingCtx.player.playbackState} incomingPlaying=${incomingCtx.player.isPlaying}",
+            )
+
+            incomingCtx.player.stop()
+            incomingCtx.player.clearMediaItems()
+            incomingCtx.player.volume = 0f
+            incomingCtx.player.setMediaItem(mediaItem)
+            incomingCtx.player.playWhenReady = true
+            incomingCtx.player.prepare()
+            if (positionMs != null) {
+                incomingCtx.player.seekTo(positionMs)
+            }
+            incomingCtx.player.play()
+
+            crossfadeGeneration += 1
+            val generation = crossfadeGeneration
+            activeCrossfadeSession = CrossfadeSession(
+                generation = generation,
+                baseVolume = baseVolume,
+                targetVolume = baseVolume,
+            )
+
+            crossfadeAnimator?.cancel()
+            val animator = ValueAnimator.ofFloat(0f, 1f)
+            animator.duration = durationMs
+            animator.addUpdateListener { animation ->
+                if (crossfadeGeneration != generation) {
+                    animation.cancel()
+                    return@addUpdateListener
+                }
+                val progress = (animation.animatedValue as Float).coerceIn(0f, 1f)
+                val outgoingVolume = (baseVolume * (1f - progress)).coerceIn(0f, 1f)
+                val incomingVolume = (baseVolume * progress).coerceIn(0f, 1f)
+                mainCtx.player.volume = outgoingVolume
+                incomingCtx.player.volume = incomingVolume
+                android.util.Log.v(
+                    "AudioCore",
+                    "handleCrossfade tick gen=$generation progress=$progress " +
+                        "outgoing=$outgoingVolume incoming=$incomingVolume " +
+                        "mainPlaying=${mainCtx.player.isPlaying} incomingPlaying=${incomingCtx.player.isPlaying}",
+                )
+            }
+            animator.addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationCancel(animation: android.animation.Animator) {
+                    android.util.Log.d(
+                        "AudioCore",
+                        "handleCrossfade cancel generation=$generation current=${crossfadeGeneration}",
+                    )
+                    if (crossfadeAnimator === animator) {
+                        crossfadeAnimator = null
+                    }
+                }
+
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (crossfadeGeneration != generation) return
+                    android.util.Log.d(
+                        "AudioCore",
+                        "handleCrossfade end generation=$generation current=${crossfadeGeneration}",
+                    )
+                    if (crossfadeAnimator === animator) {
+                        crossfadeAnimator = null
+                    }
+                    finalizeCrossfade(generation)
+                }
+            })
+            crossfadeAnimator = animator
+            Handler(Looper.getMainLooper()).post {
+                if (crossfadeGeneration != generation) return@post
+                animator.start()
+            }
+
+            result.success(null)
+        } catch (e: Exception) {
+            result.error("CROSSFADE_FAILED", e.message, mapOf("exception" to e.javaClass.name))
+        }
+    }
+
+    private fun cancelActiveCrossfade(restoreMainVolume: Boolean = true) {
+        val session = activeCrossfadeSession ?: return
+        android.util.Log.d(
+            "AudioCore",
+            "cancelActiveCrossfade restoreMainVolume=$restoreMainVolume sessionGen=${session.generation} " +
+                "baseVolume=${session.baseVolume} targetVolume=${session.targetVolume} currentGen=$crossfadeGeneration",
+        )
+        activeCrossfadeSession = null
+        crossfadeGeneration += 1
+        crossfadeAnimator?.cancel()
+        crossfadeAnimator = null
+
+        playerContexts[CROSSFADE_PLAYER_ID]?.let { incoming ->
+            incoming.player.stop()
+            incoming.player.clearMediaItems()
+            releasePlayerContext(incoming)
+            playerContexts.remove(CROSSFADE_PLAYER_ID)
+        }
+
+        if (restoreMainVolume) {
+            playerContexts[MAIN_PLAYER_ID]?.player?.volume = session.baseVolume
+        }
+    }
+
+    private fun finalizeCrossfade(generation: Long) {
+        val session = activeCrossfadeSession ?: return
+        if (session.generation != generation) return
+
+        android.util.Log.d(
+            "AudioCore",
+            "finalizeCrossfade generation=$generation baseVolume=${session.baseVolume} " +
+                "targetVolume=${session.targetVolume} contexts=${playerContexts.keys}",
+        )
+
+        val incoming = playerContexts[CROSSFADE_PLAYER_ID] ?: run {
+            activeCrossfadeSession = null
+            return
+        }
+        val outgoing = playerContexts[MAIN_PLAYER_ID]
+
+        incoming.player.volume = session.targetVolume
+        incoming.id = MAIN_PLAYER_ID
+        incoming.player.setAudioAttributes(
+            androidx.media3.common.AudioAttributes.Builder()
+                .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+                .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
+                .build(),
+            true,
+        )
+
+        outgoing?.let {
+            it.player.stop()
+            it.player.clearMediaItems()
+            releasePlayerContext(it)
+        }
+        playerContexts.remove(MAIN_PLAYER_ID)
+        playerContexts.remove(CROSSFADE_PLAYER_ID)
+        playerContexts[MAIN_PLAYER_ID] = incoming
+        activeCrossfadeSession = null
+        sendPlayerState(MAIN_PLAYER_ID)
+    }
+
     private fun releasePlayerContext(ctx: PlayerContext) {
+        ctx.volumeAnimator?.cancel()
+        ctx.volumeAnimator = null
         ctx.player.release()
         ctx.equalizer?.release()
         ctx.bassBoost?.release()

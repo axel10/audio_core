@@ -67,6 +67,7 @@ class AndroidAudioEngine implements AudioEngine {
   @override
   Future<void> load(String path) async {
     _currentPath = path;
+    debugPrint('[AndroidAudioEngine] load path=$path');
     await _channel.invokeMethod('load', {
       'url': path,
       'playerId': _activePlayerId,
@@ -79,64 +80,59 @@ class AndroidAudioEngine implements AudioEngine {
     Duration duration, {
     Duration? position,
   }) async {
-    // Current native plugin doesn't have a dedicated 'crossfade' command that overlaps.
-    // We'll just load and play as a basic implementation.
-    _currentPath = path;
-    await _channel.invokeMethod('load', {
-      'url': path,
+    debugPrint(
+      '[AndroidAudioEngine] crossfade path=$path durationMs=${duration.inMilliseconds} '
+      'positionMs=${position?.inMilliseconds}',
+    );
+    await _channel.invokeMethod('crossfade', {
+      'path': path,
+      'durationMs': duration.inMilliseconds,
+      if (position != null) 'positionMs': position.inMilliseconds,
       'playerId': _activePlayerId,
     });
-    if (position != null && position > Duration.zero) {
-      await _channel.invokeMethod('seek', {
-        'position': position.inMilliseconds,
-        'playerId': _activePlayerId,
-      });
-    }
-    if (duration > Duration.zero) {
-      await _channel.invokeMethod('play', {
-        'playerId': _activePlayerId,
-        'fadeDurationMs': duration.inMilliseconds,
-        'targetVolume': _currentVolume,
-      });
-    } else {
-      await _channel.invokeMethod('play', {'playerId': _activePlayerId});
-    }
+    _currentPath = path;
   }
 
   @override
   Future<void> play({Duration? fadeDuration}) async {
-    if (fadeDuration != null && fadeDuration > Duration.zero) {
-      await _channel.invokeMethod('play', {
-        'playerId': _activePlayerId,
-        'fadeDurationMs': fadeDuration.inMilliseconds,
-        'targetVolume': _currentVolume,
-      });
-    } else {
-      await _channel.invokeMethod('play', {'playerId': _activePlayerId});
-    }
+    debugPrint(
+      '[AndroidAudioEngine] play fadeDurationMs=${fadeDuration?.inMilliseconds ?? 0} '
+      'currentPath=$_currentPath volume=$_currentVolume',
+    );
+    await _channel.invokeMethod('play', {
+      'playerId': _activePlayerId,
+      'fadeDurationMs': fadeDuration?.inMilliseconds ?? 0,
+      'targetVolume': _currentVolume,
+    });
   }
 
   @override
   Future<void> pause({Duration? fadeDuration}) async {
-    if (fadeDuration != null && fadeDuration > Duration.zero) {
-      await _channel.invokeMethod('pause', {
-        'playerId': _activePlayerId,
-        'fadeDurationMs': fadeDuration.inMilliseconds,
-      });
-    } else {
-      await _channel.invokeMethod('pause', {'playerId': _activePlayerId});
-    }
+    debugPrint(
+      '[AndroidAudioEngine] pause fadeDurationMs=${fadeDuration?.inMilliseconds ?? 0} '
+      'currentPath=$_currentPath volume=$_currentVolume',
+    );
+    await _channel.invokeMethod('pause', {
+      'playerId': _activePlayerId,
+      'fadeDurationMs': fadeDuration?.inMilliseconds ?? 0,
+    });
   }
 
   @override
-  Future<void> seek(Duration position) => _channel.invokeMethod('seek', {
-    'position': position.inMilliseconds,
-    'playerId': _activePlayerId,
-  });
+  Future<void> seek(Duration position) async {
+    debugPrint(
+      '[AndroidAudioEngine] seek positionMs=${position.inMilliseconds} currentPath=$_currentPath',
+    );
+    await _channel.invokeMethod('seek', {
+      'position': position.inMilliseconds,
+      'playerId': _activePlayerId,
+    });
+  }
 
   @override
   Future<void> setVolume(double volume) {
     _currentVolume = volume;
+    debugPrint('[AndroidAudioEngine] setVolume volume=$volume currentPath=$_currentPath');
     return _channel.invokeMethod('setVolume', {
       'volume': volume,
       'playerId': _activePlayerId,

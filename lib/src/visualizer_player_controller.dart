@@ -268,6 +268,12 @@ class AudioCoreController extends ChangeNotifier
     final track = playlist.currentTrack;
     if (track == null) return;
 
+    debugPrint(
+      '[AudioCoreController] loadTrack track=${track.id} uri=${track.uri} '
+      'autoPlay=$autoPlay reason=$reason positionMs=${position?.inMilliseconds} '
+      'fadeSetting=${fadeSetting ?? _initialFadeSettings}',
+    );
+
     await player.performTransition(
       uri: track.uri,
       autoPlay: autoPlay,
@@ -621,6 +627,11 @@ class AudioCoreController extends ChangeNotifier
     if (_isTransitioning || player.currentState != PlayerState.completed) {
       return;
     }
+
+    debugPrint(
+      '[AudioCoreController] autoTransition mode=${playlist.mode} '
+      'current=${playlist.currentTrack?.id} next=${playlist.nextTrack?.id}',
+    );
 
     if (playlist.mode == PlaylistMode.singleLoop) {
       await loadTrack(autoPlay: true, reason: PlaybackReason.autoNext);
