@@ -62,7 +62,7 @@ class CppEqualizerProcessor : BaseAudioProcessor() {
         }
         
         // Native initialization
-        Log.d("CppEqualizer", "Configuring EQ. SampleRate: ${inputAudioFormat.sampleRate} Hz, Channels: ${inputAudioFormat.channelCount}")
+        NativeLog.d("CppEqualizer", "Configuring EQ. SampleRate: ${inputAudioFormat.sampleRate} Hz, Channels: ${inputAudioFormat.channelCount}")
         nativeInit(nativeHandle, numBands, inputAudioFormat.sampleRate.toFloat(), inputAudioFormat.channelCount)
         isInitialized = true
         
@@ -116,3 +116,4 @@ class CppEqualizerProcessor : BaseAudioProcessor() {
     private external fun nativeSetBandGain(handle: Long, index: Int, gainDb: Float)
     private external fun nativeSetPreAmp(handle: Long, gainDb: Float)
 }
+

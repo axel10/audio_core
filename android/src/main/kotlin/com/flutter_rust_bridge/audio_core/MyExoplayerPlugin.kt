@@ -72,7 +72,7 @@ class MyExoplayerPlugin :
 
         private fun createPlayerListener(ctxRef: PlayerContext) = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
-                android.util.Log.d(
+                NativeLog.d(
                     "AudioCore",
                     "listener onPlaybackStateChanged id=${ctxRef.id} state=$state " +
                         "isPlaying=${ctxRef.player.isPlaying} playWhenReady=${ctxRef.player.playWhenReady} " +
@@ -85,7 +85,7 @@ class MyExoplayerPlugin :
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                android.util.Log.d(
+                NativeLog.d(
                     "AudioCore",
                     "listener onPlayerError id=${ctxRef.id} error=${error.message}",
                 )
@@ -93,7 +93,7 @@ class MyExoplayerPlugin :
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                android.util.Log.d(
+                NativeLog.d(
                     "AudioCore",
                     "listener onIsPlayingChanged id=${ctxRef.id} isPlaying=$isPlaying " +
                         "playWhenReady=${ctxRef.player.playWhenReady} state=${ctxRef.player.playbackState} " +
@@ -108,7 +108,7 @@ class MyExoplayerPlugin :
                 newPosition: Player.PositionInfo,
                 reason: Int
             ) {
-                android.util.Log.d(
+                NativeLog.d(
                     "AudioCore",
                     "listener onPositionDiscontinuity id=${ctxRef.id} reason=$reason " +
                         "old=${oldPosition.positionMs} new=${newPosition.positionMs} " +
@@ -180,6 +180,7 @@ class MyExoplayerPlugin :
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         instance = this
         context = flutterPluginBinding.applicationContext
+        NativeLog.init(flutterPluginBinding.applicationContext)
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "my_exoplayer")
         channel.setMethodCallHandler(this)
         mediaLibraryChannel = MethodChannel(
@@ -247,7 +248,7 @@ class MyExoplayerPlugin :
             .setWakeMode(androidx.media3.common.C.WAKE_MODE_LOCAL)
             .build()
 
-        android.util.Log.d(
+        NativeLog.d(
             "AudioCore",
             "createPlayerContext id=$id handleAudioFocus=$handleAudioFocus",
         )
@@ -315,13 +316,13 @@ class MyExoplayerPlugin :
         val result = MainThreadResult(originalResult)
         val playerId = call.argument<String>("playerId") ?: "main"
         if(call.method != "getLatestFft"){
-            android.util.Log.d(
+            NativeLog.d(
                 "AudioCore",
                 "onMethodCall method=${call.method} playerId=$playerId args=${call.arguments}",
             )
         }
 
-//        android.util.Log.d(
+//        NativeLog.d(
 //            "AudioCore",
 //            "onMethodCall method=${call.method} playerId=$playerId args=${call.arguments}",
 //        )
@@ -411,7 +412,7 @@ class MyExoplayerPlugin :
                 val url = call.argument<String>("url") ?: return result.error("INVALID_ARGUMENT", "URL is null", null)
                 val ctx = getOrCreatePlayerContext(playerId)
                 cancelActiveCrossfade()
-                android.util.Log.d(
+                NativeLog.d(
                     "AudioCore",
                     "load start playerId=$playerId url=$url currentCtx=${ctx.id} " +
                         "playWhenReady=${ctx.player.playWhenReady} isPlaying=${ctx.player.isPlaying}",
@@ -420,7 +421,7 @@ class MyExoplayerPlugin :
                 ctx.player.setMediaItem(mediaItem)
                 ctx.player.playWhenReady = false
                 ctx.player.prepare()
-                android.util.Log.d(
+                NativeLog.d(
                     "AudioCore",
                     "load prepared playerId=$playerId url=$url state=${ctx.player.playbackState} " +
                         "isPlaying=${ctx.player.isPlaying} playWhenReady=${ctx.player.playWhenReady}",
@@ -512,7 +513,7 @@ class MyExoplayerPlugin :
                     cancelActiveCrossfade()
                 }
                 val commandGeneration = beginVolumeCommand(ctx)
-                android.util.Log.d(
+                NativeLog.d(
                     "AudioCore",
                     "play start playerId=$playerId fadeDurationMs=$fadeDurationMs " +
                         "targetVolume=$targetVolume state=${ctx.player.playbackState} " +
@@ -530,7 +531,7 @@ class MyExoplayerPlugin :
                 } else {
                     ctx.player.play()
                 }
-                android.util.Log.d(
+                NativeLog.d(
                     "AudioCore",
                     "play issued playerId=$playerId state=${ctx.player.playbackState} " +
                         "isPlaying=${ctx.player.isPlaying} playWhenReady=${ctx.player.playWhenReady} " +
@@ -545,7 +546,7 @@ class MyExoplayerPlugin :
                     cancelActiveCrossfade()
                 }
                 val commandGeneration = beginVolumeCommand(ctx)
-                android.util.Log.d(
+                NativeLog.d(
                     "AudioCore",
                     "pause start playerId=$playerId fadeDurationMs=$fadeDurationMs " +
                         "state=${ctx.player.playbackState} isPlaying=${ctx.player.isPlaying} " +
@@ -565,7 +566,7 @@ class MyExoplayerPlugin :
                 } else {
                     ctx.player.pause()
                 }
-                android.util.Log.d(
+                NativeLog.d(
                     "AudioCore",
                     "pause issued playerId=$playerId state=${ctx.player.playbackState} " +
                         "isPlaying=${ctx.player.isPlaying} playWhenReady=${ctx.player.playWhenReady} " +
@@ -592,7 +593,7 @@ class MyExoplayerPlugin :
                     result.error("PLAYER_NOT_FOUND", "Player context not found for ID: $playerId", null)
                     return
                 }
-                android.util.Log.d(
+                NativeLog.d(
                     "AudioCore",
                     "seek playerId=$playerId positionMs=$positionMs state=${targetCtx.player.playbackState} " +
                         "isPlaying=${targetCtx.player.isPlaying} playWhenReady=${targetCtx.player.playWhenReady}",
@@ -603,7 +604,7 @@ class MyExoplayerPlugin :
             "prepareForFileWrite" -> {
                 cancelActiveCrossfade()
                 beginVolumeCommand(ctx)
-                android.util.Log.d(
+                NativeLog.d(
                     "AudioCore",
                     "prepareForFileWrite playerId=$playerId state=${ctx.player.playbackState} " +
                         "isPlaying=${ctx.player.isPlaying} playWhenReady=${ctx.player.playWhenReady}",
@@ -623,7 +624,7 @@ class MyExoplayerPlugin :
                     cancelActiveCrossfade()
                 }
                 val commandGeneration = beginVolumeCommand(ctx)
-                android.util.Log.d(
+                NativeLog.d(
                     "AudioCore",
                     "setVolume playerId=$playerId volume=$volume fadeDurationMs=$fadeDurationMs " +
                         "state=${ctx.player.playbackState} isPlaying=${ctx.player.isPlaying} " +
@@ -777,7 +778,7 @@ class MyExoplayerPlugin :
             }
             "dispose" -> {
                 val activeCrossfadeContext = playerId == CROSSFADE_PLAYER_ID && activeCrossfadeSession != null
-                android.util.Log.d(
+                NativeLog.d(
                     "AudioCore",
                     "dispose playerId=$playerId activeCrossfade=$activeCrossfadeContext " +
                         "currentContexts=${playerContexts.keys}",
@@ -800,13 +801,13 @@ class MyExoplayerPlugin :
     }
 
     private fun handleEnsureAudioPermission(result: Result) {
-        android.util.Log.d(
+        NativeLog.d(
             "AudioCore",
             "handleEnsureAudioPermission start sdk=${Build.VERSION.SDK_INT} " +
                 "activityPresent=${activity != null} contextPresent=${context != null}",
         )
         if (hasAudioPermission()) {
-            android.util.Log.d("AudioCore", "handleEnsureAudioPermission already granted")
+            NativeLog.d("AudioCore", "handleEnsureAudioPermission already granted")
             result.success(true)
             return
         }
@@ -830,7 +831,7 @@ class MyExoplayerPlugin :
         }
 
         pendingMediaLibraryPermissionResult = result
-        android.util.Log.d(
+        NativeLog.d(
             "AudioCore",
             "handleEnsureAudioPermission requesting permissions=" +
                 requiredPermissions().joinToString(","),
@@ -843,7 +844,7 @@ class MyExoplayerPlugin :
     }
 
     private fun handleScanAudioLibrary(result: Result) {
-        android.util.Log.d(
+        NativeLog.d(
             "AudioCore",
             "handleScanAudioLibrary start sdk=${Build.VERSION.SDK_INT} " +
                 "permission=${hasAudioPermission()}",
@@ -878,7 +879,7 @@ class MyExoplayerPlugin :
 
         val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC"
         val items = mutableListOf<Map<String, Any?>>()
-        android.util.Log.d(
+        NativeLog.d(
             "AudioCore",
             "handleScanAudioLibrary query uri=${MediaStore.Audio.Media.EXTERNAL_CONTENT_URI} " +
                 "sortOrder=$sortOrder projectionSize=${projection.size}",
@@ -942,13 +943,13 @@ class MyExoplayerPlugin :
             }
         }
 
-        android.util.Log.d(
+        NativeLog.d(
             "AudioCore",
             "handleScanAudioLibrary finished count=${items.size} " +
                 "permission=${hasAudioPermission()}",
         )
         if (items.isEmpty()) {
-            android.util.Log.w(
+            NativeLog.w(
                 "AudioCore",
                 "MediaStore query returned no playable audio items. Permission granted=${hasAudioPermission()}",
             )
@@ -996,7 +997,7 @@ class MyExoplayerPlugin :
         commandGeneration: Long,
         onEnd: (() -> Unit)? = null
     ) {
-        android.util.Log.d(
+        NativeLog.d(
             "AudioCore",
             "fadeVolumeTo start id=${ctx.id} from=${ctx.player.volume} target=$targetVolume " +
                 "durationMs=$durationMs generation=$commandGeneration",
@@ -1014,7 +1015,7 @@ class MyExoplayerPlugin :
         }
         animator.addListener(object : android.animation.AnimatorListenerAdapter() {
             override fun onAnimationCancel(animation: android.animation.Animator) {
-                android.util.Log.d(
+                NativeLog.d(
                     "AudioCore",
                     "fadeVolumeTo cancel id=${ctx.id} generation=$commandGeneration " +
                         "currentGeneration=${ctx.volumeCommandGeneration}",
@@ -1029,7 +1030,7 @@ class MyExoplayerPlugin :
                 if (ctx.volumeAnimator === animator) {
                     ctx.volumeAnimator = null
                 }
-                android.util.Log.d(
+                NativeLog.d(
                     "AudioCore",
                     "fadeVolumeTo end id=${ctx.id} target=$targetVolume generation=$commandGeneration",
                 )
@@ -1055,7 +1056,7 @@ class MyExoplayerPlugin :
                 return
             }
 
-            android.util.Log.d(
+            NativeLog.d(
                 "AudioCore",
                 "handleCrossfade start path=$path durationMs=$durationMs positionMs=$positionMs " +
                     "mainState=${mainCtx.player.playbackState} mainIsPlaying=${mainCtx.player.isPlaying} " +
@@ -1069,7 +1070,7 @@ class MyExoplayerPlugin :
             // stays true for active playback and avoids downgrading to an
             // abrupt swap when the state lags by a frame.
             if (durationMs <= 0L || !mainCtx.player.playWhenReady) {
-                android.util.Log.d(
+                NativeLog.d(
                     "AudioCore",
                     "handleCrossfade fallback immediate path=$path durationMs=$durationMs " +
                         "reason=${if (durationMs <= 0L) "zeroDuration" else "playWhenReadyFalse"}",
@@ -1100,7 +1101,7 @@ class MyExoplayerPlugin :
             val baseVolume = mainCtx.player.volume
             val mediaItem = MediaItem.fromUri(Uri.parse(path))
 
-            android.util.Log.d(
+            NativeLog.d(
                 "AudioCore",
                 "handleCrossfade deckSetup baseVolume=$baseVolume incomingId=${incomingCtx.id} " +
                     "incomingState=${incomingCtx.player.playbackState} incomingPlaying=${incomingCtx.player.isPlaying}",
@@ -1138,7 +1139,7 @@ class MyExoplayerPlugin :
                 val incomingVolume = (baseVolume * progress).coerceIn(0f, 1f)
                 mainCtx.player.volume = outgoingVolume
                 incomingCtx.player.volume = incomingVolume
-                android.util.Log.v(
+                NativeLog.v(
                     "AudioCore",
                     "handleCrossfade tick gen=$generation progress=$progress " +
                         "outgoing=$outgoingVolume incoming=$incomingVolume " +
@@ -1147,7 +1148,7 @@ class MyExoplayerPlugin :
             }
             animator.addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationCancel(animation: android.animation.Animator) {
-                    android.util.Log.d(
+                    NativeLog.d(
                         "AudioCore",
                         "handleCrossfade cancel generation=$generation current=${crossfadeGeneration}",
                     )
@@ -1158,7 +1159,7 @@ class MyExoplayerPlugin :
 
                 override fun onAnimationEnd(animation: android.animation.Animator) {
                     if (crossfadeGeneration != generation) return
-                    android.util.Log.d(
+                    NativeLog.d(
                         "AudioCore",
                         "handleCrossfade end generation=$generation current=${crossfadeGeneration}",
                     )
@@ -1182,7 +1183,7 @@ class MyExoplayerPlugin :
 
     private fun cancelActiveCrossfade(restoreMainVolume: Boolean = true) {
         val session = activeCrossfadeSession ?: return
-        android.util.Log.d(
+        NativeLog.d(
             "AudioCore",
             "cancelActiveCrossfade restoreMainVolume=$restoreMainVolume sessionGen=${session.generation} " +
                 "baseVolume=${session.baseVolume} targetVolume=${session.targetVolume} currentGen=$crossfadeGeneration",
@@ -1208,7 +1209,7 @@ class MyExoplayerPlugin :
         val session = activeCrossfadeSession ?: return
         if (session.generation != generation) return
 
-        android.util.Log.d(
+        NativeLog.d(
             "AudioCore",
             "finalizeCrossfade generation=$generation baseVolume=${session.baseVolume} " +
                 "targetVolume=${session.targetVolume} contexts=${playerContexts.keys}",
@@ -1554,7 +1555,7 @@ class MyExoplayerPlugin :
             "position" to p.currentPosition,
             "error" to p.playerError?.message
         )
-        android.util.Log.d(
+        NativeLog.d(
             "AudioCore",
             "sendPlayerState id=$id snapshotId=${snapshotCtx.id} state=${stateMap["state"]} " +
                 "isPlaying=${stateMap["isPlaying"]} playWhenReady=${p.playWhenReady} " +
@@ -1566,7 +1567,7 @@ class MyExoplayerPlugin :
 
     private fun settleActiveCrossfadeIfNeeded() {
         val session = activeCrossfadeSession ?: return
-        android.util.Log.d(
+        NativeLog.d(
             "AudioCore",
             "settleActiveCrossfade generation=${session.generation} " +
                 "baseVolume=${session.baseVolume} targetVolume=${session.targetVolume}",
@@ -1636,3 +1637,4 @@ class MyExoplayerPlugin :
         sink.success(payload)
     }
 }
+

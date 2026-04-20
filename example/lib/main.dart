@@ -18,6 +18,8 @@ late AudioCoreHandler audioHandler;
 void main() async {
   // 确保 Flutter 绑定已初始化
   WidgetsFlutterBinding.ensureInitialized();
+  await AppLog.ensureInitialized();
+  AppLog.install();
 
   final controller = AudioCoreController(
     fftSize: 1024,
@@ -194,9 +196,11 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
   }
 
   Future<void> _pickAudio({FadeSettings? fadeSetting}) async {
-    debugPrint('Select Audio clicked');
+    debugPrint('[AudioCore][Example] Select Audio clicked');
     if (!_controller.isInitialized) {
-      debugPrint('Controller not initialized, initializing now...');
+      debugPrint(
+        '[AudioCore][Example] Controller not initialized, initializing now...',
+      );
       await _controller.initialize();
     }
 
@@ -229,7 +233,9 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
       type: FileType.audio,
       allowMultiple: true,
     );
-    debugPrint('File picker returned: ${result?.files.length ?? 0} files');
+    debugPrint(
+      '[AudioCore][Example] File picker returned: ${result?.files.length ?? 0} files',
+    );
     if (result == null || result.files.isEmpty) {
       return;
     }
@@ -302,7 +308,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
       sampleStride: _waveformStride,
     );
     if (!mounted) return;
-    debugPrint(waveform.toString());
+    debugPrint('[AudioCore][Example] waveform=$waveform');
     setState(() {
       _waveform = waveform;
     });

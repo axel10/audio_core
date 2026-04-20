@@ -36,7 +36,7 @@ class EqualizerController extends ChangeNotifier {
       _config = await _parent.engine.getEqualizerConfig();
       notifyListeners();
     } catch (e) {
-      debugPrint('Equalizer initialization error: $e');
+      debugPrint('[EqualizerController] initialization error: $e');
     }
   }
 
@@ -65,7 +65,7 @@ class EqualizerController extends ChangeNotifier {
       _config = normalized;
       notifyListeners();
     } catch (e) {
-      debugPrint('Equalizer update failed: $e');
+      debugPrint('[EqualizerController] update failed: $e');
       rethrow;
     }
   }

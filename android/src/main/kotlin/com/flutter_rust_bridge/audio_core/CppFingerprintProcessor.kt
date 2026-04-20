@@ -41,7 +41,7 @@ class CppFingerprintProcessor : BaseAudioProcessor() {
         isInitialized = true
         hasPrinted = false
         totalSamplesProcessed = 0
-        Log.d("Chromaprint", "Configured CppFingerprintProcessor. SR: ${inputAudioFormat.sampleRate}")
+        NativeLog.d("Chromaprint", "Configured CppFingerprintProcessor. SR: ${inputAudioFormat.sampleRate}")
         
         return inputAudioFormat // We don't change the format
     }
@@ -64,10 +64,10 @@ class CppFingerprintProcessor : BaseAudioProcessor() {
             if (elapsedSeconds >= SECONDS_TO_FINGERPRINT) {
                 val fingerprint = ChromaprintNative.nativeGetFingerprint(nativeHandle)
                 if (fingerprint != null) {
-                    Log.d("Chromaprint", "==========================================================")
-                    Log.d("Chromaprint", "🎵 SONG FINGERPRINT GENERATED (after $SECONDS_TO_FINGERPRINT s):")
-                    Log.d("Chromaprint", fingerprint)
-                    Log.d("Chromaprint", "==========================================================")
+                    NativeLog.d("Chromaprint", "==========================================================")
+                    NativeLog.d("Chromaprint", "🎵 SONG FINGERPRINT GENERATED (after $SECONDS_TO_FINGERPRINT s):")
+                    NativeLog.d("Chromaprint", fingerprint)
+                    NativeLog.d("Chromaprint", "==========================================================")
                 }
                 hasPrinted = true
             }
@@ -98,3 +98,4 @@ class CppFingerprintProcessor : BaseAudioProcessor() {
         }
     }
 }
+

@@ -262,7 +262,7 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
         channels: channels,
       );
     } catch (e) {
-      debugPrint('Fingerprint extraction failed: $e');
+      debugPrint('[AppleAudioEngine] Fingerprint extraction failed: $e');
       return null;
     }
   }

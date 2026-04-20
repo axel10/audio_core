@@ -284,7 +284,7 @@ class AndroidAudioEngine implements AudioEngine {
       );
       return fingerprint;
     } catch (e) {
-      debugPrint("Fingerprint extraction failed: $e");
+      debugPrint('[AndroidAudioEngine] Fingerprint extraction failed: $e');
       return null;
     }
   }

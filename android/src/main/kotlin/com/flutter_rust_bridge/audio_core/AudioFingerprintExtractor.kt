@@ -34,7 +34,7 @@ object AudioFingerprintExtractor {
             }
             
             if (audioTrackIndex < 0 || format == null) {
-                Log.e(TAG, "No audio track found in file")
+                NativeLog.e(TAG, "No audio track found in file")
                 return null
             }
             
@@ -113,7 +113,7 @@ object AudioFingerprintExtractor {
             
             return ChromaprintNative.nativeGetFingerprint(handle)
         } catch (e: Exception) {
-            Log.e(TAG, "Error extracting fingerprint", e)
+            NativeLog.e(TAG, "Error extracting fingerprint", e)
             return null
         } finally {
             if (handle != 0L) {
@@ -127,3 +127,4 @@ object AudioFingerprintExtractor {
         }
     }
 }
+

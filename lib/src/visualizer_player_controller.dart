@@ -759,7 +759,9 @@ class AudioCoreController extends ChangeNotifier
       debugPrint('[AudioCore][MediaLibrary] ensure permission result=$granted');
       return granted ?? false;
     } catch (e) {
-      debugPrint('ensureAndroidMediaLibraryPermission failed: $e');
+      debugPrint(
+        '[AudioCore][MediaLibrary] ensureAndroidMediaLibraryPermission failed: $e',
+      );
       return false;
     }
   }
@@ -817,7 +819,7 @@ class AudioCoreController extends ChangeNotifier
       );
     } on PlatformException catch (e) {
       debugPrint(
-        'scanAndroidMediaLibrary failed: ${e.code} ${e.message} '
+        '[AudioCore][MediaLibrary] scanAndroidMediaLibrary failed: ${e.code} ${e.message} '
         'details=${e.details}',
       );
       return AndroidMediaLibraryScanResult(
@@ -827,7 +829,7 @@ class AudioCoreController extends ChangeNotifier
         errorMessage: e.message,
       );
     } catch (e) {
-      debugPrint('scanAndroidMediaLibrary failed: $e');
+      debugPrint('[AudioCore][MediaLibrary] scanAndroidMediaLibrary failed: $e');
       return AndroidMediaLibraryScanResult(
         permissionGranted: true,
         entries: const <AndroidMediaLibraryEntry>[],
@@ -919,7 +921,7 @@ class AudioCoreController extends ChangeNotifier
   }) async {
     final file = path.startsWith('content://') ? null : File(path);
     if (file != null && !file.existsSync()) {
-      debugPrint('updateMetadata: File does not exist: $path');
+      debugPrint('[AudioCore][Metadata] updateMetadata: File does not exist: $path');
       return false;
     }
 
@@ -964,7 +966,7 @@ class AudioCoreController extends ChangeNotifier
             ].join(' | ')
           : e.toString();
 
-      debugPrint('updateMetadata failed: $errorText');
+      debugPrint('[AudioCore][Metadata] updateMetadata failed: $errorText');
       player.setError('Metadata update failed: $errorText');
 
       if (managePlaybackSync && needsSync) {
