@@ -7,6 +7,7 @@ import '../track_metadata.dart';
 /// Define a unified status update for all platforms.
 class AudioStatus {
   final String? path;
+  final String? playbackState;
   final Duration position;
   final Duration duration;
   final bool isPlaying;
@@ -15,6 +16,7 @@ class AudioStatus {
 
   AudioStatus({
     this.path,
+    this.playbackState,
     required this.position,
     required this.duration,
     required this.isPlaying,
@@ -29,11 +31,7 @@ abstract class AudioEngine {
   Future<void> dispose();
 
   Future<void> load(String path);
-  Future<void> crossfade(
-    String path,
-    Duration duration, {
-    Duration? position,
-  });
+  Future<void> crossfade(String path, Duration duration, {Duration? position});
   Future<void> play({Duration? fadeDuration});
   Future<void> pause({Duration? fadeDuration});
   Future<void> seek(Duration position);
@@ -44,7 +42,9 @@ abstract class AudioEngine {
 
   // Visualization
   Future<List<double>> getLatestFft();
-  Future<void> updateVisualizerFftOptions(VisualizerOptimizationOptions options);
+  Future<void> updateVisualizerFftOptions(
+    VisualizerOptimizationOptions options,
+  );
   bool get fftDataIsPreGrouped;
   Future<Float32List> getAudioPcm({String? path, int sampleStride});
 

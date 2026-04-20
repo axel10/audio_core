@@ -34,6 +34,7 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
 
       final args = (call.arguments as Map?)?.cast<String, dynamic>() ?? {};
       _currentPath = args['path'] as String? ?? _currentPath;
+      final playbackState = args['state'] as String?;
       final positionMs = (args['position'] as num?)?.toInt() ?? 0;
       final durationMs = (args['duration'] as num?)?.toInt() ?? 0;
       final isPlaying = args['isPlaying'] as bool? ?? false;
@@ -45,6 +46,7 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
       _statusController.add(
         AudioStatus(
           path: _currentPath,
+          playbackState: playbackState,
           position: Duration(milliseconds: positionMs),
           duration: Duration(milliseconds: durationMs),
           isPlaying: isPlaying,
@@ -223,9 +225,7 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
         'getEqualizerConfig',
       );
       if (result != null) {
-        final config = _equalizerConfigFromMap(
-          result.cast<Object?, Object?>(),
-        );
+        final config = _equalizerConfigFromMap(result.cast<Object?, Object?>());
         _lastConfig = config;
         return config;
       }

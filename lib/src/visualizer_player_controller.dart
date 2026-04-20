@@ -212,16 +212,18 @@ class AudioCoreController extends ChangeNotifier
       _playbackStateSubscription = _engine.statusStream.listen((status) {
         player.applySnapshot(
           status.path,
+          status.playbackState,
           status.position,
           status.duration,
           status.isPlaying,
           status.volume,
           error: status.error,
         );
-        if (status.isPlaying == false &&
-            status.duration > Duration.zero &&
-            status.position >=
-                status.duration - const Duration(milliseconds: 250)) {
+        final reachedEnd =
+            status.playbackState == 'ENDED' ||
+            (status.duration > Duration.zero &&
+                status.position >= status.duration);
+        if (status.isPlaying == false && reachedEnd) {
           unawaited(_handleAutoTransition());
         }
       });
@@ -605,10 +607,7 @@ class AudioCoreController extends ChangeNotifier
 
   Future<void> _onAnalysisTick() async {
     await _refreshLatestFftCache();
-    visualizer.processAnalysisTick(
-      player.isPlaying,
-      player.position,
-    );
+    visualizer.processAnalysisTick(player.isPlaying, player.position);
   }
 
   void _onRenderTick() {

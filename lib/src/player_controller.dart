@@ -348,6 +348,7 @@ class PlayerController extends ChangeNotifier {
   @internal
   void applySnapshot(
     String? path,
+    String? playbackState,
     Duration position,
     Duration duration,
     bool isPlaying,
@@ -377,9 +378,12 @@ class PlayerController extends ChangeNotifier {
       _isPlaying = isPlaying;
       if (!isPlaying) {
         _position = position;
-        if (_selectedPath != null &&
-            _duration > Duration.zero &&
-            _position.inMilliseconds >= (_duration.inMilliseconds - 250)) {
+        final reachedEnd =
+            playbackState == 'ENDED' ||
+            (_selectedPath != null &&
+                _duration > Duration.zero &&
+                _position >= _duration);
+        if (_selectedPath != null && reachedEnd) {
           _playerState = PlayerState.completed;
         } else if (_selectedPath != null) {
           _playerState = PlayerState.paused;
@@ -400,8 +404,8 @@ class PlayerController extends ChangeNotifier {
     if (_isPlaying) {
       _playerState = PlayerState.playing;
     } else if (_selectedPath != null &&
-        _duration > Duration.zero &&
-        _position.inMilliseconds >= (_duration.inMilliseconds - 250)) {
+        (playbackState == 'ENDED' ||
+            (_duration > Duration.zero && _position >= _duration))) {
       _playerState = PlayerState.completed;
     } else if (_selectedPath != null) {
       _playerState = PlayerState.paused;
@@ -425,8 +429,7 @@ class PlayerController extends ChangeNotifier {
     }
 
     _position = position;
-    if (_duration > Duration.zero &&
-        _position >= _duration - const Duration(milliseconds: 250)) {
+    if (_duration > Duration.zero && _position >= _duration) {
       _isPlaying = false;
       _playerState = PlayerState.completed;
     }
@@ -555,11 +558,7 @@ class NativeCrossfadeTransition extends PlaybackTransition {
       '[NativeCrossfadeTransition] start uri=$uri autoPlay=$autoPlay '
       'positionMs=${position?.inMilliseconds} durationMs=${duration.inMilliseconds}',
     );
-    await player._parent.engine.crossfade(
-      uri,
-      duration,
-      position: position,
-    );
+    await player._parent.engine.crossfade(uri, duration, position: position);
 
     // We update local state immediately
     player._selectedPath = uri;

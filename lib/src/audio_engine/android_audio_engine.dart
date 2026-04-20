@@ -29,6 +29,7 @@ class AndroidAudioEngine implements AudioEngine {
       if (call.method == 'onPlayerStateChanged') {
         final String playerId = call.arguments['playerId'] ?? 'main';
         if (playerId == _activePlayerId) {
+          final String? playbackState = call.arguments['state']?.toString();
           final int positionMs = call.arguments['position'] ?? 0;
           final int durationMs = call.arguments['duration'] ?? 0;
           final bool isPlaying = call.arguments['isPlaying'] ?? false;
@@ -39,6 +40,7 @@ class AndroidAudioEngine implements AudioEngine {
           _statusController.add(
             AudioStatus(
               path: _currentPath,
+              playbackState: playbackState,
               position: Duration(milliseconds: positionMs),
               duration: Duration(milliseconds: durationMs),
               isPlaying: isPlaying,
@@ -146,7 +148,9 @@ class AndroidAudioEngine implements AudioEngine {
   @override
   Future<void> setVolume(double volume) {
     _currentVolume = volume;
-    debugPrint('[AndroidAudioEngine] setVolume volume=$volume currentPath=$_currentPath');
+    debugPrint(
+      '[AndroidAudioEngine] setVolume volume=$volume currentPath=$_currentPath',
+    );
     return _channel.invokeMethod('setVolume', {
       'volume': volume,
       'playerId': _activePlayerId,
