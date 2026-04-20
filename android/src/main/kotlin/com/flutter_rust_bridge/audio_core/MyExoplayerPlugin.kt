@@ -408,6 +408,27 @@ class MyExoplayerPlugin :
                 handleCrossfade(path, durationMs, positionMs, result)
                 return
             }
+            "transition" -> {
+                val path = call.argument<String>("path")
+                    ?: return result.error("INVALID_ARGUMENT", "Path is null", null)
+                val durationMs = call.argument<Int>("durationMs")?.toLong() ?: 0L
+                val positionMs = call.argument<Int>("positionMs")?.toLong()
+                val autoPlay = call.argument<Boolean>("autoPlay") ?: true
+                val mainCtx = playerContexts[MAIN_PLAYER_ID] ?: getOrCreatePlayerContext(
+                    MAIN_PLAYER_ID,
+                )
+                val targetVolume =
+                    call.argument<Double>("targetVolume")?.toFloat() ?: mainCtx.player.volume
+                handleSequentialTransition(
+                    path = path,
+                    durationMs = durationMs,
+                    positionMs = positionMs,
+                    autoPlay = autoPlay,
+                    targetVolume = targetVolume.coerceIn(0f, 1f),
+                    result = result,
+                )
+                return
+            }
             "load" -> {
                 val url = call.argument<String>("url") ?: return result.error("INVALID_ARGUMENT", "URL is null", null)
                 val ctx = getOrCreatePlayerContext(playerId)
@@ -1178,6 +1199,85 @@ class MyExoplayerPlugin :
             result.success(null)
         } catch (e: Exception) {
             result.error("CROSSFADE_FAILED", e.message, mapOf("exception" to e.javaClass.name))
+        }
+    }
+
+    private fun handleSequentialTransition(
+        path: String,
+        durationMs: Long,
+        positionMs: Long?,
+        autoPlay: Boolean,
+        targetVolume: Float,
+        result: Result,
+    ) {
+        try {
+            val mainCtx = playerContexts[MAIN_PLAYER_ID] ?: run {
+                result.error("PLAYER_NOT_FOUND", "Main player context not found.", null)
+                return
+            }
+
+            NativeLog.d(
+                "AudioCore",
+                "handleSequentialTransition start path=$path durationMs=$durationMs " +
+                    "positionMs=$positionMs autoPlay=$autoPlay " +
+                    "state=${mainCtx.player.playbackState} isPlaying=${mainCtx.player.isPlaying} " +
+                    "playWhenReady=${mainCtx.player.playWhenReady} volume=${mainCtx.player.volume}",
+            )
+
+            cancelActiveCrossfade()
+
+            val mediaItem = MediaItem.fromUri(Uri.parse(path))
+            val shouldFade = durationMs > 0L
+            val commandGeneration = beginVolumeCommand(mainCtx)
+
+            fun loadReplacement() {
+                mainCtx.player.stop()
+                mainCtx.player.clearMediaItems()
+                mainCtx.player.setMediaItem(mediaItem)
+                mainCtx.player.playWhenReady = autoPlay
+                mainCtx.player.volume = if (autoPlay && shouldFade) 0f else targetVolume
+                mainCtx.player.prepare()
+                if (positionMs != null) {
+                    mainCtx.player.seekTo(positionMs)
+                }
+
+                if (autoPlay) {
+                    mainCtx.player.play()
+                    if (shouldFade) {
+                        fadeVolumeTo(
+                            mainCtx,
+                            targetVolume,
+                            durationMs,
+                            commandGeneration,
+                        )
+                    }
+                }
+
+                sendPlayerState(MAIN_PLAYER_ID)
+                result.success(null)
+            }
+
+            if (shouldFade && mainCtx.player.isPlaying) {
+                fadeVolumeTo(
+                    mainCtx,
+                    0f,
+                    durationMs,
+                    commandGeneration,
+                ) {
+                    if (mainCtx.volumeCommandGeneration != commandGeneration) return@fadeVolumeTo
+                    NativeLog.d(
+                        "AudioCore",
+                        "handleSequentialTransition fadeOutComplete path=$path " +
+                            "durationMs=$durationMs autoPlay=$autoPlay",
+                    )
+                    mainCtx.player.pause()
+                    loadReplacement()
+                }
+            } else {
+                loadReplacement()
+            }
+        } catch (e: Exception) {
+            result.error("TRANSITION_FAILED", e.message, mapOf("exception" to e.javaClass.name))
         }
     }
 

@@ -473,52 +473,30 @@ class SequentialFadeTransition extends PlaybackTransition {
     required bool autoPlay,
     Duration? position,
   }) async {
-    player.nextFadeSequence();
-    final seq = player.fadeSequence;
     debugPrint(
       '[SequentialFadeTransition] start uri=$uri autoPlay=$autoPlay '
       'positionMs=${position?.inMilliseconds} durationMs=${duration.inMilliseconds} '
       'initialIsPlaying=${player.isPlaying} currentVolume=${player.volume}',
     );
 
-    if (player.isPlaying) {
-      player.setFadeActive(true);
-      try {
-        final fadedOut = await player.fadeNativeVolume(
-          from: player.volume,
-          to: 0.0,
-          duration: duration,
-          sequence: seq,
-        );
-        if (!fadedOut) return;
-      } finally {
-        if (!autoPlay) player.setFadeActive(false);
-      }
-    }
-
-    await player.load(uri, nativeVolume: autoPlay ? 0.0 : player.volume);
-    debugPrint(
-      '[SequentialFadeTransition] afterLoad uri=$uri seq=$seq '
-      'selected=${player.currentPath} isPlaying=${player.isPlaying}',
+    await player._parent.engine.transition(
+      uri,
+      duration,
+      position: position,
+      autoPlay: autoPlay,
+      targetVolume: targetVolume,
     );
-    if (player.fadeSequence != seq) return;
-    if (position != null) await player.seek(position);
 
-    if (autoPlay) {
-      player.setFadeActive(true);
-      try {
-        await player.play(withFade: false);
-        await player.fadeNativeVolume(
-          from: 0.0,
-          to: targetVolume,
-          duration: duration,
-          sequence: seq,
-          followTargetVolume: true,
-        );
-      } finally {
-        player.setFadeActive(false);
-      }
-    }
+    final loadedDuration = await player._parent.engine.getDuration();
+    player._selectedPath = uri;
+    player._position = position ?? Duration.zero;
+    player._duration = loadedDuration;
+    player._durationReady = loadedDuration > Duration.zero;
+    player._lastCommandTime = DateTime.now();
+    player._isPlaying = autoPlay;
+    player._playerState = autoPlay ? PlayerState.playing : PlayerState.ready;
+    player._onTrackChanged(uri);
+    player.notifyListeners();
   }
 }
 

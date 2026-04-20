@@ -110,6 +110,35 @@ class AndroidAudioEngine implements AudioEngine {
   }
 
   @override
+  Future<void> transition(
+    String path,
+    Duration duration, {
+    Duration? position,
+    required bool autoPlay,
+    double? targetVolume,
+  }) async {
+    final resolvedTargetVolume = (targetVolume ?? _currentVolume)
+        .clamp(0.0, 1.0)
+        .toDouble();
+    debugPrint(
+      '[AndroidAudioEngine] transition path=$path durationMs=${duration.inMilliseconds} '
+      'positionMs=${position?.inMilliseconds} autoPlay=$autoPlay '
+      'targetVolume=$resolvedTargetVolume',
+    );
+    _latestFftCache = const <double>[];
+    await _channel.invokeMethod('transition', {
+      'path': path,
+      'durationMs': duration.inMilliseconds,
+      if (position != null) 'positionMs': position.inMilliseconds,
+      'playerId': _activePlayerId,
+      'autoPlay': autoPlay,
+      'targetVolume': resolvedTargetVolume,
+    });
+    _currentPath = path;
+    _currentVolume = resolvedTargetVolume;
+  }
+
+  @override
   Future<void> play({Duration? fadeDuration}) async {
     debugPrint(
       '[AndroidAudioEngine] play fadeDurationMs=${fadeDuration?.inMilliseconds ?? 0} '

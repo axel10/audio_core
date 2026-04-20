@@ -99,6 +99,37 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
   }
 
   @override
+  Future<void> transition(
+    String path,
+    Duration duration, {
+    Duration? position,
+    required bool autoPlay,
+    double? targetVolume,
+  }) async {
+    final resolvedTargetVolume = (targetVolume ?? _currentVolume)
+        .clamp(0.0, 1.0)
+        .toDouble();
+
+    if (duration > Duration.zero) {
+      await pause(fadeDuration: duration);
+    }
+
+    _currentVolume = resolvedTargetVolume;
+    await setVolume(resolvedTargetVolume);
+    await load(path);
+
+    if (position != null) {
+      await seek(position);
+    }
+
+    if (autoPlay) {
+      await play(fadeDuration: duration);
+    }
+
+    _currentPath = path;
+  }
+
+  @override
   Future<void> play({Duration? fadeDuration}) async {
     await _channel.invokeMethod('play', <String, Object?>{
       'playerId': 'main',

@@ -11,6 +11,7 @@ import 'rust_metadata_bridge.dart';
 class RustAudioEngine with PcmWaveformSupport implements AudioEngine {
   final _statusController = StreamController<AudioStatus>.broadcast();
   StreamSubscription? _subscription;
+  double _currentVolume = 1.0;
 
   @override
   Stream<AudioStatus> get statusStream => _statusController.stream;
@@ -18,6 +19,7 @@ class RustAudioEngine with PcmWaveformSupport implements AudioEngine {
   @override
   Future<void> initialize() async {
     _subscription = rust.subscribePlaybackState().listen((state) {
+      _currentVolume = state.volume.clamp(0.0, 1.0);
       _statusController.add(
         AudioStatus(
           path: state.path,
@@ -40,10 +42,14 @@ class RustAudioEngine with PcmWaveformSupport implements AudioEngine {
   }
 
   @override
-  Future<void> stop() => rust.disposeAudio();
+  Future<void> stop() {
+    return rust.disposeAudio();
+  }
 
   @override
-  Future<void> load(String path) => rust.loadAudioFile(path: path);
+  Future<void> load(String path) {
+    return rust.loadAudioFile(path: path);
+  }
 
   @override
   Future<void> crossfade(
@@ -54,6 +60,34 @@ class RustAudioEngine with PcmWaveformSupport implements AudioEngine {
     path: path,
     durationMs: duration.inMilliseconds,
   );
+
+  @override
+  Future<void> transition(
+    String path,
+    Duration duration, {
+    Duration? position,
+    required bool autoPlay,
+    double? targetVolume,
+  }) async {
+    final resolvedTargetVolume = (targetVolume ?? _currentVolume)
+        .clamp(0.0, 1.0)
+        .toDouble();
+
+    if (duration > Duration.zero) {
+      await rust.pauseAudio(fadeDurationMs: duration.inMilliseconds);
+    }
+
+    await rust.setAudioVolume(volume: resolvedTargetVolume);
+    await rust.loadAudioFile(path: path);
+    if (position != null) {
+      await rust.seekAudioMs(positionMs: position.inMilliseconds);
+    }
+
+    if (autoPlay) {
+      await rust.playAudio(fadeDurationMs: duration.inMilliseconds);
+    }
+    _currentVolume = resolvedTargetVolume;
+  }
 
   @override
   Future<void> play({Duration? fadeDuration}) =>
@@ -68,7 +102,10 @@ class RustAudioEngine with PcmWaveformSupport implements AudioEngine {
       rust.seekAudioMs(positionMs: position.inMilliseconds);
 
   @override
-  Future<void> setVolume(double volume) => rust.setAudioVolume(volume: volume);
+  Future<void> setVolume(double volume) =>
+      rust.setAudioVolume(volume: volume).then((_) {
+        _currentVolume = volume.clamp(0.0, 1.0);
+      });
 
   @override
   Future<Duration> getDuration() async {
