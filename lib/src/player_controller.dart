@@ -428,6 +428,10 @@ class PlayerController extends ChangeNotifier {
     }
 
     _position = position;
+    if (_duration > Duration.zero && _position >= _duration) {
+      _isPlaying = false;
+      _playerState = PlayerState.completed;
+    }
     notifyListeners();
   }
 
