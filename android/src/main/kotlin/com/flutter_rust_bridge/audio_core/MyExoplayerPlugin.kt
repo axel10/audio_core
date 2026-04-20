@@ -374,23 +374,40 @@ class MyExoplayerPlugin :
             "getWaveform" -> {
                 val path = call.argument<String>("path") ?: return result.error("INVALID_ARGUMENT", "Path is null", null)
                 val expectedChunks = call.argument<Int>("expectedChunks") ?: 0
-                val amp = amplituda ?: return result.error("INTERNAL_ERROR", "Amplituda not initialized", null)
-                
-                val (localPath, isTemp) = ensureLocalPath(path)
-                
-                amp.processAudio(localPath).get({ amResult ->
-                    val rawData = amResult.amplitudesAsList()
-                    val processedData = if (expectedChunks > 0) {
-                        downsample(rawData, expectedChunks)
-                    } else {
-                        rawData
+                // Amplituda's processing and any content:// materialization can be expensive,
+                // so keep it off the main thread to avoid janking the UI.
+                Thread {
+                    try {
+                        val amp = amplituda ?: run {
+                            result.error("INTERNAL_ERROR", "Amplituda not initialized", null)
+                            return@Thread
+                        }
+
+                        val (localPath, isTemp) = ensureLocalPath(path)
+
+                        amp.processAudio(localPath).get({ amResult ->
+                            try {
+                                val rawData = amResult.amplitudesAsList()
+                                val processedData = if (expectedChunks > 0) {
+                                    downsample(rawData, expectedChunks)
+                                } else {
+                                    rawData
+                                }
+                                result.success(processedData)
+                            } finally {
+                                if (isTemp) java.io.File(localPath).delete()
+                            }
+                        }, { error ->
+                            try {
+                                result.error("AMPLITUDA_ERROR", error.message, null)
+                            } finally {
+                                if (isTemp) java.io.File(localPath).delete()
+                            }
+                        })
+                    } catch (e: Exception) {
+                        result.error("AMPLITUDA_ERROR", e.message, null)
                     }
-                    result.success(processedData)
-                    if (isTemp) java.io.File(localPath).delete()
-                }, { error ->
-                    result.error("AMPLITUDA_ERROR", error.message, null)
-                    if (isTemp) java.io.File(localPath).delete()
-                })
+                }.start()
                 return
             }
             "extractFingerprint" -> {
