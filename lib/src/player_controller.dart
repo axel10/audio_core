@@ -428,10 +428,8 @@ class PlayerController extends ChangeNotifier {
     }
 
     _position = position;
-    if (_duration > Duration.zero && _position >= _duration) {
-      _isPlaying = false;
-      _playerState = PlayerState.completed;
-    }
+    // Completion is now derived from native playback state, not the local
+    // render timer, to avoid premature end-of-track transitions.
     notifyListeners();
   }
 

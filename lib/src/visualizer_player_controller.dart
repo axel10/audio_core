@@ -219,12 +219,10 @@ class AudioCoreController extends ChangeNotifier
           status.volume,
           error: status.error,
         );
-        final reachedEnd =
-            status.playbackState == 'ENDED' ||
-            (status.playbackState == null &&
-                status.duration > Duration.zero &&
-                status.position >= status.duration);
-        if (status.isPlaying == false && reachedEnd) {
+        // Only trust the native backend for end-of-track handoff.
+        // Background timers can drift, so we avoid inferring completion from
+        // the cached position alone.
+        if (status.playbackState == 'ENDED') {
           unawaited(_handleAutoTransition());
         }
       });
@@ -622,10 +620,6 @@ class AudioCoreController extends ChangeNotifier
   void _advanceLocalPosition() {
     if (!player.isPlaying || player.currentPath == null) return;
     player.updatePosition(player.position + _renderInterval);
-
-    if (player.currentState == PlayerState.completed) {
-      unawaited(_handleAutoTransition());
-    }
   }
 
   Future<void> _handleAutoTransition() async {
