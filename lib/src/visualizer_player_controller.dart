@@ -221,7 +221,8 @@ class AudioCoreController extends ChangeNotifier
         );
         final reachedEnd =
             status.playbackState == 'ENDED' ||
-            (status.duration > Duration.zero &&
+            (status.playbackState == null &&
+                status.duration > Duration.zero &&
                 status.position >= status.duration);
         if (status.isPlaying == false && reachedEnd) {
           unawaited(_handleAutoTransition());

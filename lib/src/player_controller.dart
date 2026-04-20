@@ -53,12 +53,10 @@ class PlayerController extends ChangeNotifier {
     required void Function(bool progressing) onStateChanged,
   }) async {
     final effectiveFadeSettings = fadeSetting ?? _fadeSettings;
-    final isAutoTransition = _playerState == PlayerState.completed;
     final switchingTracks = _selectedPath != null && _selectedPath != uri;
     final isActivelyPlaying = _isPlaying && _playerState == PlayerState.playing;
     final shouldFade =
         switchingTracks &&
-        !isAutoTransition &&
         effectiveFadeSettings.fadeOnSwitch &&
         effectiveFadeSettings.duration > Duration.zero &&
         (reason == PlaybackReason.user || autoPlay);
@@ -67,7 +65,7 @@ class PlayerController extends ChangeNotifier {
       '[PlayerController] performTransition uri=$uri autoPlay=$autoPlay '
       'reason=$reason current=$_selectedPath posMs=${position?.inMilliseconds} '
       'state=$_playerState isPlaying=$_isPlaying switching=$switchingTracks '
-      'autoCompleted=$isAutoTransition fadeOnSwitch=${effectiveFadeSettings.fadeOnSwitch} '
+      'fadeOnSwitch=${effectiveFadeSettings.fadeOnSwitch} '
       'mode=${effectiveFadeSettings.mode} durationMs=${effectiveFadeSettings.duration.inMilliseconds} '
       'shouldFade=$shouldFade nativeCrossfadeCandidate='
       '${shouldFade && isActivelyPlaying && effectiveFadeSettings.mode == FadeMode.crossfade && _parent.engine.supportsCrossfade}',
@@ -378,11 +376,11 @@ class PlayerController extends ChangeNotifier {
       _isPlaying = isPlaying;
       if (!isPlaying) {
         _position = position;
-        final reachedEnd =
-            playbackState == 'ENDED' ||
-            (_selectedPath != null &&
-                _duration > Duration.zero &&
-                _position >= _duration);
+        final reachedEnd = playbackState != null
+            ? playbackState == 'ENDED'
+            : (_selectedPath != null &&
+                  _duration > Duration.zero &&
+                  _position >= _duration);
         if (_selectedPath != null && reachedEnd) {
           _playerState = PlayerState.completed;
         } else if (_selectedPath != null) {
@@ -404,8 +402,9 @@ class PlayerController extends ChangeNotifier {
     if (_isPlaying) {
       _playerState = PlayerState.playing;
     } else if (_selectedPath != null &&
-        (playbackState == 'ENDED' ||
-            (_duration > Duration.zero && _position >= _duration))) {
+        (playbackState != null
+            ? playbackState == 'ENDED'
+            : (_duration > Duration.zero && _position >= _duration))) {
       _playerState = PlayerState.completed;
     } else if (_selectedPath != null) {
       _playerState = PlayerState.paused;
@@ -429,10 +428,6 @@ class PlayerController extends ChangeNotifier {
     }
 
     _position = position;
-    if (_duration > Duration.zero && _position >= _duration) {
-      _isPlaying = false;
-      _playerState = PlayerState.completed;
-    }
     notifyListeners();
   }
 

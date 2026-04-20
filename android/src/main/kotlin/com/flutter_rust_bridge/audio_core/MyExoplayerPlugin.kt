@@ -155,6 +155,18 @@ class MyExoplayerPlugin :
             ctx.volumeCommandGeneration += 1
             return ctx.volumeCommandGeneration
         }
+
+        private fun settleActiveCrossfadeIfNeeded() {
+            val session = activeCrossfadeSession ?: return
+            android.util.Log.d(
+                "AudioCore",
+                "settleActiveCrossfade generation=${session.generation} " +
+                    "baseVolume=${session.baseVolume} targetVolume=${session.targetVolume}",
+            )
+            crossfadeAnimator?.cancel()
+            crossfadeAnimator = null
+            finalizeCrossfade(session.generation)
+        }
     }
 
     private lateinit var channel: MethodChannel
@@ -592,13 +604,29 @@ class MyExoplayerPlugin :
             }
             "seek" -> {
                 val positionMs = call.argument<Int>("position")?.toLong() ?: 0L
-                cancelActiveCrossfade()
+                if (playerId == MAIN_PLAYER_ID && activeCrossfadeSession != null) {
+                    settleActiveCrossfadeIfNeeded()
+                }
+                val targetCtx = playerContexts[playerId] ?: if (playerId == "main") {
+                    try {
+                        getOrCreatePlayerContext("main")
+                    } catch (e: Exception) {
+                        result.error("INIT_ERROR", "Lazy init failed: ${e.message}", null)
+                        return
+                    }
+                } else {
+                    null
+                }
+                if (targetCtx == null) {
+                    result.error("PLAYER_NOT_FOUND", "Player context not found for ID: $playerId", null)
+                    return
+                }
                 android.util.Log.d(
                     "AudioCore",
-                    "seek playerId=$playerId positionMs=$positionMs state=${ctx.player.playbackState} " +
-                        "isPlaying=${ctx.player.isPlaying} playWhenReady=${ctx.player.playWhenReady}",
+                    "seek playerId=$playerId positionMs=$positionMs state=${targetCtx.player.playbackState} " +
+                        "isPlaying=${targetCtx.player.isPlaying} playWhenReady=${targetCtx.player.playWhenReady}",
                 )
-                ctx.player.seekTo(positionMs)
+                targetCtx.player.seekTo(positionMs)
                 result.success(null)
             }
             "prepareForFileWrite" -> {
