@@ -31,6 +31,17 @@ export 'playlist_models.dart';
 export 'player_state_snapshot.dart';
 export 'android_media_library.dart';
 
+@visibleForTesting
+bool shouldAutoAdvanceFromStatus(AudioStatus status) {
+  if (status.playbackState == 'ENDED') {
+    return true;
+  }
+  if (status.isPlaying) {
+    return false;
+  }
+  return status.duration > Duration.zero && status.position >= status.duration;
+}
+
 /// The top-level modular controller for audio playback and visualization.
 class AudioCoreController extends ChangeNotifier
     implements AudioVisualizerParent {
@@ -228,10 +239,9 @@ class AudioCoreController extends ChangeNotifier
           status.volume,
           error: status.error,
         );
-        // Only trust the native backend for end-of-track handoff.
-        // Background timers can drift, so we avoid inferring completion from
-        // the cached position alone.
-        if (status.playbackState == 'ENDED') {
+        // Use the native snapshot for handoff. Some backends emit ENDED
+        // explicitly, while others only surface the final position/duration.
+        if (shouldAutoAdvanceFromStatus(status)) {
           unawaited(_handleAutoTransition());
         }
       });
@@ -639,7 +649,7 @@ class AudioCoreController extends ChangeNotifier
     _lastLocalAdvanceTime = now;
 
     if (last != null) {
-      // High-precision elapsed advance without artificial capping. 
+      // High-precision elapsed advance without artificial capping.
       // Because we anchor via snapshots, this correctly models time passed.
       final elapsed = now.difference(last);
       player.updatePosition(player.position + elapsed);
@@ -648,11 +658,14 @@ class AudioCoreController extends ChangeNotifier
     }
 
     // Periodically re-sync with native engine to prevent drift
-    if (_lastEngineSyncTime == null || now.difference(_lastEngineSyncTime!) > const Duration(milliseconds: 500)) {
+    if (_lastEngineSyncTime == null ||
+        now.difference(_lastEngineSyncTime!) >
+            const Duration(milliseconds: 500)) {
       _lastEngineSyncTime = now;
       _engine.getCurrentPosition().then((snapshot) {
         if (player.isPlaying) {
-          final offset = DateTime.now().millisecondsSinceEpoch - snapshot.takenAtMs;
+          final offset =
+              DateTime.now().millisecondsSinceEpoch - snapshot.takenAtMs;
           var adjustedPos = snapshot.position;
           if (offset > 0) {
             adjustedPos += Duration(milliseconds: offset);

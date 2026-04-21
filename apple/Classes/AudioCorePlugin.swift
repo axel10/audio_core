@@ -908,6 +908,7 @@ private final class AppleAudioEngine {
         deck.playbackFramePosition = currentFile.length
       }
       deck.isPlaybackScheduled = false
+      self.sendPlayerState()
     }
   }
 
