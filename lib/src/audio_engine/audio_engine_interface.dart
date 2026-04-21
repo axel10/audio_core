@@ -4,6 +4,17 @@ import '../fft_processor.dart';
 import '../rust/api/simple/equalizer.dart';
 import '../track_metadata.dart';
 
+/// Define a snapshot for highly accurate position synchronization.
+class PositionSnapshot {
+  final Duration position;
+  final int takenAtMs;
+
+  PositionSnapshot({
+    required this.position,
+    required this.takenAtMs,
+  });
+}
+
 /// Define a unified status update for all platforms.
 class AudioStatus {
   final String? path;
@@ -13,6 +24,7 @@ class AudioStatus {
   final bool isPlaying;
   final double volume;
   final String? error;
+  final int? updateTimeSinceEpochMs;
 
   AudioStatus({
     this.path,
@@ -21,6 +33,7 @@ class AudioStatus {
     required this.duration,
     required this.isPlaying,
     required this.volume,
+    this.updateTimeSinceEpochMs,
     this.error,
   });
 }
@@ -48,7 +61,7 @@ abstract class AudioEngine {
   Future<void> setVolume(double volume);
 
   Future<Duration> getDuration();
-  Future<Duration> getCurrentPosition();
+  Future<PositionSnapshot> getCurrentPosition();
 
   // Visualization
   Future<List<double>> getLatestFft();

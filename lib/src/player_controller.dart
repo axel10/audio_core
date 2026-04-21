@@ -22,6 +22,7 @@ class PlayerController extends ChangeNotifier {
   FadeSettings _fadeSettings = const FadeSettings();
   PlayerState _playerState = PlayerState.idle;
   DateTime _lastCommandTime = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _lastPlayCommandTime = DateTime.fromMillisecondsSinceEpoch(0);
 
   // --- Getters ---
   String? get currentPath => _selectedPath;
@@ -164,6 +165,7 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> pause({bool withFade = true, FadeSettings? fadeSetting}) async {
     try {
+      _lastPlayCommandTime = DateTime.fromMillisecondsSinceEpoch(0);
       final fadeDuration = _pauseResumeFadeDuration(
         withFade: withFade && _isPlaying,
         fadeSetting: fadeSetting,
@@ -206,6 +208,7 @@ class PlayerController extends ChangeNotifier {
       );
       await _parent.engine.play(fadeDuration: fadeDuration);
       _lastCommandTime = DateTime.now();
+      _lastPlayCommandTime = _lastCommandTime;
       _isPlaying = true;
       _playerState = PlayerState.playing;
     } catch (e) {
@@ -280,6 +283,7 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> stopPlayback() async {
+    _lastPlayCommandTime = DateTime.fromMillisecondsSinceEpoch(0);
     _selectedPath = null;
     _position = Duration.zero;
     _duration = Duration.zero;
@@ -310,6 +314,13 @@ class PlayerController extends ChangeNotifier {
     final now = DateTime.now();
     final recentlyCommanded =
         now.difference(_lastCommandTime) < const Duration(milliseconds: 500);
+    final recentlyStartedPlaying =
+        now.difference(_lastPlayCommandTime) < const Duration(seconds: 2);
+    final suppressTransientPause =
+        !isPlaying &&
+        playbackState != 'ENDED' &&
+        _playerState == PlayerState.playing &&
+        recentlyStartedPlaying;
 
     // Update duration and volume even if recently commanded.
     _duration = duration;
@@ -321,7 +332,11 @@ class PlayerController extends ChangeNotifier {
     if (recentlyCommanded) {
       _selectedPath = path;
       _isPlaying = isPlaying;
-      if (!isPlaying) {
+      if (suppressTransientPause) {
+        _isPlaying = true;
+        _position = position > _position ? position : _position;
+        _playerState = PlayerState.playing;
+      } else if (!isPlaying) {
         _position = position;
         final reachedEnd = playbackState != null
             ? playbackState == 'ENDED'
@@ -343,6 +358,14 @@ class PlayerController extends ChangeNotifier {
     }
 
     _selectedPath = path;
+    if (suppressTransientPause) {
+      _position = position > _position ? position : _position;
+      _isPlaying = true;
+      _playerState = PlayerState.playing;
+      notifyListeners();
+      return;
+    }
+
     _position = position;
     _isPlaying = isPlaying;
 

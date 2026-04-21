@@ -34,6 +34,7 @@ class AndroidAudioEngine implements AudioEngine {
           final int durationMs = call.arguments['duration'] ?? 0;
           final bool isPlaying = call.arguments['isPlaying'] ?? false;
           final String? error = call.arguments['error'];
+          final int updateTimeMs = call.arguments['updateTime'] ?? DateTime.now().millisecondsSinceEpoch;
 
           _isPlaying = isPlaying;
 
@@ -45,6 +46,7 @@ class AndroidAudioEngine implements AudioEngine {
               duration: Duration(milliseconds: durationMs),
               isPlaying: isPlaying,
               volume: _currentVolume,
+              updateTimeSinceEpochMs: updateTimeMs,
               error: error,
             ),
           );
@@ -196,11 +198,14 @@ class AndroidAudioEngine implements AudioEngine {
   }
 
   @override
-  Future<Duration> getCurrentPosition() async {
-    final int? ms = await _channel.invokeMethod('getCurrentPosition', {
+  Future<PositionSnapshot> getCurrentPosition() async {
+    final Map<dynamic, dynamic>? result = await _channel.invokeMethod('getCurrentPosition', {
       'playerId': _activePlayerId,
     });
-    return Duration(milliseconds: ms ?? 0);
+    return PositionSnapshot(
+      position: Duration(milliseconds: (result?['position'] as int?) ?? 0),
+      takenAtMs: (result?['takenAt'] as int?) ?? DateTime.now().millisecondsSinceEpoch,
+    );
   }
 
   @override
@@ -335,7 +340,7 @@ class AndroidAudioEngine implements AudioEngine {
     final pos = await getCurrentPosition();
     _pendingEdit = _PendingAndroidEdit(
       path: path,
-      position: pos,
+      position: pos.position,
       wasPlaying: _isPlaying,
     );
 

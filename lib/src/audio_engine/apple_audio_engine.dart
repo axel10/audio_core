@@ -40,6 +40,7 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
       final isPlaying = args['isPlaying'] as bool? ?? false;
       final error = args['error'] as String?;
       final volume = (args['volume'] as num?)?.toDouble() ?? _currentVolume;
+      final updateTimeMs = (args['updateTime'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
 
       _currentVolume = volume;
 
@@ -51,6 +52,7 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
           duration: Duration(milliseconds: durationMs),
           isPlaying: isPlaying,
           volume: volume,
+          updateTimeSinceEpochMs: updateTimeMs,
           error: error,
         ),
       );
@@ -172,12 +174,15 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
   }
 
   @override
-  Future<Duration> getCurrentPosition() async {
-    final int? ms = await _channel.invokeMethod(
+  Future<PositionSnapshot> getCurrentPosition() async {
+    final Map<dynamic, dynamic>? result = await _channel.invokeMethod(
       'getCurrentPosition',
       <String, Object?>{'playerId': 'main'},
     );
-    return Duration(milliseconds: ms ?? 0);
+    return PositionSnapshot(
+      position: Duration(milliseconds: (result?['position'] as int?) ?? 0),
+      takenAtMs: (result?['takenAt'] as int?) ?? DateTime.now().millisecondsSinceEpoch,
+    );
   }
 
   @override

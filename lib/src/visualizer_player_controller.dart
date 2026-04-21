@@ -210,10 +210,19 @@ class AudioCoreController extends ChangeNotifier
       await _engine.initialize();
       await _engine.updateVisualizerFftOptions(visualizer.options);
       _playbackStateSubscription = _engine.statusStream.listen((status) {
+        var adjustedPosition = status.position;
+        final updateTimeMs = status.updateTimeSinceEpochMs;
+        if (updateTimeMs != null && status.isPlaying) {
+          final offset = DateTime.now().millisecondsSinceEpoch - updateTimeMs;
+          if (offset > 0) {
+            adjustedPosition += Duration(milliseconds: offset);
+          }
+        }
+
         player.applySnapshot(
           status.path,
           status.playbackState,
-          status.position,
+          adjustedPosition,
           status.duration,
           status.isPlaying,
           status.volume,
@@ -630,11 +639,9 @@ class AudioCoreController extends ChangeNotifier
     _lastLocalAdvanceTime = now;
 
     if (last != null) {
-      // Calculate real time elapsed, cap to avoid huge jumps on wake
-      var elapsed = now.difference(last);
-      if (elapsed > const Duration(seconds: 1)) {
-        elapsed = _renderInterval;
-      }
+      // High-precision elapsed advance without artificial capping. 
+      // Because we anchor via snapshots, this correctly models time passed.
+      final elapsed = now.difference(last);
       player.updatePosition(player.position + elapsed);
     } else {
       player.updatePosition(player.position + _renderInterval);
@@ -643,9 +650,14 @@ class AudioCoreController extends ChangeNotifier
     // Periodically re-sync with native engine to prevent drift
     if (_lastEngineSyncTime == null || now.difference(_lastEngineSyncTime!) > const Duration(milliseconds: 500)) {
       _lastEngineSyncTime = now;
-      _engine.getCurrentPosition().then((pos) {
+      _engine.getCurrentPosition().then((snapshot) {
         if (player.isPlaying) {
-          player.updatePosition(pos);
+          final offset = DateTime.now().millisecondsSinceEpoch - snapshot.takenAtMs;
+          var adjustedPos = snapshot.position;
+          if (offset > 0) {
+            adjustedPos += Duration(milliseconds: offset);
+          }
+          player.updatePosition(adjustedPos);
         }
       });
     }

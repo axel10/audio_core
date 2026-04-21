@@ -706,7 +706,8 @@ class MyExoplayerPlugin :
                     ctx
                 }
                 val pos = snapshotCtx.player.currentPosition
-                result.success(if (pos < 0) 0L else pos)
+                val now = System.currentTimeMillis()
+                result.success(mapOf("position" to (if (pos < 0) 0L else pos), "takenAt" to now))
             }
             "getDuration" -> {
                 val snapshotCtx = if (playerId == MAIN_PLAYER_ID && activeCrossfadeSession != null) {
@@ -1653,6 +1654,7 @@ class MyExoplayerPlugin :
             "isPlaying" to p.isPlaying,
             "duration" to clampedDuration,
             "position" to p.currentPosition,
+            "updateTime" to System.currentTimeMillis(),
             "error" to p.playerError?.message
         )
         NativeLog.d(

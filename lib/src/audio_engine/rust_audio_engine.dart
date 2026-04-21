@@ -28,6 +28,7 @@ class RustAudioEngine with PcmWaveformSupport implements AudioEngine {
           duration: Duration(milliseconds: state.durationMs.toInt()),
           isPlaying: state.isPlaying,
           volume: state.volume,
+          updateTimeSinceEpochMs: DateTime.now().millisecondsSinceEpoch,
           error: state.error,
         ),
       );
@@ -114,9 +115,12 @@ class RustAudioEngine with PcmWaveformSupport implements AudioEngine {
   }
 
   @override
-  Future<Duration> getCurrentPosition() async {
+  Future<PositionSnapshot> getCurrentPosition() async {
     final ms = await rust.getAudioPositionMs();
-    return Duration(milliseconds: ms.toInt());
+    return PositionSnapshot(
+      position: Duration(milliseconds: ms.toInt()),
+      takenAtMs: DateTime.now().millisecondsSinceEpoch,
+    );
   }
 
   @override
