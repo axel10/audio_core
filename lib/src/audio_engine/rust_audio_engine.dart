@@ -23,7 +23,7 @@ class RustAudioEngine with PcmWaveformSupport implements AudioEngine {
       _statusController.add(
         AudioStatus(
           path: state.path,
-          playbackState: null,
+          playbackState: state.playbackState,
           position: Duration(milliseconds: state.positionMs.toInt()),
           duration: Duration(milliseconds: state.durationMs.toInt()),
           isPlaying: state.isPlaying,

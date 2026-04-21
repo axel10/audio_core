@@ -1219,15 +1219,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PlaybackState dco_decode_playback_state(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return PlaybackState(
-      positionMs: dco_decode_i_64(arr[0]),
-      durationMs: dco_decode_i_64(arr[1]),
-      isPlaying: dco_decode_bool(arr[2]),
-      volume: dco_decode_f_32(arr[3]),
-      path: dco_decode_opt_String(arr[4]),
-      error: dco_decode_opt_String(arr[5]),
+      playbackState: dco_decode_opt_String(arr[0]),
+      positionMs: dco_decode_i_64(arr[1]),
+      durationMs: dco_decode_i_64(arr[2]),
+      isPlaying: dco_decode_bool(arr[3]),
+      volume: dco_decode_f_32(arr[4]),
+      path: dco_decode_opt_String(arr[5]),
+      error: dco_decode_opt_String(arr[6]),
     );
   }
 
@@ -1467,6 +1468,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   PlaybackState sse_decode_playback_state(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_playbackState = sse_decode_opt_String(deserializer);
     var var_positionMs = sse_decode_i_64(deserializer);
     var var_durationMs = sse_decode_i_64(deserializer);
     var var_isPlaying = sse_decode_bool(deserializer);
@@ -1474,6 +1476,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_path = sse_decode_opt_String(deserializer);
     var var_error = sse_decode_opt_String(deserializer);
     return PlaybackState(
+      playbackState: var_playbackState,
       positionMs: var_positionMs,
       durationMs: var_durationMs,
       isPlaying: var_isPlaying,
@@ -1734,6 +1737,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_playback_state(PlaybackState self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_String(self.playbackState, serializer);
     sse_encode_i_64(self.positionMs, serializer);
     sse_encode_i_64(self.durationMs, serializer);
     sse_encode_bool(self.isPlaying, serializer);

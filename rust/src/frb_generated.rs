@@ -1280,6 +1280,7 @@ impl SseDecode for Option<i32> {
 impl SseDecode for crate::api::simple::controller::PlaybackState {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_playbackState = <Option<String>>::sse_decode(deserializer);
         let mut var_positionMs = <i64>::sse_decode(deserializer);
         let mut var_durationMs = <i64>::sse_decode(deserializer);
         let mut var_isPlaying = <bool>::sse_decode(deserializer);
@@ -1287,6 +1288,7 @@ impl SseDecode for crate::api::simple::controller::PlaybackState {
         let mut var_path = <Option<String>>::sse_decode(deserializer);
         let mut var_error = <Option<String>>::sse_decode(deserializer);
         return crate::api::simple::controller::PlaybackState {
+            playback_state: var_playbackState,
             position_ms: var_positionMs,
             duration_ms: var_durationMs,
             is_playing: var_isPlaying,
@@ -1648,6 +1650,7 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::simple::controller::FadeSetti
 impl flutter_rust_bridge::IntoDart for crate::api::simple::controller::PlaybackState {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.playback_state.into_into_dart().into_dart(),
             self.position_ms.into_into_dart().into_dart(),
             self.duration_ms.into_into_dart().into_dart(),
             self.is_playing.into_into_dart().into_dart(),
@@ -1886,6 +1889,7 @@ impl SseEncode for Option<i32> {
 impl SseEncode for crate::api::simple::controller::PlaybackState {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Option<String>>::sse_encode(self.playback_state, serializer);
         <i64>::sse_encode(self.position_ms, serializer);
         <i64>::sse_encode(self.duration_ms, serializer);
         <bool>::sse_encode(self.is_playing, serializer);

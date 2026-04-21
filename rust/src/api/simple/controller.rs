@@ -1,6 +1,6 @@
 use super::equalizer::{EqSource, EqualizerConfig, EqualizerShared};
 use super::fft::{clear_fft_buffer, FftSource, RAW_FFT_BINS};
-use log::{info, LevelFilter};
+use log::info;
 use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use std::fs::File;
@@ -55,6 +55,7 @@ fn controller() -> &'static Mutex<PlayerController> {
 
 #[derive(Debug, Clone)]
 pub struct PlaybackState {
+    pub playback_state: Option<String>,
     pub position_ms: i64,
     pub duration_ms: i64,
     pub is_playing: bool,
@@ -114,6 +115,7 @@ struct PlayerController {
     cached_sample_rate: u32,
     pending_edit: Option<PendingEdit>,
     pause_fade_in_progress: bool,
+    pending_playback_state: Option<String>,
 }
 
 struct PendingEdit {
@@ -121,6 +123,71 @@ struct PendingEdit {
     position: Duration,
     was_playing: bool,
     gain: f32,
+}
+
+struct EndNotifySource<I, F>
+where
+    F: FnMut(),
+{
+    input: I,
+    callback: F,
+    signal_sent: bool,
+}
+
+impl<I, F> EndNotifySource<I, F>
+where
+    F: FnMut(),
+{
+    fn new(input: I, callback: F) -> Self {
+        Self {
+            input,
+            callback,
+            signal_sent: false,
+        }
+    }
+}
+
+impl<I, F> Iterator for EndNotifySource<I, F>
+where
+    I: Iterator,
+    F: FnMut(),
+{
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = self.input.next();
+        if !self.signal_sent && next.is_none() {
+            self.signal_sent = true;
+            (self.callback)();
+        }
+        next
+    }
+}
+
+impl<I, F> Source for EndNotifySource<I, F>
+where
+    I: Source,
+    F: FnMut(),
+{
+    fn current_span_len(&self) -> Option<usize> {
+        self.input.current_span_len()
+    }
+
+    fn channels(&self) -> rodio::ChannelCount {
+        self.input.channels()
+    }
+
+    fn sample_rate(&self) -> rodio::SampleRate {
+        self.input.sample_rate()
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.input.total_duration()
+    }
+
+    fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
+        self.input.try_seek(pos)
+    }
 }
 
 impl PlayerController {
@@ -140,6 +207,7 @@ impl PlayerController {
             cached_sample_rate: 0,
             pending_edit: None,
             pause_fade_in_progress: false,
+            pending_playback_state: None,
         }
     }
 
@@ -272,14 +340,21 @@ impl PlayerController {
         };
         player.set_volume((self.volume * gain).clamp(0.0, 1.0));
         let eq_source = EqSource::new(source, Arc::clone(&self.equalizer));
-        if clamped_offset > Duration::ZERO {
-            player.append(FftSource::new(
-                eq_source.skip_duration(clamped_offset),
-                Arc::clone(&latest_fft),
-            ));
+        let audio_source: Box<dyn Source<Item = f32> + Send> = if clamped_offset > Duration::ZERO {
+            Box::new(eq_source.skip_duration(clamped_offset))
         } else {
-            player.append(FftSource::new(eq_source, Arc::clone(&latest_fft)));
-        }
+            Box::new(eq_source)
+        };
+        let end_path = path.to_string();
+        let notifying_source = EndNotifySource::new(
+            FftSource::new(audio_source, Arc::clone(&latest_fft)),
+            move || {
+                if let Ok(mut c) = controller().lock() {
+                    c.mark_track_ended(&end_path);
+                }
+            },
+        );
+        player.append(notifying_source);
         if auto_play {
             player.play();
         } else {
@@ -303,6 +378,7 @@ impl PlayerController {
         auto_play: bool,
     ) -> Result<(), String> {
         self.pause_fade_in_progress = false;
+        self.clear_pending_playback_state();
         let previous_public_path = self.public_path().map(str::to_string);
         let deck = self.open_deck_from_path(path, start_offset, auto_play, 1.0)?;
 
@@ -345,6 +421,7 @@ impl PlayerController {
             && !self.pause_fade_in_progress;
 
         PlaybackState {
+            playback_state: self.pending_playback_state.clone(),
             position_ms: self.public_position().as_millis().min(i64::MAX as u128) as i64,
             duration_ms: public_deck
                 .map(|deck| deck.loaded_duration.as_millis().min(i64::MAX as u128) as i64)
@@ -353,6 +430,18 @@ impl PlayerController {
             volume: self.volume,
             path: public_deck.map(|deck| deck.loaded_path.clone()),
             error: None,
+        }
+    }
+
+    fn clear_pending_playback_state(&mut self) {
+        self.pending_playback_state = None;
+        super::notify_playback_state_changed();
+    }
+
+    fn mark_track_ended(&mut self, path: &str) {
+        if self.public_path() == Some(path) {
+            self.pending_playback_state = Some("ENDED".to_string());
+            super::notify_playback_state_changed();
         }
     }
 
@@ -487,6 +576,7 @@ impl PlayerController {
     fn dispose_audio(&mut self) {
         self.transition_generation = self.transition_generation.wrapping_add(1);
         self.pause_fade_in_progress = false;
+        self.clear_pending_playback_state();
         if let Some(incoming) = self.incoming_deck.take() {
             incoming.clear();
         }
@@ -553,6 +643,7 @@ impl PlayerController {
         let deck =
             self.open_deck_from_path(&edit.path, edit.position, edit.was_playing, edit.gain)?;
         self.current_deck = Some(deck);
+        self.clear_pending_playback_state();
 
         if self.public_path() != Some(&edit.path) {
             self.warm_waveform_cache_for_public_path();
@@ -583,6 +674,7 @@ pub(super) fn snapshot_playback_state() -> PlaybackState {
         .lock()
         .map(|c| c.playback_state_snapshot())
         .unwrap_or(PlaybackState {
+            playback_state: None,
             position_ms: 0,
             duration_ms: 0,
             is_playing: false,
@@ -915,6 +1007,7 @@ pub fn crossfade_to_audio_file(path: String, duration_ms: i64) -> Result<(), Str
     let mut c = controller()
         .lock()
         .map_err(|_| "player lock poisoned".to_string())?;
+    c.clear_pending_playback_state();
     let duration = Duration::from_millis(duration_ms.max(0) as u64);
     c.start_crossfade(&path, duration)
 }
@@ -928,6 +1021,7 @@ pub fn play_audio(fade_duration_ms: i64) -> Result<(), String> {
     }
 
     c.pause_fade_in_progress = false;
+    c.clear_pending_playback_state();
     let duration = Duration::from_millis(fade_duration_ms.max(0) as u64);
     if !duration.is_zero() {
         let master_volume = c.volume;
@@ -975,6 +1069,7 @@ pub fn seek_audio_ms(position_ms: i64) -> Result<(), String> {
         .map_err(|_| "player lock poisoned".to_string())?;
 
     c.settle_to_public_deck();
+    c.clear_pending_playback_state();
 
     let target_ms = position_ms.max(0) as u64;
     let mut target = Duration::from_millis(target_ms);

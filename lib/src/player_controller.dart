@@ -329,26 +329,21 @@ class PlayerController extends ChangeNotifier {
     _volume = nativeVolume;
 
     // Guard position and playing state to avoid "jumping" back to old state during command processing
-    if (recentlyCommanded) {
-      _selectedPath = path;
-      _isPlaying = isPlaying;
-      if (suppressTransientPause) {
-        _isPlaying = true;
-        _position = position > _position ? position : _position;
-        _playerState = PlayerState.playing;
-      } else if (!isPlaying) {
-        _position = position;
-        final reachedEnd = playbackState != null
-            ? playbackState == 'ENDED'
-            : (_selectedPath != null &&
-                  _duration > Duration.zero &&
-                  _position >= _duration);
-        if (_selectedPath != null && reachedEnd) {
-          _playerState = PlayerState.completed;
-        } else if (_selectedPath != null) {
-          _playerState = PlayerState.paused;
-        } else {
-          _playerState = PlayerState.idle;
+      if (recentlyCommanded) {
+        _selectedPath = path;
+        _isPlaying = isPlaying;
+        if (suppressTransientPause) {
+          _isPlaying = true;
+          _position = position > _position ? position : _position;
+          _playerState = PlayerState.playing;
+        } else if (!isPlaying) {
+          _position = position;
+          if (_selectedPath != null && playbackState == 'ENDED') {
+            _playerState = PlayerState.completed;
+          } else if (_selectedPath != null) {
+            _playerState = PlayerState.paused;
+          } else {
+            _playerState = PlayerState.idle;
         }
       } else {
         _playerState = PlayerState.playing;
@@ -371,10 +366,7 @@ class PlayerController extends ChangeNotifier {
 
     if (_isPlaying) {
       _playerState = PlayerState.playing;
-    } else if (_selectedPath != null &&
-        (playbackState != null
-            ? playbackState == 'ENDED'
-            : (_duration > Duration.zero && _position >= _duration))) {
+    } else if (_selectedPath != null && playbackState == 'ENDED') {
       _playerState = PlayerState.completed;
     } else if (_selectedPath != null) {
       _playerState = PlayerState.paused;

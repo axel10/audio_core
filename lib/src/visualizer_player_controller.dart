@@ -33,13 +33,7 @@ export 'android_media_library.dart';
 
 @visibleForTesting
 bool shouldAutoAdvanceFromStatus(AudioStatus status) {
-  if (status.playbackState == 'ENDED') {
-    return true;
-  }
-  if (status.isPlaying) {
-    return false;
-  }
-  return status.duration > Duration.zero && status.position >= status.duration;
+  return status.playbackState == 'ENDED';
 }
 
 /// The top-level modular controller for audio playback and visualization.
@@ -119,6 +113,7 @@ class AudioCoreController extends ChangeNotifier
   static bool _rustLibInitialized = false;
   bool _initialized = false;
   bool _isTransitioning = false;
+  String? _lastEndedAutoAdvancePath;
   Timer? _analysisTick;
   Timer? _renderTick;
   StreamSubscription<AudioStatus>? _playbackStateSubscription;
@@ -240,9 +235,16 @@ class AudioCoreController extends ChangeNotifier
           error: status.error,
         );
         // Use the native snapshot for handoff. Some backends emit ENDED
-        // explicitly, while others only surface the final position/duration.
+        // explicitly; Flutter no longer infers completion from position.
         if (shouldAutoAdvanceFromStatus(status)) {
-          unawaited(_handleAutoTransition());
+          final endedPath = status.path;
+          if (endedPath == null || endedPath != _lastEndedAutoAdvancePath) {
+            _lastEndedAutoAdvancePath = endedPath;
+            unawaited(_handleAutoTransition());
+          }
+        } else if (status.playbackState != 'ENDED' &&
+            player.currentState != PlayerState.completed) {
+          _lastEndedAutoAdvancePath = null;
         }
       });
     } catch (e) {
@@ -581,6 +583,7 @@ class AudioCoreController extends ChangeNotifier
     await _engine.stop();
     player.stopPlayback();
     visualizer.resetState();
+    _lastEndedAutoAdvancePath = null;
   }
 
   /// Resets the playback session to the initial empty state.
@@ -591,6 +594,7 @@ class AudioCoreController extends ChangeNotifier
     await playlist.resetPlaybackState();
     _latestFftCache = const [];
     _isTransitioning = false;
+    _lastEndedAutoAdvancePath = null;
     notifyListeners();
   }
 

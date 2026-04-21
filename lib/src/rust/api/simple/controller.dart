@@ -127,6 +127,7 @@ class FadeSettings {
 }
 
 class PlaybackState {
+  final String? playbackState;
   final PlatformInt64 positionMs;
   final PlatformInt64 durationMs;
   final bool isPlaying;
@@ -135,6 +136,7 @@ class PlaybackState {
   final String? error;
 
   const PlaybackState({
+    this.playbackState,
     required this.positionMs,
     required this.durationMs,
     required this.isPlaying,
@@ -145,6 +147,7 @@ class PlaybackState {
 
   @override
   int get hashCode =>
+      playbackState.hashCode ^
       positionMs.hashCode ^
       durationMs.hashCode ^
       isPlaying.hashCode ^
@@ -157,6 +160,7 @@ class PlaybackState {
       identical(this, other) ||
       other is PlaybackState &&
           runtimeType == other.runtimeType &&
+          playbackState == other.playbackState &&
           positionMs == other.positionMs &&
           durationMs == other.durationMs &&
           isPlaying == other.isPlaying &&

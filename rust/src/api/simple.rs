@@ -43,6 +43,7 @@ pub mod controller {
 
     #[derive(Debug, Clone, Default)]
     pub struct PlaybackState {
+        pub playback_state: Option<String>,
         pub position_ms: i64,
         pub duration_ms: i64,
         pub is_playing: bool,
@@ -120,6 +121,7 @@ pub mod fft {
 }
 
 use crate::frb_generated::StreamSink;
+use std::sync::{Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -136,6 +138,11 @@ pub use metadata::{
 };
 
 const PLAYBACK_STATE_PUSH_INTERVAL: Duration = Duration::from_millis(500);
+static PLAYBACK_STATE_NOTIFY: OnceLock<(Mutex<()>, Condvar)> = OnceLock::new();
+
+fn playback_state_notify_pair() -> &'static (Mutex<()>, Condvar) {
+    PLAYBACK_STATE_NOTIFY.get_or_init(|| (Mutex::new(()), Condvar::new()))
+}
 
 #[flutter_rust_bridge::frb(sync)]
 pub fn greet(name: String) -> String {
@@ -152,17 +159,28 @@ fn trigger_state_push(
     sink.add(push_state()).is_ok()
 }
 
+pub(super) fn notify_playback_state_changed() {
+    let (_, cvar) = playback_state_notify_pair();
+    cvar.notify_all();
+}
+
 #[flutter_rust_bridge::frb(sync)]
 pub fn subscribe_playback_state(
     sink: StreamSink<PlaybackState, flutter_rust_bridge::for_generated::SseCodec>,
 ) {
     thread::spawn(move || {
+        let (lock, cvar) = playback_state_notify_pair();
+        let mut guard = lock.lock().expect("playback state notify mutex poisoned");
+
         if !trigger_state_push(&sink) {
             return;
         }
 
         loop {
-            thread::sleep(PLAYBACK_STATE_PUSH_INTERVAL);
+            let (next_guard, _) = cvar
+                .wait_timeout(guard, PLAYBACK_STATE_PUSH_INTERVAL)
+                .expect("playback state notify wait failed");
+            guard = next_guard;
             if !trigger_state_push(&sink) {
                 break;
             }
