@@ -53,6 +53,7 @@ class PlayerController extends ChangeNotifier {
         switchingTracks &&
         effectiveFadeSettings.fadeOnSwitch &&
         effectiveFadeSettings.duration > Duration.zero &&
+        reason != PlaybackReason.autoNext &&
         (reason == PlaybackReason.user || autoPlay);
 
     debugPrint(
