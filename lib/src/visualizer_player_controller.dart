@@ -641,7 +641,7 @@ class AudioCoreController extends ChangeNotifier
     }
 
     // Periodically re-sync with native engine to prevent drift
-    if (_lastEngineSyncTime == null || now.difference(_lastEngineSyncTime!) > const Duration(seconds: 1)) {
+    if (_lastEngineSyncTime == null || now.difference(_lastEngineSyncTime!) > const Duration(milliseconds: 500)) {
       _lastEngineSyncTime = now;
       _engine.getCurrentPosition().then((pos) {
         if (player.isPlaying) {
