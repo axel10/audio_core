@@ -616,9 +616,39 @@ class AudioCoreController extends ChangeNotifier
     );
   }
 
+  DateTime? _lastLocalAdvanceTime;
+  DateTime? _lastEngineSyncTime;
+
   void _advanceLocalPosition() {
-    if (!player.isPlaying || player.currentPath == null) return;
-    player.updatePosition(player.position + _renderInterval);
+    if (!player.isPlaying || player.currentPath == null) {
+      _lastLocalAdvanceTime = null;
+      return;
+    }
+
+    final now = DateTime.now();
+    final last = _lastLocalAdvanceTime;
+    _lastLocalAdvanceTime = now;
+
+    if (last != null) {
+      // Calculate real time elapsed, cap to avoid huge jumps on wake
+      var elapsed = now.difference(last);
+      if (elapsed > const Duration(seconds: 1)) {
+        elapsed = _renderInterval;
+      }
+      player.updatePosition(player.position + elapsed);
+    } else {
+      player.updatePosition(player.position + _renderInterval);
+    }
+
+    // Periodically re-sync with native engine to prevent drift
+    if (_lastEngineSyncTime == null || now.difference(_lastEngineSyncTime!) > const Duration(seconds: 1)) {
+      _lastEngineSyncTime = now;
+      _engine.getCurrentPosition().then((pos) {
+        if (player.isPlaying) {
+          player.updatePosition(pos);
+        }
+      });
+    }
   }
 
   Future<void> _handleAutoTransition() async {
