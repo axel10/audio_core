@@ -15,6 +15,10 @@ object NativeLog {
 
     @Volatile
     private var logFile: File? = null
+    @Volatile
+    private var uncaughtHandlerInstalled = false
+    @Volatile
+    private var previousUncaughtHandler: Thread.UncaughtExceptionHandler? = null
 
     fun init(context: Context) {
         if (logFile != null) return
@@ -25,6 +29,7 @@ object NativeLog {
                 dir.mkdirs()
             }
             logFile = File(dir, FILE_NAME)
+            installUncaughtExceptionHandler()
         }
     }
 
@@ -34,6 +39,22 @@ object NativeLog {
     fun e(tag: String, message: String) = log(Log.ERROR, tag, message)
     fun e(tag: String, message: String, throwable: Throwable) {
         log(Log.ERROR, tag, message, throwable)
+    }
+
+    private fun installUncaughtExceptionHandler() {
+        if (uncaughtHandlerInstalled) return
+        previousUncaughtHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            runCatching {
+                writeLineSync(
+                    "F/Crash",
+                    "Uncaught exception in ${thread.name}",
+                    throwable,
+                )
+            }
+            previousUncaughtHandler?.uncaughtException(thread, throwable)
+        }
+        uncaughtHandlerInstalled = true
     }
 
     private fun log(
@@ -52,25 +73,48 @@ object NativeLog {
 
         val file = logFile ?: return
         val timestamp = System.currentTimeMillis().toString()
-        val line = buildString {
-            append('[')
-            append(timestamp)
-            append("][")
-            append(priorityLabel(priority))
-            append('/')
-            append(tag)
-            append("] ")
-            append(message)
-            if (throwable != null) {
-                append(" | ")
-                append(throwable.stackTraceToString())
-            }
-        }
+        val line = buildLine(timestamp, priorityLabel(priority), tag, message, throwable)
 
         executor.execute {
             runCatching {
                 file.appendText(line + System.lineSeparator())
             }
+        }
+    }
+
+    private fun writeLineSync(
+        channel: String,
+        message: String,
+        throwable: Throwable? = null,
+    ) {
+        val file = logFile ?: return
+        val timestamp = System.currentTimeMillis().toString()
+        val line = buildLine(timestamp, channel, null, message, throwable)
+        runCatching {
+            file.appendText(line + System.lineSeparator())
+        }
+    }
+
+    private fun buildLine(
+        timestamp: String,
+        channel: String,
+        tag: String?,
+        message: String,
+        throwable: Throwable?,
+    ): String = buildString {
+        append('[')
+        append(timestamp)
+        append("][")
+        append(channel)
+        if (tag != null) {
+            append('/')
+            append(tag)
+        }
+        append("] ")
+        append(message)
+        if (throwable != null) {
+            append(" | ")
+            append(throwable.stackTraceToString())
         }
     }
 

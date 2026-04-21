@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -33,6 +32,28 @@ class AppLog {
     if (_installed) return;
     debugPrint = flutterDebugPrint;
     _installed = true;
+  }
+
+  static void installFlutterErrorHandlers() {
+    FlutterError.onError = (details) {
+      e(
+        _formatFlutterErrorMessage(details),
+        tag: 'Flutter',
+        error: details.exception,
+        stackTrace: details.stack,
+      );
+      FlutterError.presentError(details);
+    };
+
+    PlatformDispatcher.instance.onError = (error, stack) {
+      e(
+        'Uncaught platform dispatcher error',
+        tag: 'Flutter',
+        error: error,
+        stackTrace: stack,
+      );
+      return true;
+    };
   }
 
   static void flutterDebugPrint(String? message, {int? wrapWidth}) {
@@ -118,7 +139,31 @@ class AppLog {
         return true;
       }
     }
+
+    final lower = message.toLowerCase();
+    if (lower.contains(' error') ||
+        lower.contains(' warning') ||
+        lower.contains(' exception') ||
+        lower.contains(' failed') ||
+        lower.contains(' failure') ||
+        lower.startsWith('error:') ||
+        lower.startsWith('warning:') ||
+        lower.startsWith('exception:') ||
+        lower.startsWith('e/') ||
+        lower.startsWith('w/')) {
+      return true;
+    }
+
     return false;
+  }
+
+  static String _formatFlutterErrorMessage(FlutterErrorDetails details) {
+    final parts = <String>[
+      if (details.library != null) details.library!,
+      if (details.context != null) details.context?.toDescription() ?? '',
+      details.exceptionAsString(),
+    ];
+    return parts.where((part) => part.trim().isNotEmpty).join(' | ');
   }
 
   static Future<void> _initialize() async {

@@ -15,45 +15,55 @@ import 'package:audio_service/audio_service.dart';
 
 late AudioCoreHandler audioHandler;
 
-void main() async {
-  // 确保 Flutter 绑定已初始化
-  WidgetsFlutterBinding.ensureInitialized();
-  await AppLog.ensureInitialized();
-  AppLog.install();
+void main() {
+  runZonedGuarded(() async {
+    // 确保 Flutter 绑定已初始化
+    WidgetsFlutterBinding.ensureInitialized();
+    await AppLog.ensureInitialized();
+    AppLog.install();
+    AppLog.installFlutterErrorHandlers();
 
-  final controller = AudioCoreController(
-    fftSize: 1024,
-    analysisFrequencyHz: 30,
-    fadeSettings: const FadeSettings(
-      fadeOnSwitch: true,
-      fadeOnPauseResume: true,
-      duration: Duration(milliseconds: 500),
-      mode: FadeMode.crossfade,
-    ),
-    visualOptions: const VisualizerOptimizationOptions(
-      smoothingCoefficient: 0.35,
-      gravityCoefficient: 10,
-      logarithmicScale: 4,
-      normalizationFloorDb: -85,
-      aggregationMode: FftAggregationMode.peak,
-      frequencyGroups: 64,
-      targetFrameRate: 60,
-      groupContrastExponent: 1.6,
-      overallMultiplier: 1.2,
-    ),
-  );
+    final controller = AudioCoreController(
+      fftSize: 1024,
+      analysisFrequencyHz: 30,
+      fadeSettings: const FadeSettings(
+        fadeOnSwitch: true,
+        fadeOnPauseResume: true,
+        duration: Duration(milliseconds: 500),
+        mode: FadeMode.crossfade,
+      ),
+      visualOptions: const VisualizerOptimizationOptions(
+        smoothingCoefficient: 0.35,
+        gravityCoefficient: 10,
+        logarithmicScale: 4,
+        normalizationFloorDb: -85,
+        aggregationMode: FftAggregationMode.peak,
+        frequencyGroups: 64,
+        targetFrameRate: 60,
+        groupContrastExponent: 1.6,
+        overallMultiplier: 1.2,
+      ),
+    );
 
-  audioHandler = await AudioService.init(
-    builder: () => AudioCoreHandler(controller),
-    config: const AudioServiceConfig(
-      androidNotificationChannelId:
-          'com.flutter_rust_bridge.audio_core.channel.audio',
-      androidNotificationChannelName: 'Audio Playback',
-      androidNotificationOngoing: true,
-    ),
-  );
+    audioHandler = await AudioService.init(
+      builder: () => AudioCoreHandler(controller),
+      config: const AudioServiceConfig(
+        androidNotificationChannelId:
+            'com.flutter_rust_bridge.audio_core.channel.audio',
+        androidNotificationChannelName: 'Audio Playback',
+        androidNotificationOngoing: true,
+      ),
+    );
 
-  runApp(MyApp(controller: controller));
+    runApp(MyApp(controller: controller));
+  }, (error, stack) {
+    AppLog.e(
+      'Uncaught Flutter zone error',
+      tag: 'Flutter',
+      error: error,
+      stackTrace: stack,
+    );
+  });
 }
 
 class MyApp extends StatelessWidget {
