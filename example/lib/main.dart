@@ -556,6 +556,26 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
             _controller.player.seek(Duration(milliseconds: value.toInt()));
           },
         ),
+        Row(
+          children: [
+            const Icon(Icons.volume_down, size: 20),
+            Expanded(
+              child: Slider(
+                value: _controller.player.volume,
+                onChanged: (v) => _controller.player.setVolume(v),
+              ),
+            ),
+            const Icon(Icons.volume_up, size: 20),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 40,
+              child: Text(
+                '${(_controller.player.volume * 100).toInt()}%',
+                textAlign: TextAlign.right,
+              ),
+            ),
+          ],
+        ),
         if (_controller.player.error != null) ...[
           const SizedBox(height: 8),
           Align(
