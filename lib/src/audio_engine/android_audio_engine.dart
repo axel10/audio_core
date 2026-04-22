@@ -34,7 +34,9 @@ class AndroidAudioEngine implements AudioEngine {
           final int durationMs = call.arguments['duration'] ?? 0;
           final bool isPlaying = call.arguments['isPlaying'] ?? false;
           final String? error = call.arguments['error'];
-          final int updateTimeMs = call.arguments['updateTime'] ?? DateTime.now().millisecondsSinceEpoch;
+          final int updateTimeMs =
+              call.arguments['updateTime'] ??
+              DateTime.now().millisecondsSinceEpoch;
 
           _isPlaying = isPlaying;
 
@@ -199,12 +201,14 @@ class AndroidAudioEngine implements AudioEngine {
 
   @override
   Future<PositionSnapshot> getCurrentPosition() async {
-    final Map<dynamic, dynamic>? result = await _channel.invokeMethod('getCurrentPosition', {
-      'playerId': _activePlayerId,
-    });
+    final Map<dynamic, dynamic>? result = await _channel.invokeMethod(
+      'getCurrentPosition',
+      {'playerId': _activePlayerId},
+    );
     return PositionSnapshot(
       position: Duration(milliseconds: (result?['position'] as int?) ?? 0),
-      takenAtMs: (result?['takenAt'] as int?) ?? DateTime.now().millisecondsSinceEpoch,
+      takenAtMs:
+          (result?['takenAt'] as int?) ?? DateTime.now().millisecondsSinceEpoch,
     );
   }
 
@@ -260,8 +264,13 @@ class AndroidAudioEngine implements AudioEngine {
 
   @override
   Future<void> setEqualizerConfig(EqualizerConfig config) async {
+    final previous = _lastConfig;
+    await _applyConfigToPlayer(
+      _activePlayerId,
+      config,
+      previousConfig: previous,
+    );
     _lastConfig = config;
-    await _applyConfigToPlayer(_activePlayerId, config);
   }
 
   void _handleFftEvent(dynamic event) {
@@ -280,24 +289,44 @@ class AndroidAudioEngine implements AudioEngine {
 
   Future<void> _applyConfigToPlayer(
     String playerId,
-    EqualizerConfig config,
-  ) async {
-    await _channel.invokeMethod('setCppEqualizerEnabled', {
-      'enabled': config.enabled,
-      'playerId': playerId,
-    });
-    await _channel.invokeMethod('setCppEqualizerPreAmp', {
-      'gainDb': config.preampDb,
-      'playerId': playerId,
-    });
-    await _channel.invokeMethod('setCppEqualizerBandCount', {
-      'count': config.bandCount,
-      'playerId': playerId,
-    });
-    await _channel.invokeMethod('setCppEqualizerConfig', {
-      'bandGains': config.bandGainsDb.toList(),
-      'playerId': playerId,
-    });
+    EqualizerConfig config, {
+    EqualizerConfig? previousConfig,
+  }) async {
+    final previous = previousConfig;
+    final enabledChanged =
+        previous == null || previous.enabled != config.enabled;
+    final preampChanged =
+        previous == null || previous.preampDb != config.preampDb;
+    final bandCountChanged =
+        previous == null || previous.bandCount != config.bandCount;
+    final bandGainsChanged =
+        previous == null ||
+        !listEquals(previous.bandGainsDb, config.bandGainsDb);
+
+    if (enabledChanged) {
+      await _channel.invokeMethod('setCppEqualizerEnabled', {
+        'enabled': config.enabled,
+        'playerId': playerId,
+      });
+    }
+    if (preampChanged) {
+      await _channel.invokeMethod('setCppEqualizerPreAmp', {
+        'gainDb': config.preampDb,
+        'playerId': playerId,
+      });
+    }
+    if (bandCountChanged) {
+      await _channel.invokeMethod('setCppEqualizerBandCount', {
+        'count': config.bandCount,
+        'playerId': playerId,
+      });
+    }
+    if (bandCountChanged || bandGainsChanged) {
+      await _channel.invokeMethod('setCppEqualizerConfig', {
+        'bandGains': config.bandGainsDb.toList(),
+        'playerId': playerId,
+      });
+    }
   }
 
   @override

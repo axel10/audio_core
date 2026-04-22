@@ -68,6 +68,7 @@ private:
     float mSampleRate;
     std::atomic<float> mTargetPreAmpLinear{1.0f};
     float mCurrentPreAmpLinear{1.0f};
+    float mCurrentHeadroomLinear{1.0f};
     
     std::vector<EqualizerBand> mBands;
 };

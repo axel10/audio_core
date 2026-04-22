@@ -29,6 +29,23 @@ inline float32x4_t vdivq_f32_fast(float32x4_t num, float32x4_t den) {
 
 BiquadFilter::BiquadFilter() : b0(1.0), b1(0.0), b2(0.0), a1(0.0), a2(0.0) {}
 
+namespace {
+constexpr float kHeadroomSmoothing = 0.15f;
+constexpr float kLimiterThreshold = 0.95f;
+constexpr float kLimiterKneeWidth = 0.05f;
+
+float computeHeadroomLinear(const std::vector<EqualizerBand>& bands) {
+    float maxBoostDb = 0.0f;
+    for (const auto& band : bands) {
+        const float gainDb = band.targetGainDb.load(std::memory_order_relaxed);
+        if (gainDb > maxBoostDb) {
+            maxBoostDb = gainDb;
+        }
+    }
+    return std::pow(10.0f, -maxBoostDb / 20.0f);
+}
+} // namespace
+
 void BiquadFilter::prepare(int channels) {
     if (channels <= 0) return;
     if (z1.size() != (size_t)channels) {
@@ -130,6 +147,8 @@ EqualizerEngine::EqualizerEngine() : mSampleRate(44100.0f) {}
 void EqualizerEngine::init(int numBands, float sampleRate, int channels) {
     std::lock_guard<std::mutex> lock(mMutex);
     mSampleRate = sampleRate;
+    mCurrentPreAmpLinear = mTargetPreAmpLinear.load(std::memory_order_relaxed);
+    mCurrentHeadroomLinear = 1.0f;
     mBands.clear();
     
     if (numBands < 1) return;
@@ -235,10 +254,17 @@ void EqualizerEngine::process(float* buffer, int numSamples, int channels) {
         }
     }
 
-    // 移除之前的自动增益补偿(AGC)，直接使用前级增益(Pre-Amp)
-    // 防止因为某个频段被过度拉高导致全局音量被硬性压低，从而产生拖动时的"忽大忽小"感。
-    // 偶尔的溢出会由底部的软限制器(Soft Limiter)平滑处理
-    float totalGain = mCurrentPreAmpLinear;
+    float desiredHeadroomLinear = computeHeadroomLinear(mBands);
+    if (std::abs(desiredHeadroomLinear - mCurrentHeadroomLinear) > 0.001f) {
+        mCurrentHeadroomLinear +=
+            kHeadroomSmoothing * (desiredHeadroomLinear - mCurrentHeadroomLinear);
+    } else {
+        mCurrentHeadroomLinear = desiredHeadroomLinear;
+    }
+
+    // Rust 侧的策略是：当有正增益时先把前级整体降下来，再让 EQ 去抬频段，
+    // 这样能保留 headroom 而不是靠每个 buffer 动态抽吸。
+    float totalGain = mCurrentPreAmpLinear * mCurrentHeadroomLinear;
 
     // 2. 应用 Pre-Amp 增益 
     if (totalGain != 1.0f) {
@@ -268,25 +294,25 @@ void EqualizerEngine::process(float* buffer, int numSamples, int channels) {
         }
     }
 
-    // 4. 改进的软限制器和安全 Hard Clamp
+    // 4. 软限制器和安全 Hard Clamp
 #if USE_NEON_INTRINSICS
     float32x4_t vOne = vdupq_n_f32(1.0f);
     float32x4_t vNegOne = vdupq_n_f32(-1.0f);
-    float32x4_t vThreshold = vdupq_n_f32(0.8f);
-    float32x4_t vSoftKneeMult = vdupq_n_f32(1.0f / 0.15f); // 6.6666667f
+    float32x4_t vThreshold = vdupq_n_f32(kLimiterThreshold);
+    float32x4_t vSoftKneeMult = vdupq_n_f32(1.0f / kLimiterKneeWidth);
 
     int j = 0;
     for (; j <= totalSamples - 4; j += 4) {
         float32x4_t x = vld1q_f32(&buffer[j]);
         float32x4_t abs_x = vabsq_f32(x);
         
-        // 计算软限制: diff = max(0, abs_x - 0.8)
+        // 计算软限制: diff = max(0, abs_x - threshold)
         float32x4_t diff = vmaxq_f32(vdupq_n_f32(0.0f), vsubq_f32(abs_x, vThreshold));
         
         // denom = 1.0 + diff * 6.6666667
         float32x4_t denom = vaddq_f32(vOne, vmulq_f32(diff, vSoftKneeMult));
         
-        // shaped = 0.8 + diff / denom
+        // shaped = threshold + diff / denom
         float32x4_t shaped_magnitude = vaddq_f32(vThreshold, vdivq_f32_fast(diff, denom));
         
         // 恢复符号: copy sign bit from x to shaped_magnitude
@@ -294,7 +320,7 @@ void EqualizerEngine::process(float* buffer, int numSamples, int channels) {
         float32x4_t sign_x = vreinterpretq_f32_u32(vandq_u32(vreinterpretq_u32_f32(x), sign_mask));
         float32x4_t shaped_x = vreinterpretq_f32_u32(vorrq_u32(vreinterpretq_u32_f32(shaped_magnitude), sign_x));
         
-        // mix: 如果 abs_x > 0.8，使用 shaped_x，否则保留原始 x
+        // mix: 如果 abs_x > threshold，使用 shaped_x，否则保留原始 x
         uint32x4_t gt_mask = vcgtq_f32(abs_x, vThreshold);
         x = vbslq_f32(gt_mask, shaped_x, x);
         
@@ -307,9 +333,10 @@ void EqualizerEngine::process(float* buffer, int numSamples, int channels) {
     for (; j < totalSamples; ++j) {
         float x = buffer[j];
         float abs_x = std::abs(x);
-        if (abs_x > 0.8f) {
-            float diff = abs_x - 0.8f;
-            float shaped = 0.8f + diff / (1.0f + diff / 0.15f);
+        if (abs_x > kLimiterThreshold) {
+            float diff = abs_x - kLimiterThreshold;
+            float shaped =
+                kLimiterThreshold + diff / (1.0f + diff / kLimiterKneeWidth);
             x = (x > 0.0f) ? shaped : -shaped;
         }
         buffer[j] = std::max(-1.0f, std::min(1.0f, x));
@@ -318,9 +345,10 @@ void EqualizerEngine::process(float* buffer, int numSamples, int channels) {
     for (int j = 0; j < totalSamples; ++j) {
         float x = buffer[j];
         float abs_x = std::abs(x);
-        if (abs_x > 0.8f) {
-            float diff = abs_x - 0.8f;
-            float shaped = 0.8f + diff / (1.0f + diff / 0.15f);
+        if (abs_x > kLimiterThreshold) {
+            float diff = abs_x - kLimiterThreshold;
+            float shaped =
+                kLimiterThreshold + diff / (1.0f + diff / kLimiterKneeWidth);
             x = (x > 0.0f) ? shaped : -shaped;
         }
         buffer[j] = std::max(-1.0f, std::min(1.0f, x));
