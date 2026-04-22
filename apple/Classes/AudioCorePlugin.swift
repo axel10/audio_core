@@ -73,6 +73,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
         sendPlayerState()
         result(nil)
       } catch {
+        sendPlayerState(error: error.localizedDescription)
         result(FlutterError(code: "LOAD_FAILED", message: error.localizedDescription, details: nil))
       }
     case "crossfade":
@@ -91,6 +92,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
         sendPlayerState()
         result(nil)
       } catch {
+        sendPlayerState(error: error.localizedDescription)
         result(FlutterError(code: "CROSSFADE_FAILED", message: error.localizedDescription, details: nil))
       }
     case "play":
@@ -104,6 +106,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
         sendPlayerState()
         result(nil)
       } catch {
+        sendPlayerState(error: error.localizedDescription)
         result(FlutterError(code: "PLAY_FAILED", message: error.localizedDescription, details: nil))
       }
     case "pause":
@@ -113,6 +116,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
         sendPlayerState()
         result(nil)
       } catch {
+        sendPlayerState(error: error.localizedDescription)
         result(FlutterError(code: "PAUSE_FAILED", message: error.localizedDescription, details: nil))
       }
     case "seek":
@@ -122,6 +126,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
         sendPlayerState()
         result(nil)
       } catch {
+        sendPlayerState(error: error.localizedDescription)
         result(FlutterError(code: "SEEK_FAILED", message: error.localizedDescription, details: nil))
       }
     case "setVolume":
@@ -131,6 +136,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
         sendPlayerState()
         result(nil)
       } catch {
+        sendPlayerState(error: error.localizedDescription)
         result(FlutterError(code: "VOLUME_FAILED", message: error.localizedDescription, details: nil))
       }
     case "setEqualizerConfig":
@@ -150,6 +156,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       do {
         result(engine.getLatestFft())
       } catch {
+        sendPlayerState(error: error.localizedDescription)
         result(FlutterError(code: "FFT_FAILED", message: error.localizedDescription, details: nil))
       }
     case "getAudioPcm":
@@ -162,6 +169,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       do {
         result(try engine.getAudioPcm(path: path, sampleStride: sampleStride))
       } catch {
+        sendPlayerState(error: error.localizedDescription)
         result(FlutterError(code: "PCM_FAILED", message: error.localizedDescription, details: nil))
       }
     case "getAudioPcmChannelCount":
@@ -173,6 +181,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       do {
         result(try engine.getAudioPcmChannelCount(path: path))
       } catch {
+        sendPlayerState(error: error.localizedDescription)
         result(FlutterError(code: "PCM_FAILED", message: error.localizedDescription, details: nil))
       }
     case "getFingerprintPcm":
@@ -185,6 +194,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       do {
         result(try engine.getFingerprintPcm(path: path, maxDurationMs: maxDurationMs))
       } catch {
+        sendPlayerState(error: error.localizedDescription)
         result(FlutterError(code: "PCM_FAILED", message: error.localizedDescription, details: nil))
       }
     case "prepareForFileWrite":
@@ -194,6 +204,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
         sendPlayerState()
         result(nil)
       } catch {
+        sendPlayerState(error: error.localizedDescription)
         result(FlutterError(code: "PREPARE_FAILED", message: error.localizedDescription, details: nil))
       }
     case "finishFileWrite":
@@ -203,6 +214,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
         sendPlayerState()
         result(nil)
       } catch {
+        sendPlayerState(error: error.localizedDescription)
         result(FlutterError(code: "FINISH_FAILED", message: error.localizedDescription, details: nil))
       }
     case "registerPersistentAccess":
@@ -241,10 +253,13 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
     }
   }
 
-  private func sendPlayerState() {
+  private func sendPlayerState(playbackState: String? = nil, error: String? = nil) {
     guard let channel else { return }
     DispatchQueue.main.async {
-      channel.invokeMethod("onPlayerStateChanged", arguments: self.engine.statusPayload())
+      channel.invokeMethod(
+        "onPlayerStateChanged",
+        arguments: self.engine.statusPayload(playbackState: playbackState, error: error)
+      )
     }
   }
 
@@ -768,18 +783,28 @@ private final class AppleAudioEngine {
     incomingDeck.loadedFile = nil
   }
 
-  func statusPayload() -> [String: Any] {
+  func statusPayload(playbackState: String? = nil, error: String? = nil) -> [String: Any] {
     var payload: [String: Any] = [
       "playerId": "main",
+      "state": playbackState ?? currentPlaybackState(),
       "position": getCurrentPositionMs(),
       "duration": getDurationMs(),
       "isPlaying": publicDeck()?.isPlaying ?? false,
       "volume": latestVolume,
+      "updateTime": Int(Date().timeIntervalSince1970 * 1000),
     ]
     if let path = publicURL()?.path {
       payload["path"] = path
     }
+    payload["error"] = error ?? NSNull()
     return payload
+  }
+
+  private func currentPlaybackState() -> String {
+    guard publicDeck() != nil else {
+      return "IDLE"
+    }
+    return "READY"
   }
 
   private func normalizedFilePath(_ path: String) -> String {
@@ -908,7 +933,7 @@ private final class AppleAudioEngine {
         deck.playbackFramePosition = currentFile.length
       }
       deck.isPlaybackScheduled = false
-      self.sendPlayerState()
+      self.sendPlayerState(playbackState: "ENDED")
     }
   }
 
