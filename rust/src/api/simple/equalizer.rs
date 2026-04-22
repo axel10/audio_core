@@ -13,6 +13,7 @@ const MAX_EQ_CENTER_HZ: f32 = 16_000.0;
 const DEFAULT_BASS_BOOST_HZ: f32 = 80.0;
 const DEFAULT_BASS_BOOST_Q: f32 = 0.75;
 const CONFIG_REFRESH_STRIDE: usize = 64;
+const CONFIG_SMOOTHING_FACTOR: f32 = 0.18;
 const EPSILON_GAIN_DB: f32 = 0.001;
 
 #[derive(Debug, Clone)]
@@ -54,6 +55,73 @@ impl EqualizerConfig {
 
         self
     }
+}
+
+fn smooth_toward(current: f32, target: f32, factor: f32) -> f32 {
+    current + (target - current) * factor
+}
+
+fn smooth_config_toward(current: &mut EqualizerConfig, target: &EqualizerConfig) -> bool {
+    let mut changed = false;
+
+    if current.enabled != target.enabled {
+        current.enabled = target.enabled;
+        changed = true;
+    }
+
+    if current.band_count != target.band_count {
+        current.band_count = target.band_count;
+        changed = true;
+    }
+
+    let next_preamp_db = smooth_toward(current.preamp_db, target.preamp_db, CONFIG_SMOOTHING_FACTOR);
+    if (next_preamp_db - current.preamp_db).abs() > EPSILON_GAIN_DB {
+        current.preamp_db = next_preamp_db;
+        changed = true;
+    }
+
+    let next_bass_boost_db =
+        smooth_toward(current.bass_boost_db, target.bass_boost_db, CONFIG_SMOOTHING_FACTOR);
+    if (next_bass_boost_db - current.bass_boost_db).abs() > EPSILON_GAIN_DB {
+        current.bass_boost_db = next_bass_boost_db;
+        changed = true;
+    }
+
+    let next_bass_boost_frequency_hz = smooth_toward(
+        current.bass_boost_frequency_hz,
+        target.bass_boost_frequency_hz,
+        CONFIG_SMOOTHING_FACTOR,
+    );
+    if (next_bass_boost_frequency_hz - current.bass_boost_frequency_hz).abs() > 0.01 {
+        current.bass_boost_frequency_hz = next_bass_boost_frequency_hz;
+        changed = true;
+    }
+
+    let next_bass_boost_q =
+        smooth_toward(current.bass_boost_q, target.bass_boost_q, CONFIG_SMOOTHING_FACTOR);
+    if (next_bass_boost_q - current.bass_boost_q).abs() > 0.001 {
+        current.bass_boost_q = next_bass_boost_q;
+        changed = true;
+    }
+
+    let band_count = min(
+        MAX_EQ_BANDS,
+        min(current.band_gains_db.len(), target.band_gains_db.len()),
+    );
+    for i in 0..band_count {
+        let next_gain = smooth_toward(
+            current.band_gains_db[i],
+            target.band_gains_db[i],
+            CONFIG_SMOOTHING_FACTOR,
+        );
+        if (next_gain - current.band_gains_db[i]).abs() > EPSILON_GAIN_DB {
+            current.band_gains_db[i] = next_gain;
+            changed = true;
+        }
+    }
+
+    *current = std::mem::take(current).sanitized();
+    changed
 }
 
 pub(crate) struct EqualizerShared {
@@ -217,6 +285,8 @@ where
     inner: S,
     shared: Arc<EqualizerShared>,
     current_version: u64,
+    target_config: EqualizerConfig,
+    smoothed_config: EqualizerConfig,
     chains: Vec<EqualizerChain>,
     channels: usize,
     sample_rate: u32,
@@ -240,6 +310,8 @@ where
             inner,
             shared,
             current_version: 0,
+            target_config: config.clone(),
+            smoothed_config: config,
             chains,
             channels,
             sample_rate,
@@ -250,15 +322,19 @@ where
 
     fn refresh_if_needed(&mut self) {
         let version = self.shared.version();
-        if version == self.current_version {
+        if version != self.current_version {
+            self.target_config = self.shared.current_config();
+            self.current_version = version;
+        }
+
+        let config_changed = smooth_config_toward(&mut self.smoothed_config, &self.target_config);
+        if !config_changed {
             return;
         }
 
-        let config = self.shared.current_config();
         for chain in &mut self.chains {
-            chain.update_from_config(&config, self.sample_rate);
+            chain.update_from_config(&self.smoothed_config, self.sample_rate);
         }
-        self.current_version = version;
     }
 
     fn process_current_sample(&mut self, sample: f32) -> f32 {
