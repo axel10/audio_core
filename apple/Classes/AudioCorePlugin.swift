@@ -17,6 +17,16 @@ private struct AppleEqualizerConfig {
   let bandGainsDb: [Double]
 }
 
+private enum AppleEqualizerDefaults {
+  static let maxBands = 20
+  static let minCenterFrequencyHz = 32.0
+  static let maxCenterFrequencyHz = 16_000.0
+  static let defaultBassBoostFrequencyHz = 80.0
+  static let defaultBassBoostQ = 0.75
+  static let eqBandQ = 1.0
+  static let epsilonGainDb = 0.001
+}
+
 public final class AudioCorePlugin: NSObject, FlutterPlugin {
   private let fileAccess = SecurityScopedFileAccessCoordinator()
   private let engine: AppleAudioEngine
@@ -290,17 +300,22 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
 
   private static func readEqualizerConfig(_ arguments: Any?) -> AppleEqualizerConfig? {
     guard let map = arguments as? [String: Any] else { return nil }
-    let bandCountLimit = 20
 
     let enabled = (map["enabled"] as? Bool) ?? false
     let bandCount = Self.readInt(arguments, key: "bandCount") ?? 0
     let preampDb = Self.readDouble(arguments, key: "preampDb") ?? 0.0
     let bassBoostDb = Self.readDouble(arguments, key: "bassBoostDb") ?? 0.0
-    let bassBoostFrequencyHz = Self.readDouble(arguments, key: "bassBoostFrequencyHz") ?? 80.0
-    let bassBoostQ = Self.readDouble(arguments, key: "bassBoostQ") ?? 0.75
+    let bassBoostFrequencyHz = Self.readDouble(
+      arguments,
+      key: "bassBoostFrequencyHz"
+    ) ?? AppleEqualizerDefaults.defaultBassBoostFrequencyHz
+    let bassBoostQ = Self.readDouble(
+      arguments,
+      key: "bassBoostQ"
+    ) ?? AppleEqualizerDefaults.defaultBassBoostQ
 
     let rawBands = map["bandGainsDb"] as? [Any] ?? []
-    var bandGainsDb = Array(repeating: 0.0, count: max(0, min(bandCount, bandCountLimit)))
+    var bandGainsDb = Array(repeating: 0.0, count: AppleEqualizerDefaults.maxBands)
     for index in 0..<min(rawBands.count, bandGainsDb.count) {
       if let value = rawBands[index] as? Double {
         bandGainsDb[index] = value
@@ -313,14 +328,33 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       }
     }
 
+    return Self.sanitizedEqualizerConfig(
+      AppleEqualizerConfig(
+        enabled: enabled,
+        bandCount: bandCount,
+        preampDb: preampDb,
+        bassBoostDb: bassBoostDb,
+        bassBoostFrequencyHz: bassBoostFrequencyHz,
+        bassBoostQ: bassBoostQ,
+        bandGainsDb: bandGainsDb
+      )
+    )
+  }
+
+  private static func sanitizedEqualizerConfig(_ config: AppleEqualizerConfig) -> AppleEqualizerConfig {
+    var gains = Array(repeating: 0.0, count: AppleEqualizerDefaults.maxBands)
+    for index in 0..<min(config.bandGainsDb.count, gains.count) {
+      gains[index] = config.bandGainsDb[index]
+    }
+
     return AppleEqualizerConfig(
-      enabled: enabled,
-      bandCount: max(0, min(bandCount, bandCountLimit)),
-      preampDb: preampDb,
-      bassBoostDb: bassBoostDb,
-      bassBoostFrequencyHz: bassBoostFrequencyHz,
-      bassBoostQ: bassBoostQ,
-      bandGainsDb: bandGainsDb
+      enabled: config.enabled,
+      bandCount: max(0, min(config.bandCount, AppleEqualizerDefaults.maxBands)),
+      preampDb: config.preampDb,
+      bassBoostDb: config.bassBoostDb,
+      bassBoostFrequencyHz: config.bassBoostFrequencyHz.clamped(to: 20.0...240.0),
+      bassBoostQ: config.bassBoostQ.clamped(to: 0.1...2.0),
+      bandGainsDb: gains
     )
   }
 
@@ -852,29 +886,35 @@ private final class AppleAudioEngine {
   }
 
   private func applyEqualizerConfig(_ config: AppleEqualizerConfig) {
+    let sanitizedConfig = Self.sanitizedEqualizerConfig(config)
     let availableBandCount = equalizerNode.bands.count
     let userBandCount = min(EqualizerBandLayout.bandCount, max(0, availableBandCount - 1))
-    let clampedBandCount = max(0, min(config.bandCount, userBandCount))
+    let clampedBandCount = max(0, min(sanitizedConfig.bandCount, userBandCount))
     let bandFrequencies = Self.bandCenterFrequencies(count: EqualizerBandLayout.bandCount)
+    let maxBoostDb = Self.maxBoostDb(for: sanitizedConfig, userBandCount: clampedBandCount)
+    let compensatedPreampDb = sanitizedConfig.preampDb - maxBoostDb
 
-    equalizerNode.globalGain = Float(config.enabled ? config.preampDb : 0.0)
+    equalizerNode.globalGain = Float(sanitizedConfig.enabled ? compensatedPreampDb : 0.0)
+    let eqBandwidth = Self.bandwidthInOctaves(forQ: AppleEqualizerDefaults.eqBandQ)
+    let bassBandwidth = Self.bandwidthInOctaves(forQ: sanitizedConfig.bassBoostQ)
 
     for index in 0..<userBandCount {
       let band = equalizerNode.bands[index]
-      band.bypass = !config.enabled || index >= clampedBandCount
+      band.bypass = !sanitizedConfig.enabled || index >= clampedBandCount
       band.filterType = .parametric
       band.frequency = Float(bandFrequencies[index])
-      band.gain = index < config.bandGainsDb.count ? Float(config.bandGainsDb[index]) : 0.0
-      band.bandwidth = Self.bandwidth(forQ: config.bassBoostQ)
+      band.gain = index < sanitizedConfig.bandGainsDb.count ? Float(sanitizedConfig.bandGainsDb[index]) : 0.0
+      band.bandwidth = eqBandwidth
     }
 
     if availableBandCount > userBandCount {
       let bassBand = equalizerNode.bands[userBandCount]
-      bassBand.bypass = !config.enabled || config.bassBoostDb == 0.0
-      bassBand.filterType = .lowShelf
-      bassBand.frequency = Float(config.bassBoostFrequencyHz)
-      bassBand.gain = Float(config.bassBoostDb)
-      bassBand.bandwidth = Self.bandwidth(forQ: config.bassBoostQ)
+      bassBand.bypass =
+        !sanitizedConfig.enabled || abs(sanitizedConfig.bassBoostDb) <= AppleEqualizerDefaults.epsilonGainDb
+      bassBand.filterType = .resonantLowShelf
+      bassBand.frequency = Float(sanitizedConfig.bassBoostFrequencyHz)
+      bassBand.gain = Float(sanitizedConfig.bassBoostDb)
+      bassBand.bandwidth = bassBandwidth
     }
   }
 
@@ -1092,10 +1132,19 @@ private final class AppleAudioEngine {
     framePositionToMilliseconds(frameCount, sampleRate: sampleRate)
   }
 
-  private static func bandwidth(forQ q: Double) -> Float {
+  private static func bandwidthInOctaves(forQ q: Double) -> Float {
     let safeQ = max(q, 0.0001)
-    let bandwidth = 1.0 / safeQ
-    return Float(max(0.1, min(bandwidth, 4.0)))
+    let root = (1.0 + sqrt(1.0 + 4.0 * safeQ * safeQ)) / (2.0 * safeQ)
+    let bandwidth = 2.0 * log2(root)
+    return Float(max(0.05, min(bandwidth, 6.0)))
+  }
+
+  private static func maxBoostDb(for config: AppleEqualizerConfig, userBandCount: Int) -> Double {
+    var maxBoostDb = max(0.0, config.bassBoostDb)
+    for index in 0..<min(userBandCount, config.bandGainsDb.count) {
+      maxBoostDb = max(maxBoostDb, config.bandGainsDb[index])
+    }
+    return maxBoostDb
   }
 
   private static func bandCenterFrequencies(count: Int) -> [Double] {
@@ -1104,8 +1153,8 @@ private final class AppleAudioEngine {
       return [1000.0]
     }
 
-    let minFrequency = 32.0
-    let maxFrequency = 16_000.0
+    let minFrequency = AppleEqualizerDefaults.minCenterFrequencyHz
+    let maxFrequency = AppleEqualizerDefaults.maxCenterFrequencyHz
     let ratio = maxFrequency / minFrequency
     return (0..<safeCount).map { index in
       let exponent = Double(index) / Double(safeCount - 1)
@@ -1119,15 +1168,16 @@ private final class AppleAudioEngine {
       bandCount: EqualizerBandLayout.bandCount,
       preampDb: 0.0,
       bassBoostDb: 0.0,
-      bassBoostFrequencyHz: 80.0,
-      bassBoostQ: 0.75,
+      bassBoostFrequencyHz: AppleEqualizerDefaults.defaultBassBoostFrequencyHz,
+      bassBoostQ: AppleEqualizerDefaults.defaultBassBoostQ,
       bandGainsDb: Array(repeating: 0.0, count: EqualizerBandLayout.bandCount)
     )
   }
 
   func setEqualizerConfig(_ config: AppleEqualizerConfig) {
-    latestEqualizerConfig = config
-    applyEqualizerConfig(config)
+    let sanitizedConfig = Self.sanitizedEqualizerConfig(config)
+    latestEqualizerConfig = sanitizedConfig
+    applyEqualizerConfig(sanitizedConfig)
   }
 
   func getEqualizerConfig() -> AppleEqualizerConfig {
