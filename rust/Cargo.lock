@@ -1407,7 +1407,7 @@ dependencies = [
 [[package]]
 name = "rodio"
 version = "0.22.2"
-source = "git+https://github.com/axel10/rodio#2ebfe593f4bee06bf97cbd2361eadb69c0f0de4c"
+source = "git+https://github.com/axel10/rodio?branch=master#2ebfe593f4bee06bf97cbd2361eadb69c0f0de4c"
 dependencies = [
  "cpal",
  "dasp_sample",
