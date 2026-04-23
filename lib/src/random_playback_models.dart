@@ -531,8 +531,9 @@ class _WeightedRandomStrategy extends RandomStrategy {
       weights.add(normalized);
       totalWeight += normalized;
     }
-    if (totalWeight <= 0.0)
+    if (totalWeight <= 0.0) {
       return candidates[random.nextInt(candidates.length)];
+    }
     final target = random.nextDouble() * totalWeight;
     var cursor = 0.0;
     for (var i = 0; i < candidates.length; i++) {

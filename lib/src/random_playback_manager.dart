@@ -148,7 +148,7 @@ class RandomPlaybackManager {
     // Sync deck if needed
     if (policy.strategy.kind == RandomStrategyKind.fisherYates ||
         policy.strategy.kind == RandomStrategyKind.sequential) {
-      final context = _buildContext_internal(
+      final context = _buildContextInternal(
         playlistId,
         tracks,
         currentTrack: currentTrack,
@@ -171,7 +171,7 @@ class RandomPlaybackManager {
     final policy = _policy;
     if (policy == null || tracks.isEmpty) return null;
 
-    final context = _buildContext_internal(
+    final context = _buildContextInternal(
       playlistId,
       tracks,
       currentTrack: currentTrack,
@@ -385,7 +385,7 @@ class RandomPlaybackManager {
 
   // --- Internal Helpers ---
 
-  RandomSelectionContext _buildContext_internal(
+  RandomSelectionContext _buildContextInternal(
     String? playlistId,
     List<AudioTrack> tracks, {
     AudioTrack? currentTrack,
