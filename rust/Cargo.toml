@@ -18,7 +18,7 @@ base64 = "0.22.1"
 [target.'cfg(not(any(target_os = "ios", target_os = "macos")))'.dependencies]
 rusty-chromaprint = "0.3.0"
 symphonia = { version = "0.5.5", features = ["all"] }
-rodio = { path = "./rodio", default-features = true, features = ["symphonia-all"] }
+rodio = { git="https://github.com/axel10/rodio", default-features = true, features = ["symphonia-all"] }
 realfft = "3.5.0"
 fundsp = "0.23.0"
 
