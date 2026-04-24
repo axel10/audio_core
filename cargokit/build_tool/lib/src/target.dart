@@ -100,7 +100,7 @@ class Target {
 
   static List<Target> androidTargets() {
     return all
-        .where((element) => element.android != null)
+        .where((element) => element.android != null && element.flutter != 'android-x86')
         .toList(growable: false);
   }
 
