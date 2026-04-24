@@ -121,7 +121,7 @@ abstract class AudioEngine {
     required String path,
     required String cacheRootPath,
     required bool saveLargeArtwork,
-    int thumbnailSize = 200,
+    int thumbnailSize = generatedArtworkThumbnailSize,
   }) async {
     throw UnimplementedError(
       'generateTrackArtwork is not implemented on this platform.',

@@ -1073,7 +1073,7 @@ class AudioCoreController extends ChangeNotifier
     required String path,
     required String cacheRootPath,
     required bool saveLargeArtwork,
-    int thumbnailSize = 200,
+    int thumbnailSize = generatedArtworkThumbnailSize,
   }) async {
     if (!_initialized) {
       await initialize();

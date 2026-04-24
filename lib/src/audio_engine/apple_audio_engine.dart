@@ -406,7 +406,7 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
     required String path,
     required String cacheRootPath,
     required bool saveLargeArtwork,
-    int thumbnailSize = 200,
+    int thumbnailSize = generatedArtworkThumbnailSize,
   }) async {
     final result = await rust.generateTrackArtwork(
       path: _normalizePath(path),

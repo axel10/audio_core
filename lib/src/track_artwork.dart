@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+const int generatedArtworkThumbnailSize = 300;
+
 class GeneratedTrackArtwork {
   const GeneratedTrackArtwork({
     required this.artworkFound,
