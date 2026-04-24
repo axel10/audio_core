@@ -42,7 +42,6 @@ impl Default for FadeSettings {
     }
 }
 
-
 const DEFAULT_OUTPUT_POLL_INTERVAL: Duration = Duration::from_millis(1000);
 const CROSSFADE_TICK_INTERVAL: Duration = Duration::from_millis(16);
 

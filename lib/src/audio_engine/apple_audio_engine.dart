@@ -41,7 +41,9 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
       final isPlaying = args['isPlaying'] as bool? ?? false;
       final error = args['error'] as String?;
       final volume = (args['volume'] as num?)?.toDouble() ?? _currentVolume;
-      final updateTimeMs = (args['updateTime'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
+      final updateTimeMs =
+          (args['updateTime'] as num?)?.toInt() ??
+          DateTime.now().millisecondsSinceEpoch;
 
       _currentVolume = volume;
 
@@ -182,7 +184,8 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
     );
     return PositionSnapshot(
       position: Duration(milliseconds: (result?['position'] as int?) ?? 0),
-      takenAtMs: (result?['takenAt'] as int?) ?? DateTime.now().millisecondsSinceEpoch,
+      takenAtMs:
+          (result?['takenAt'] as int?) ?? DateTime.now().millisecondsSinceEpoch,
     );
   }
 
@@ -417,6 +420,7 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
       thumbnailPath: result.thumbnailPath,
       artworkWidth: result.artworkWidth,
       artworkHeight: result.artworkHeight,
+      themeColorsBlob: result.themeColorsBlob,
     );
   }
 

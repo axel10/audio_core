@@ -187,5 +187,15 @@ class FakeAudioEngine implements AudioEngine {
   }
 
   @override
+  Future<GeneratedTrackArtwork> generateTrackArtwork({
+    required String path,
+    required String cacheRootPath,
+    required bool saveLargeArtwork,
+    int thumbnailSize = 200,
+  }) async {
+    return const GeneratedTrackArtwork(artworkFound: false);
+  }
+
+  @override
   Future<void> removeAllTags({String? path}) async {}
 }

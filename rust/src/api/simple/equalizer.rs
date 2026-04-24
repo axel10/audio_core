@@ -74,14 +74,18 @@ fn smooth_config_toward(current: &mut EqualizerConfig, target: &EqualizerConfig)
         changed = true;
     }
 
-    let next_preamp_db = smooth_toward(current.preamp_db, target.preamp_db, CONFIG_SMOOTHING_FACTOR);
+    let next_preamp_db =
+        smooth_toward(current.preamp_db, target.preamp_db, CONFIG_SMOOTHING_FACTOR);
     if (next_preamp_db - current.preamp_db).abs() > EPSILON_GAIN_DB {
         current.preamp_db = next_preamp_db;
         changed = true;
     }
 
-    let next_bass_boost_db =
-        smooth_toward(current.bass_boost_db, target.bass_boost_db, CONFIG_SMOOTHING_FACTOR);
+    let next_bass_boost_db = smooth_toward(
+        current.bass_boost_db,
+        target.bass_boost_db,
+        CONFIG_SMOOTHING_FACTOR,
+    );
     if (next_bass_boost_db - current.bass_boost_db).abs() > EPSILON_GAIN_DB {
         current.bass_boost_db = next_bass_boost_db;
         changed = true;
@@ -97,8 +101,11 @@ fn smooth_config_toward(current: &mut EqualizerConfig, target: &EqualizerConfig)
         changed = true;
     }
 
-    let next_bass_boost_q =
-        smooth_toward(current.bass_boost_q, target.bass_boost_q, CONFIG_SMOOTHING_FACTOR);
+    let next_bass_boost_q = smooth_toward(
+        current.bass_boost_q,
+        target.bass_boost_q,
+        CONFIG_SMOOTHING_FACTOR,
+    );
     if (next_bass_boost_q - current.bass_boost_q).abs() > 0.001 {
         current.bass_boost_q = next_bass_boost_q;
         changed = true;

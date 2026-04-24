@@ -235,6 +235,7 @@ class RustAudioEngine with PcmWaveformSupport implements AudioEngine {
       thumbnailPath: result.thumbnailPath,
       artworkWidth: result.artworkWidth,
       artworkHeight: result.artworkHeight,
+      themeColorsBlob: result.themeColorsBlob,
     );
   }
 

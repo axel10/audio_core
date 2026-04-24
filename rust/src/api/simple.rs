@@ -12,7 +12,9 @@ pub mod metadata;
 #[cfg(any(target_os = "ios", target_os = "macos", target_os = "android"))]
 pub mod audio_fingerprint {
     pub fn get_audio_fingerprint(_path: String) -> anyhow::Result<String> {
-        Err(anyhow::anyhow!("Audio fingerprinting is not supported on this platform"))
+        Err(anyhow::anyhow!(
+            "Audio fingerprinting is not supported on this platform"
+        ))
     }
 }
 
@@ -195,4 +197,3 @@ pub fn subscribe_playback_state(
         }
     });
 }
-

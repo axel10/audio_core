@@ -1354,6 +1354,17 @@ impl SseDecode for Option<i32> {
     }
 }
 
+impl SseDecode for Option<Vec<u8>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<Vec<u8>>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for crate::api::simple::controller::PlaybackState {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1384,12 +1395,14 @@ impl SseDecode for crate::api::simple::metadata::TrackArtworkResult {
         let mut var_thumbnailPath = <Option<String>>::sse_decode(deserializer);
         let mut var_artworkWidth = <Option<i32>>::sse_decode(deserializer);
         let mut var_artworkHeight = <Option<i32>>::sse_decode(deserializer);
+        let mut var_themeColorsBlob = <Option<Vec<u8>>>::sse_decode(deserializer);
         return crate::api::simple::metadata::TrackArtworkResult {
             artwork_found: var_artworkFound,
             artwork_path: var_artworkPath,
             thumbnail_path: var_thumbnailPath,
             artwork_width: var_artworkWidth,
             artwork_height: var_artworkHeight,
+            theme_colors_blob: var_themeColorsBlob,
         };
     }
 }
@@ -1788,6 +1801,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::simple::metadata::TrackArtwor
             self.thumbnail_path.into_into_dart().into_dart(),
             self.artwork_width.into_into_dart().into_dart(),
             self.artwork_height.into_into_dart().into_dart(),
+            self.theme_colors_blob.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -2017,6 +2031,16 @@ impl SseEncode for Option<i32> {
     }
 }
 
+impl SseEncode for Option<Vec<u8>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <Vec<u8>>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for crate::api::simple::controller::PlaybackState {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -2038,6 +2062,7 @@ impl SseEncode for crate::api::simple::metadata::TrackArtworkResult {
         <Option<String>>::sse_encode(self.thumbnail_path, serializer);
         <Option<i32>>::sse_encode(self.artwork_width, serializer);
         <Option<i32>>::sse_encode(self.artwork_height, serializer);
+        <Option<Vec<u8>>>::sse_encode(self.theme_colors_blob, serializer);
     }
 }
 

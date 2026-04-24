@@ -135,6 +135,7 @@ dependencies = [
  "realfft",
  "rodio",
  "rusty-chromaprint",
+ "serde_json",
  "symphonia",
  "windows 0.52.0",
  "zune-core",

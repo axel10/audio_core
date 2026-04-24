@@ -469,6 +469,7 @@ class AndroidAudioEngine implements AudioEngine {
       thumbnailPath: result.thumbnailPath,
       artworkWidth: result.artworkWidth,
       artworkHeight: result.artworkHeight,
+      themeColorsBlob: result.themeColorsBlob,
     );
   }
 
