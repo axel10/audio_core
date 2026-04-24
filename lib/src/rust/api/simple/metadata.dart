@@ -6,8 +6,8 @@
 import '../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `first_extended_text_value`, `first_tag_value`, `first_text_frame_value`, `id3_picture_type_to_label`, `lofty_picture_type_to_label`, `read_track_metadata_with_id3`, `read_track_metadata_with_lofty`, `should_use_id3`, `update_track_metadata_with_id3`, `update_track_metadata_with_lofty`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `build_square_thumbnail`, `current_time_millis`, `extract_embedded_artwork`, `file_token`, `first_extended_text_value`, `first_tag_value`, `first_text_frame_value`, `id3_picture_type_to_label`, `lofty_picture_type_to_label`, `path_to_string`, `read_track_metadata_with_id3`, `read_track_metadata_with_lofty`, `should_use_id3`, `update_track_metadata_with_id3`, `update_track_metadata_with_lofty`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`
 
 Future<void> updateTrackMetadata({
   required String path,
@@ -20,8 +20,58 @@ Future<void> updateTrackMetadata({
 Future<TrackMetadataUpdate> getTrackMetadata({required String path}) =>
     RustLib.instance.api.crateApiSimpleMetadataGetTrackMetadata(path: path);
 
+Future<TrackArtworkResult> generateTrackArtwork({
+  required String path,
+  required String cacheRootPath,
+  required bool saveLargeArtwork,
+  required int thumbnailSize,
+}) => RustLib.instance.api.crateApiSimpleMetadataGenerateTrackArtwork(
+  path: path,
+  cacheRootPath: cacheRootPath,
+  saveLargeArtwork: saveLargeArtwork,
+  thumbnailSize: thumbnailSize,
+);
+
 Future<void> removeAllTags({required String path}) =>
     RustLib.instance.api.crateApiSimpleMetadataRemoveAllTags(path: path);
+
+class TrackArtworkResult {
+  final bool artworkFound;
+  final String? artworkPath;
+  final String? thumbnailPath;
+  final int? artworkWidth;
+  final int? artworkHeight;
+
+  const TrackArtworkResult({
+    required this.artworkFound,
+    this.artworkPath,
+    this.thumbnailPath,
+    this.artworkWidth,
+    this.artworkHeight,
+  });
+
+  static Future<TrackArtworkResult> default_() =>
+      RustLib.instance.api.crateApiSimpleMetadataTrackArtworkResultDefault();
+
+  @override
+  int get hashCode =>
+      artworkFound.hashCode ^
+      artworkPath.hashCode ^
+      thumbnailPath.hashCode ^
+      artworkWidth.hashCode ^
+      artworkHeight.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TrackArtworkResult &&
+          runtimeType == other.runtimeType &&
+          artworkFound == other.artworkFound &&
+          artworkPath == other.artworkPath &&
+          thumbnailPath == other.thumbnailPath &&
+          artworkWidth == other.artworkWidth &&
+          artworkHeight == other.artworkHeight;
+}
 
 class TrackMetadataUpdate {
   final String? title;

@@ -13,14 +13,22 @@ lofty = "0.23.3"
 id3 = "1.16.4"
 log = "0.4.29"
 base64 = "0.22.1"
+zune-core = "0.5.1"
+zune-image = { version = "0.5.0", default-features = false, features = ["jpeg", "png"] }
+zune-imageprocs = { version = "0.5.1", default-features = false }
 
 
-[target.'cfg(not(any(target_os = "ios", target_os = "macos")))'.dependencies]
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 rusty-chromaprint = "0.3.0"
 symphonia = { version = "0.5.5", features = ["all"] }
 rodio = { git="https://github.com/axel10/rodio",branch = "master", default-features = true, features = ["symphonia-all"] }
 realfft = "3.5.0"
 fundsp = "0.23.0"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21.1"
+android_logger = "0.15.0"
+ndk-context = "0.1.1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.52", features = [

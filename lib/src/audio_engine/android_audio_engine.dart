@@ -2,7 +2,9 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import '../fft_processor.dart';
+import '../rust/api/simple_api.dart' as rust;
 import '../rust/api/simple/equalizer.dart';
+import '../track_artwork.dart';
 import '../track_metadata.dart';
 import 'audio_engine_interface.dart';
 
@@ -446,6 +448,28 @@ class AndroidAudioEngine implements AudioEngine {
         pictures: const [],
       );
     }
+  }
+
+  @override
+  Future<GeneratedTrackArtwork> generateTrackArtwork({
+    required String path,
+    required String cacheRootPath,
+    required bool saveLargeArtwork,
+    int thumbnailSize = 200,
+  }) async {
+    final result = await rust.generateTrackArtwork(
+      path: path,
+      cacheRootPath: cacheRootPath,
+      saveLargeArtwork: saveLargeArtwork,
+      thumbnailSize: thumbnailSize,
+    );
+    return GeneratedTrackArtwork(
+      artworkFound: result.artworkFound,
+      artworkPath: result.artworkPath,
+      thumbnailPath: result.thumbnailPath,
+      artworkWidth: result.artworkWidth,
+      artworkHeight: result.artworkHeight,
+    );
   }
 
   @override

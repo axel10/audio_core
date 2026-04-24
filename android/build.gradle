@@ -86,8 +86,8 @@ dependencies {
     implementation "io.github.kyant0:taglib:1.0.5"
 }
 
-// apply from: "../cargokit/gradle/plugin.gradle"
-// cargokit {
-//     manifestDir = "../rust"
-//     libname = "audio_core"
-// }
+apply from: "../cargokit/gradle/plugin.gradle"
+cargokit {
+    manifestDir = "../rust"
+    libname = "audio_core"
+}

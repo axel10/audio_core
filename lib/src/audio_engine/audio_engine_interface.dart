@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 import '../fft_processor.dart';
+import '../track_artwork.dart';
 import '../rust/api/simple/equalizer.dart';
 import '../track_metadata.dart';
 
@@ -113,6 +114,17 @@ abstract class AudioEngine {
   }) async {
     throw UnimplementedError(
       'getTrackMetadata is not implemented on this platform.',
+    );
+  }
+
+  Future<GeneratedTrackArtwork> generateTrackArtwork({
+    required String path,
+    required String cacheRootPath,
+    required bool saveLargeArtwork,
+    int thumbnailSize = 200,
+  }) async {
+    throw UnimplementedError(
+      'generateTrackArtwork is not implemented on this platform.',
     );
   }
 

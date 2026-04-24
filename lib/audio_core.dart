@@ -15,6 +15,7 @@ export 'src/visualizer_output_stream.dart';
 export 'src/visualizer_output_manager.dart';
 export 'src/android_track_metadata.dart';
 export 'src/track_metadata.dart';
+export 'src/track_artwork.dart';
 export 'src/android_media_library.dart';
 export 'src/app_log.dart';
 export 'src/waveform_pcm_processor.dart';

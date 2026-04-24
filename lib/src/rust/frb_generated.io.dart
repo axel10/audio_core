@@ -85,6 +85,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlaybackState dco_decode_playback_state(dynamic raw);
 
   @protected
+  TrackArtworkResult dco_decode_track_artwork_result(dynamic raw);
+
+  @protected
   TrackMetadataUpdate dco_decode_track_metadata_update(dynamic raw);
 
   @protected
@@ -166,6 +169,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PlaybackState sse_decode_playback_state(SseDeserializer deserializer);
+
+  @protected
+  TrackArtworkResult sse_decode_track_artwork_result(
+    SseDeserializer deserializer,
+  );
 
   @protected
   TrackMetadataUpdate sse_decode_track_metadata_update(
@@ -267,6 +275,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_playback_state(PlaybackState self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_track_artwork_result(
+    TrackArtworkResult self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_track_metadata_update(

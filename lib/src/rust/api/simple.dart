@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'simple/controller.dart';
 
-// These functions are ignored because they are not marked as `pub`: `push_state`, `trigger_state_push`
+// These functions are ignored because they are not marked as `pub`: `notify_playback_state_changed`, `playback_state_notify_pair`, `push_state`, `trigger_state_push`
 
 String greet({required String name}) =>
     RustLib.instance.api.crateApiSimpleGreet(name: name);

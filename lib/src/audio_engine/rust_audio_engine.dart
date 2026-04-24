@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 import '../fft_processor.dart';
+import '../track_artwork.dart';
 import '../rust/api/simple_api.dart' as rust;
 import '../rust/api/simple/equalizer.dart';
 import '../track_metadata.dart';
@@ -213,6 +214,28 @@ class RustAudioEngine with PcmWaveformSupport implements AudioEngine {
   }) async {
     final metadata = await rust.getTrackMetadata(path: path);
     return trackMetadataFromRust(metadata);
+  }
+
+  @override
+  Future<GeneratedTrackArtwork> generateTrackArtwork({
+    required String path,
+    required String cacheRootPath,
+    required bool saveLargeArtwork,
+    int thumbnailSize = 200,
+  }) async {
+    final result = await rust.generateTrackArtwork(
+      path: path,
+      cacheRootPath: cacheRootPath,
+      saveLargeArtwork: saveLargeArtwork,
+      thumbnailSize: thumbnailSize,
+    );
+    return GeneratedTrackArtwork(
+      artworkFound: result.artworkFound,
+      artworkPath: result.artworkPath,
+      thumbnailPath: result.thumbnailPath,
+      artworkWidth: result.artworkWidth,
+      artworkHeight: result.artworkHeight,
+    );
   }
 
   @override

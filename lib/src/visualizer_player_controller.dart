@@ -20,6 +20,7 @@ import 'audio_engine/android_audio_engine.dart';
 import 'audio_engine/rust_audio_engine.dart';
 import 'android_track_metadata.dart';
 import 'android_media_library.dart';
+import 'track_artwork.dart';
 import 'track_metadata.dart';
 
 export 'player_controller.dart';
@@ -127,8 +128,6 @@ class AudioCoreController extends ChangeNotifier
   bool get isInitialized => _initialized;
   EqualizerConfig get equalizerConfig => equalizer.config;
   bool get _usesRustPlaybackBackend => Platform.isLinux || Platform.isWindows;
-  bool get _usesRustMetadataBackend => !Platform.isAndroid;
-
   /// Returns the next track in the current playlist sequence.
   AudioTrack? get nextTrack => playlist.nextTrack;
 
@@ -170,7 +169,7 @@ class AudioCoreController extends ChangeNotifier
     }
     debugPrint('AudioCoreController: isSupported = true');
 
-    if (_usesRustMetadataBackend && !_rustLibInitialized) {
+    if (!_rustLibInitialized) {
       try {
         debugPrint('AudioCoreController: Initializing RustLib');
         await RustLib.init();
@@ -1068,6 +1067,27 @@ class AudioCoreController extends ChangeNotifier
     }
 
     return _engine.getTrackMetadata(path: targetPath);
+  }
+
+  Future<GeneratedTrackArtwork> generateTrackArtwork({
+    required String path,
+    required String cacheRootPath,
+    required bool saveLargeArtwork,
+    int thumbnailSize = 200,
+  }) async {
+    if (!_initialized) {
+      await initialize();
+    }
+    if (!_initialized) {
+      throw StateError('AudioCoreController is not initialized.');
+    }
+
+    return _engine.generateTrackArtwork(
+      path: path,
+      cacheRootPath: cacheRootPath,
+      saveLargeArtwork: saveLargeArtwork,
+      thumbnailSize: thumbnailSize,
+    );
   }
 
   /// Updates metadata for multiple Android tracks in sequence.

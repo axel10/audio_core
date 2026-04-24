@@ -1,15 +1,22 @@
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub mod audio_fingerprint;
-#[cfg(not(any(target_os = "ios", target_os = "macos")))]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub mod controller;
-#[cfg(not(any(target_os = "ios", target_os = "macos")))]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub mod equalizer;
-#[cfg(not(any(target_os = "ios", target_os = "macos")))]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub mod fft;
 
 pub mod metadata;
 
-// Remove the audio_fingerprint stub as we now compile the real one everywhere
-#[cfg(any(target_os = "ios", target_os = "macos"))]
+#[cfg(any(target_os = "ios", target_os = "macos", target_os = "android"))]
+pub mod audio_fingerprint {
+    pub fn get_audio_fingerprint(_path: String) -> anyhow::Result<String> {
+        Err(anyhow::anyhow!("Audio fingerprinting is not supported on this platform"))
+    }
+}
+
+#[cfg(any(target_os = "ios", target_os = "macos", target_os = "android"))]
 pub mod equalizer {
     #[derive(Debug, Clone, Default)]
     pub struct EqualizerConfig {
@@ -23,7 +30,7 @@ pub mod equalizer {
     }
 }
 
-#[cfg(any(target_os = "ios", target_os = "macos"))]
+#[cfg(any(target_os = "ios", target_os = "macos", target_os = "android"))]
 pub mod controller {
     use super::equalizer::EqualizerConfig;
 
@@ -115,7 +122,7 @@ pub mod controller {
     }
 }
 
-#[cfg(any(target_os = "ios", target_os = "macos"))]
+#[cfg(any(target_os = "ios", target_os = "macos", target_os = "android"))]
 pub mod fft {
     pub const RAW_FFT_BINS: usize = 0;
 }
@@ -134,7 +141,8 @@ pub use controller::{
     PlaybackState,
 };
 pub use metadata::{
-    get_track_metadata, remove_all_tags, update_track_metadata, TrackMetadataUpdate, TrackPicture,
+    generate_track_artwork, get_track_metadata, remove_all_tags, update_track_metadata,
+    TrackArtworkResult, TrackMetadataUpdate, TrackPicture,
 };
 
 const PLAYBACK_STATE_PUSH_INTERVAL: Duration = Duration::from_millis(500);

@@ -6,7 +6,7 @@
 import '../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `band_center_frequency`, `current_config`, `from_config`, `identity`, `new`, `new`, `process_current_sample`, `process_sample`, `refresh_if_needed`, `reset`, `set_config`, `update_from_config`, `version`
+// These functions are ignored because they are not marked as `pub`: `band_center_frequency`, `current_config`, `from_config`, `identity`, `new`, `new`, `process_current_sample`, `process_sample`, `refresh_if_needed`, `reset`, `set_config`, `smooth_config_toward`, `smooth_toward`, `update_from_config`, `version`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `EqSource`, `EqualizerChain`, `EqualizerShared`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `channels`, `clone`, `clone`, `current_span_len`, `fmt`, `next`, `sample_rate`, `total_duration`, `try_seek`
 // These functions have error during generation (see debug logs or enable `stop_on_error: true` for more details): `sanitized`

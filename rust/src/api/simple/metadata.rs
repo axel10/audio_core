@@ -1,9 +1,17 @@
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use lofty::config::WriteOptions;
 use lofty::prelude::*;
 use lofty::probe::Probe;
 use lofty::tag::{ItemKey, Tag, TagType};
+use zune_core::bytestream::ZCursor;
+use zune_core::options::DecoderOptions;
+use zune_image::codecs::ImageFormat;
+use zune_image::image::Image;
+use zune_image::traits::OperationsTrait;
+use zune_imageprocs::crop::Crop;
+use zune_imageprocs::resize::{Resize, ResizeMethod};
 
 use id3::frame::{
     Comment as Id3Comment, ExtendedText as Id3ExtendedText, Lyrics as Id3Lyrics,
@@ -41,6 +49,15 @@ pub struct TrackMetadataUpdate {
     pub pictures: Vec<TrackPicture>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct TrackArtworkResult {
+    pub artwork_found: bool,
+    pub artwork_path: Option<String>,
+    pub thumbnail_path: Option<String>,
+    pub artwork_width: Option<i32>,
+    pub artwork_height: Option<i32>,
+}
+
 pub fn update_track_metadata(path: String, metadata: TrackMetadataUpdate) -> anyhow::Result<()> {
     if should_use_id3(&path) {
         return update_track_metadata_with_id3(path, metadata);
@@ -57,6 +74,62 @@ pub fn get_track_metadata(path: String) -> TrackMetadataUpdate {
     read_track_metadata_with_lofty(&path)
 }
 
+pub fn generate_track_artwork(
+    path: String,
+    cache_root_path: String,
+    save_large_artwork: bool,
+    thumbnail_size: i32,
+) -> anyhow::Result<TrackArtworkResult> {
+    let picture = extract_embedded_artwork(&path);
+    let Some(picture) = picture else {
+        return Ok(TrackArtworkResult {
+            artwork_found: false,
+            ..TrackArtworkResult::default()
+        });
+    };
+
+    if picture.bytes.is_empty() {
+        return Ok(TrackArtworkResult {
+            artwork_found: false,
+            ..TrackArtworkResult::default()
+        });
+    }
+
+    let (thumbnail_bytes, artwork_width, artwork_height) =
+        build_square_thumbnail(&picture.bytes, thumbnail_size.max(1) as usize)?;
+
+    let cache_root = PathBuf::from(cache_root_path);
+    let artworks_dir = cache_root.join("artworks");
+    let thumbnails_dir = cache_root.join("thumbnails");
+    fs::create_dir_all(&artworks_dir)?;
+    fs::create_dir_all(&thumbnails_dir)?;
+
+    let base_name = format!(
+        "{}_{}",
+        current_time_millis(),
+        file_token(&path)
+    );
+
+    let artwork_path = if save_large_artwork {
+        let artwork_path = artworks_dir.join(format!("{base_name}.jpg"));
+        fs::write(&artwork_path, &picture.bytes)?;
+        Some(path_to_string(&artwork_path))
+    } else {
+        None
+    };
+
+    let thumbnail_path = thumbnails_dir.join(format!("{base_name}_thumb.jpg"));
+    fs::write(&thumbnail_path, &thumbnail_bytes)?;
+
+    Ok(TrackArtworkResult {
+        artwork_found: true,
+        artwork_path,
+        thumbnail_path: Some(path_to_string(&thumbnail_path)),
+        artwork_width: Some(artwork_width as i32),
+        artwork_height: Some(artwork_height as i32),
+    })
+}
+
 fn should_use_id3(path: &str) -> bool {
     matches!(
         Path::new(path)
@@ -66,6 +139,58 @@ fn should_use_id3(path: &str) -> bool {
             .as_deref(),
         Some("mp3" | "wav" | "aiff" | "aif")
     )
+}
+
+fn extract_embedded_artwork(path: &str) -> Option<TrackPicture> {
+    get_track_metadata(path.to_string()).pictures.into_iter().next()
+}
+
+fn build_square_thumbnail(
+    artwork_bytes: &[u8],
+    thumbnail_size: usize,
+) -> anyhow::Result<(Vec<u8>, usize, usize)> {
+    let mut image = Image::read(ZCursor::new(artwork_bytes), DecoderOptions::default())
+        .map_err(|err| anyhow::anyhow!("failed to decode artwork image: {err}"))?;
+    let (width, height) = image.dimensions();
+    if width == 0 || height == 0 {
+        anyhow::bail!("failed to decode artwork image: decoded dimensions are 0x0");
+    }
+    let crop_size = width.min(height);
+    let offset_x = (width.saturating_sub(crop_size)) / 2;
+    let offset_y = (height.saturating_sub(crop_size)) / 2;
+
+    Crop::new(crop_size, crop_size, offset_x, offset_y)
+        .execute(&mut image)
+        .map_err(|err| anyhow::anyhow!("failed to crop artwork image: {err}"))?;
+    Resize::new(thumbnail_size, thumbnail_size, ResizeMethod::Bilinear)
+        .execute(&mut image)
+        .map_err(|err| anyhow::anyhow!("failed to resize artwork image: {err}"))?;
+
+    let thumbnail_bytes = image
+        .write_to_vec(ImageFormat::JPEG)
+        .map_err(|err| anyhow::anyhow!("failed to encode artwork thumbnail: {err}"))?;
+
+    Ok((thumbnail_bytes, width, height))
+}
+
+fn file_token(path: &str) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in path.trim().to_ascii_lowercase().bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+fn current_time_millis() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default()
+}
+
+fn path_to_string(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
 }
 
 fn update_track_metadata_with_id3(

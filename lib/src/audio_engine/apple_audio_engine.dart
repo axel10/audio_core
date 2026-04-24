@@ -8,6 +8,7 @@ import 'package:dart_chromaprint/dart_chromaprint.dart';
 import '../fft_processor.dart';
 import '../rust/api/simple/equalizer.dart';
 import '../rust/api/simple_api.dart' as rust;
+import '../track_artwork.dart';
 import '../track_metadata.dart';
 import 'audio_engine_interface.dart';
 import 'pcm_waveform_support.dart';
@@ -395,6 +396,28 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
     final targetPath = _normalizePath(path);
     final metadata = await rust.getTrackMetadata(path: targetPath);
     return trackMetadataFromRust(metadata);
+  }
+
+  @override
+  Future<GeneratedTrackArtwork> generateTrackArtwork({
+    required String path,
+    required String cacheRootPath,
+    required bool saveLargeArtwork,
+    int thumbnailSize = 200,
+  }) async {
+    final result = await rust.generateTrackArtwork(
+      path: _normalizePath(path),
+      cacheRootPath: _normalizePath(cacheRootPath),
+      saveLargeArtwork: saveLargeArtwork,
+      thumbnailSize: thumbnailSize,
+    );
+    return GeneratedTrackArtwork(
+      artworkFound: result.artworkFound,
+      artworkPath: result.artworkPath,
+      thumbnailPath: result.thumbnailPath,
+      artworkWidth: result.artworkWidth,
+      artworkHeight: result.artworkHeight,
+    );
   }
 
   @override
