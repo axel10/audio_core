@@ -50,6 +50,17 @@ pub mod controller {
         pub mode: FadeMode,
     }
 
+    impl Default for FadeSettings {
+        fn default() -> Self {
+            Self {
+                fade_on_switch: true,
+                fade_on_pause_resume: true,
+                duration_ms: 250,
+                mode: FadeMode::Crossfade,
+            }
+        }
+    }
+
     #[derive(Debug, Clone, Default)]
     pub struct PlaybackState {
         pub playback_state: Option<String>,
@@ -88,6 +99,9 @@ pub mod controller {
     }
     pub fn get_audio_duration_ms() -> i64 {
         0
+    }
+    pub fn get_audio_pcm_channel_count(_path: Option<String>) -> Result<i32, String> {
+        Ok(2)
     }
     pub fn is_audio_playing() -> bool {
         false
