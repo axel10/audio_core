@@ -85,12 +85,18 @@ Future<Map<String, int>> _generateRustThemeColors(File imageFile) async {
     isNotNull,
     reason: 'Expected theme colors blob for ${imageFile.path}',
   );
+  expect(
+    result.thumbnailPath,
+    isNotNull,
+    reason: 'Expected thumbnail path for ${imageFile.path}',
+  );
 
   return _decodeThemeColorsBlob(result.themeColorsBlob!);
 }
 
 Future<Map<String, int>> _generateOriginalThemeColors(File imageFile) async {
-  final encodedImage = await _readEncodedImage(imageFile);
+  final thumbnailPath = await _generateRustThumbnailPath(imageFile);
+  final encodedImage = await _readEncodedImageFromFile(File(thumbnailPath));
   final palette = await original_palette.PaletteGenerator.fromByteData(
     encodedImage,
     maximumColorCount: _paletteMaxColors,
@@ -98,7 +104,59 @@ Future<Map<String, int>> _generateOriginalThemeColors(File imageFile) async {
   return _themeColorsFromPalette(palette);
 }
 
-Future<original_palette.EncodedImage> _readEncodedImage(File imageFile) async {
+Future<String> _generateRustThumbnailPath(File imageFile) async {
+  final tempDir = await Directory.systemTemp.createTemp('audio_core_palette_ref_');
+  addTearDown(() async {
+    if (await tempDir.exists()) {
+      await tempDir.delete(recursive: true);
+    }
+  });
+
+  final sampleAudioSource = _resolveExistingFile(const <String>[
+    'rust/lofty-rs/tests/files/assets/minimal/full_test.mp3',
+    'rust/lofty-rs/tests/taglib/data/bladeenc.mp3',
+    'android/src/main/cpp/chromaprint/tests/data/test.mp3',
+  ]);
+
+  final tempAudio = File('${tempDir.path}${Platform.pathSeparator}sample.mp3');
+  await sampleAudioSource.copy(tempAudio.path);
+
+  await removeAllTags(path: tempAudio.path);
+  await updateTrackMetadata(
+    path: tempAudio.path,
+    metadata: TrackMetadataUpdate(
+      genres: const <String>[],
+      pictures: <TrackPicture>[
+        TrackPicture(
+          bytes: await imageFile.readAsBytes(),
+          mimeType: 'image/jpeg',
+          pictureType: 'Front Cover',
+        ),
+      ],
+    ),
+  );
+
+  final cacheRoot = Directory('${tempDir.path}${Platform.pathSeparator}cache');
+  await cacheRoot.create(recursive: true);
+
+  final result = await generateTrackArtwork(
+    path: tempAudio.path,
+    cacheRootPath: cacheRoot.path,
+    saveLargeArtwork: false,
+    thumbnailSize: generatedArtworkThumbnailSize,
+  );
+
+  expect(
+    result.thumbnailPath,
+    isNotNull,
+    reason: 'Expected thumbnail path for ${imageFile.path}',
+  );
+  return result.thumbnailPath!;
+}
+
+Future<original_palette.EncodedImage> _readEncodedImageFromFile(
+  File imageFile,
+) async {
   final bytes = await imageFile.readAsBytes();
   final codec = await ui.instantiateImageCodec(bytes);
   final frame = await codec.getNextFrame();

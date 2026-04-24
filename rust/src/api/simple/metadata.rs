@@ -62,7 +62,7 @@ pub struct TrackArtworkResult {
     pub theme_colors_blob: Option<Vec<u8>>,
 }
 
-const PALETTE_MAX_COLORS: usize = 20;
+const PALETTE_MAX_COLORS: usize = 16;
 const QUANTIZE_WORD_MASK: u8 = 0xF8;
 
 pub fn update_track_metadata(path: String, metadata: TrackMetadataUpdate) -> anyhow::Result<()> {
@@ -250,6 +250,7 @@ fn quantize_palette_colors(
     max_colors: usize,
 ) -> Vec<PaletteColor> {
     let mut histogram = HashMap::<u32, usize>::new();
+    let mut colors = Vec::<u32>::new();
 
     for pixel in pixels.chunks_exact(channels_per_pixel) {
         let alpha = if channels_per_pixel >= 4 {
@@ -262,26 +263,33 @@ fn quantize_palette_colors(
         }
 
         let quantized = quantize_rgb(pixel[0], pixel[1], pixel[2]);
+        if !histogram.contains_key(&quantized) {
+            colors.push(quantized);
+        }
         *histogram.entry(quantized).or_insert(0) += 1;
     }
 
     histogram.retain(|color, _| !should_ignore_color(*color));
+    colors.retain(|color| !should_ignore_color(*color));
     if histogram.is_empty() {
         return Vec::new();
     }
 
-    if histogram.len() <= max_colors {
-        return histogram
+    if colors.len() <= max_colors {
+        return colors
             .into_iter()
-            .map(|(color, population)| PaletteColor::new(color, population))
+            .map(|color| PaletteColor::new(color, histogram[&color]))
             .collect();
     }
 
-    quantize_histogram(histogram, max_colors)
+    quantize_histogram(histogram, colors, max_colors)
 }
 
-fn quantize_histogram(histogram: HashMap<u32, usize>, max_colors: usize) -> Vec<PaletteColor> {
-    let mut colors = histogram.keys().copied().collect::<Vec<_>>();
+fn quantize_histogram(
+    histogram: HashMap<u32, usize>,
+    mut colors: Vec<u32>,
+    max_colors: usize,
+) -> Vec<PaletteColor> {
     if colors.is_empty() {
         return Vec::new();
     }
