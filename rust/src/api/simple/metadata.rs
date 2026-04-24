@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use lofty::config::WriteOptions;
+use lofty::config::{ParseOptions, WriteOptions};
 use lofty::prelude::*;
 use lofty::probe::Probe;
 use lofty::tag::{ItemKey, Tag, TagType};
@@ -153,10 +153,49 @@ fn should_use_id3(path: &str) -> bool {
 }
 
 fn extract_embedded_artwork(path: &str) -> Option<TrackPicture> {
-    get_track_metadata(path.to_string())
-        .pictures
-        .into_iter()
-        .next()
+    if should_use_id3(path) {
+        return extract_embedded_artwork_with_id3(path);
+    }
+
+    extract_embedded_artwork_with_lofty(path)
+}
+
+fn extract_embedded_artwork_with_id3(path: &str) -> Option<TrackPicture> {
+    let tag = Id3Tag::read_from_path(path).ok()?;
+    let picture = tag.pictures().next()?;
+    Some(TrackPicture {
+        bytes: picture.data.clone(),
+        mime_type: picture.mime_type.clone(),
+        picture_type: id3_picture_type_to_label(picture.picture_type),
+        description: if picture.description.is_empty() {
+            None
+        } else {
+            Some(picture.description.clone())
+        },
+    })
+}
+
+fn extract_embedded_artwork_with_lofty(path: &str) -> Option<TrackPicture> {
+    let tagged_file = Probe::open(path)
+        .and_then(|probe| {
+            probe
+                .options(ParseOptions::new().read_properties(false))
+                .read()
+        })
+        .ok()?;
+    let tag = tagged_file
+        .primary_tag()
+        .or_else(|| tagged_file.first_tag())?;
+    let picture = tag.pictures().iter().next()?;
+    Some(TrackPicture {
+        bytes: picture.data().to_vec(),
+        mime_type: picture
+            .mime_type()
+            .map(|mime| mime.to_string())
+            .unwrap_or_else(|| "image/jpeg".to_string()),
+        picture_type: lofty_picture_type_to_label(picture.pic_type()),
+        description: picture.description().map(str::to_string),
+    })
 }
 
 fn build_square_thumbnail(
