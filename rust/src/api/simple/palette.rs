@@ -580,7 +580,7 @@ impl PriorityColorBox {
 
 impl PartialEq for PriorityColorBox {
     fn eq(&self, other: &Self) -> bool {
-        self.0.volume() == other.0.volume() && self.0.population == other.0.population
+        self.0.volume() == other.0.volume()
     }
 }
 
@@ -594,10 +594,7 @@ impl PartialOrd for PriorityColorBox {
 
 impl Ord for PriorityColorBox {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.0
-            .volume()
-            .cmp(&other.0.volume())
-            .then_with(|| self.0.population.cmp(&other.0.population))
+        self.0.volume().cmp(&other.0.volume())
     }
 }
 
