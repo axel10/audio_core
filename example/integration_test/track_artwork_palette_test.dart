@@ -10,7 +10,7 @@ import 'package:integration_test/integration_test.dart';
 
 import 'palette/palette_generator.dart' as original_palette;
 
-const int _paletteMaxColors = 20;
+const int _paletteMaxColors = 16;
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();

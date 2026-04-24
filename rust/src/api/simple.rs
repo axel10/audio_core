@@ -8,6 +8,7 @@ pub mod equalizer;
 pub mod fft;
 
 pub mod metadata;
+pub mod palette;
 
 #[cfg(any(target_os = "ios", target_os = "macos", target_os = "android"))]
 pub mod audio_fingerprint {
