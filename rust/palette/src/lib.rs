@@ -20,8 +20,8 @@ pub fn build_theme_colors_from_pixels_with_options(
     channels_per_pixel: usize,
     options: ThemePaletteOptions,
 ) -> Option<BTreeMap<String, u32>> {
-    let palette_colors = quantize_palette_colors(pixels, channels_per_pixel, PALETTE_MAX_COLORS);
-    let theme_colors = select_theme_colors(palette_colors, options);
+    let (palette_colors, mesh_colors) = quantize_palette_colors(pixels, channels_per_pixel, PALETTE_MAX_COLORS);
+    let theme_colors = select_theme_colors(palette_colors, mesh_colors, options);
     if theme_colors.is_empty() {
         return None;
     }
@@ -53,12 +53,13 @@ fn quantize_palette_colors(
     pixels: &[u8],
     channels_per_pixel: usize,
     max_colors: usize,
-) -> Vec<PaletteColor> {
+) -> (Vec<PaletteColor>, Vec<PaletteColor>) {
     if channels_per_pixel < 3 {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
 
     let mut histogram = HashMap::<u32, usize>::new();
+    let mut ignored_histogram = HashMap::<u32, usize>::new();
     let mut colors = Vec::<u32>::new();
 
     for pixel in pixels.chunks_exact(channels_per_pixel) {
@@ -72,26 +73,36 @@ fn quantize_palette_colors(
         }
 
         let quantized = quantize_rgb(pixel[0], pixel[1], pixel[2]);
-        if !histogram.contains_key(&quantized) {
-            colors.push(quantized);
+        if should_ignore_color(quantized) {
+            *ignored_histogram.entry(quantized).or_insert(0) += 1;
+        } else {
+            if !histogram.contains_key(&quantized) {
+                colors.push(quantized);
+            }
+            *histogram.entry(quantized).or_insert(0) += 1;
         }
-        *histogram.entry(quantized).or_insert(0) += 1;
     }
 
-    histogram.retain(|color, _| !should_ignore_color(*color));
-    colors.retain(|color| !should_ignore_color(*color));
-    if histogram.is_empty() {
-        return Vec::new();
-    }
-
-    if colors.len() <= max_colors {
-        return colors
+    let theme_colors = if histogram.is_empty() {
+        Vec::new()
+    } else if colors.len() <= max_colors {
+        colors
             .into_iter()
             .map(|color| PaletteColor::new(color, histogram[&color]))
-            .collect();
-    }
+            .collect()
+    } else {
+        quantize_histogram(histogram, colors, max_colors)
+    };
 
-    quantize_histogram(histogram, colors, max_colors)
+    let mut mesh_colors = theme_colors.clone();
+    let mut ignored_counts: Vec<_> = ignored_histogram.into_iter().collect();
+    ignored_counts.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+    for (color, pop) in ignored_counts.into_iter().take(8) {
+        mesh_colors.push(PaletteColor::new(color, pop));
+    }
+    mesh_colors.sort_by(|a, b| b.population.cmp(&a.population));
+
+    (theme_colors, mesh_colors)
 }
 
 fn quantize_histogram(
@@ -139,6 +150,7 @@ fn quantize_histogram(
 
 fn select_theme_colors(
     mut palette_colors: Vec<PaletteColor>,
+    mesh_colors: Vec<PaletteColor>,
     options: ThemePaletteOptions,
 ) -> BTreeMap<String, PaletteColor> {
     if palette_colors.is_empty() {
@@ -175,7 +187,7 @@ fn select_theme_colors(
 
     harmonize_theme_colors(&mut theme_colors, &hue_anchors, hue_cohesion);
 
-    if let Some(mesh_combo) = select_mesh_colors(&palette_colors, options.mesh_muddy_penalty_multiplier) {
+    if let Some(mesh_combo) = select_mesh_colors(&mesh_colors, options.mesh_muddy_penalty_multiplier) {
         theme_colors.insert("mesh1".to_string(), mesh_combo[0].clone());
         theme_colors.insert("mesh2".to_string(), mesh_combo[1].clone());
         theme_colors.insert("mesh3".to_string(), mesh_combo[2].clone());
@@ -954,7 +966,7 @@ fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64, muddy_penalty_m
             let h_dist = circular_hue_distance(combo[i].oklch.h, combo[j].oklch.h);
             if h_dist > 45.0 && h_dist < 135.0 {
                 let chroma_product = combo[i].oklch.c * combo[j].oklch.c;
-                clash_penalty += chroma_product * 1000.0 * muddy_penalty_multiplier;
+                clash_penalty += chroma_product * 300.0 * muddy_penalty_multiplier;
             }
         }
     }
@@ -976,7 +988,7 @@ fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64, muddy_penalty_m
     }
     
     let over_chroma_penalty = if c_mean > 0.15 { (c_mean - 0.15) * 5.0 } else { 0.0 };
-    let cohesion_penalty = l_var * 5.0 + c_var * 5.0;
+    let cohesion_penalty = l_var * 1.0 + c_var * 1.0;
 
     pop_score * 2.0 + distinct_score - clash_penalty - cohesion_penalty - over_chroma_penalty
 }
@@ -991,7 +1003,7 @@ mod tests {
             0x08, 0x18, 0x28, 0xff, 0x08, 0x18, 0x28, 0xff, 0x30, 0x40, 0x50, 0xff,
         ];
 
-        let palette = quantize_palette_colors(&pixels, 4, PALETTE_MAX_COLORS);
+        let (palette, _) = quantize_palette_colors(&pixels, 4, PALETTE_MAX_COLORS);
 
         assert_eq!(palette.len(), 2);
         assert_eq!(palette[0].rgb, pack_rgb(0x08, 0x18, 0x28));
@@ -1008,7 +1020,7 @@ mod tests {
 
         let theme_colors = build_theme_colors_from_pixels(&pixels, 4).expect("theme colors");
 
-        assert_eq!(theme_colors.len(), 2);
+        assert_eq!(theme_colors.len(), 6);
         assert_eq!(theme_colors.get("dominant"), Some(&0xff78_7878));
         assert_eq!(theme_colors.get("muted"), Some(&0xff78_7878));
     }
@@ -1035,10 +1047,14 @@ mod tests {
 
         let loose = select_theme_colors(
             palette_colors.clone(),
+            palette_colors.clone(),
             ThemePaletteOptions { hue_cohesion: 0.0, ..Default::default() },
         );
-        let cohesive =
-            select_theme_colors(palette_colors, ThemePaletteOptions { hue_cohesion: 1.0, ..Default::default() });
+        let cohesive = select_theme_colors(
+            palette_colors.clone(),
+            palette_colors,
+            ThemePaletteOptions { hue_cohesion: 1.0, ..Default::default() },
+        );
 
         assert_eq!(loose.get("darkVibrant").map(|c| c.rgb), Some(0x008484));
         assert_eq!(cohesive.get("darkVibrant").map(|c| c.rgb), Some(0x008484));
