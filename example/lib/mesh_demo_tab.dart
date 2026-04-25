@@ -30,7 +30,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
   late final Directory _cacheRoot;
   double _hueCohesion = 0.58;
   double _meshMuddyPenaltyMultiplier = 1.0;
-  bool _showUi = true;
+  bool _showFullUi = true;
   List<Color> _meshColors = _fallbackColors;
   List<_MeshThemePreset> _themePresets = const [];
   String _activeThemeSource = 'auto';
@@ -39,6 +39,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
   String? _errorText;
   String? _trackedKey;
   Timer? _debounceTimer;
+  String? _artworkPath;
   int _requestToken = 0;
 
   @override
@@ -72,7 +73,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
 
   void _toggleUiVisibility() {
     setState(() {
-      _showUi = !_showUi;
+      _showFullUi = !_showFullUi;
     });
   }
 
@@ -105,6 +106,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
       setState(() {
         _trackedKey = trackKey;
         _meshColors = _fallbackColors;
+        _artworkPath = null;
         _themePresets = const [];
         _activeThemeSource = 'auto';
         _statusText = 'Load a song with embedded artwork to drive the mesh.';
@@ -129,6 +131,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
         cacheRootPath: _cacheRoot.path,
         saveLargeArtwork: false,
         options: TrackArtworkOptions(
+          thumbnailSize: 600,
           hueCohesion: _hueCohesion,
           meshMuddyPenaltyMultiplier: _meshMuddyPenaltyMultiplier,
         ),
@@ -142,6 +145,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
       );
       if (!mounted || requestToken != _requestToken) return;
       setState(() {
+        _artworkPath = artwork.artworkPath ?? artwork.thumbnailPath;
         _meshColors = colors;
         _themePresets = themePresets;
         _activeThemeSource = 'auto';
@@ -154,6 +158,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
     } catch (e) {
       if (!mounted || requestToken != _requestToken) return;
       setState(() {
+        _artworkPath = null;
         _meshColors = _fallbackColors;
         _themePresets = const [];
         _activeThemeSource = 'auto';
@@ -404,297 +409,352 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
             ),
           ),
         ),
-        if (_showUi)
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.black.withValues(alpha: 0.16),
-                    Colors.black.withValues(alpha: 0.34),
-                  ],
-                ),
-              ),
-            ),
+        Positioned.fill(
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            child: _showFullUi
+                ? DecoratedBox(
+                    key: const ValueKey('scrim'),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.16),
+                          Colors.black.withValues(alpha: 0.34),
+                        ],
+                      ),
+                    ),
+                  )
+                : const SizedBox.shrink(),
           ),
-        if (_showUi)
-          SafeArea(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildGlassCard(
-                    context: context,
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.blur_on, size: 34),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+        ),
+        SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      const SizedBox(height: 20),
+                      _buildArtworkCover(),
+                      if (_showFullUi) ...[
+                        const SizedBox(height: 32),
+                        _buildGlassCard(
+                          context: context,
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
                                   children: [
-                                    Text(
-                                      'Mesh Artwork Lab',
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.headlineSmall,
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'The mesh colors come from the current song cover, then the slider retunes hue cohesion in real time.',
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodyMedium,
+                                    const Icon(Icons.blur_on, size: 28),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Mesh Artwork Lab',
+                                            style: Theme.of(
+                                              context,
+                                            ).textTheme.titleLarge,
+                                          ),
+                                          Text(
+                                            'Sampled from cover artwork',
+                                            style: Theme.of(
+                                              context,
+                                            ).textTheme.bodySmall,
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ],
                                 ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            title == null || title.isEmpty
-                                ? 'No track selected'
-                                : title,
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            subtitle,
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          const SizedBox(height: 16),
-                          Wrap(
-                            spacing: 10,
-                            runSpacing: 10,
-                            children: [
-                              Chip(
-                                avatar: const Icon(
-                                  Icons.palette_outlined,
-                                  size: 18,
+                                const SizedBox(height: 12),
+                                Text(
+                                  title == null || title.isEmpty
+                                      ? 'No track selected'
+                                      : title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.titleMedium,
                                 ),
-                                label: Text(
-                                  '${_hueCohesion.toStringAsFixed(2)} hue cohesion',
+                                Text(
+                                  subtitle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.bodySmall,
                                 ),
-                              ),
-                              Chip(
-                                avatar: const Icon(
-                                  Icons.warning_amber_rounded,
-                                  size: 18,
-                                ),
-                                label: Text(
-                                  '${_meshMuddyPenaltyMultiplier.toStringAsFixed(2)} muddy penalty',
-                                ),
-                              ),
-                              Chip(
-                                avatar: const Icon(
-                                  Icons.auto_awesome,
-                                  size: 18,
-                                ),
-                                label: Text(
-                                  _isLoading
-                                      ? 'Sampling cover'
-                                      : 'Live mesh background',
-                                ),
-                              ),
-                            ],
-                          ),
-                          if (_themePresets.isNotEmpty) ...[
-                            const SizedBox(height: 16),
-                            Text(
-                              'Tap a cover-derived palette to apply it to the mesh.',
-                              style: Theme.of(context).textTheme.bodyMedium,
-                            ),
-                            const SizedBox(height: 12),
-                            Wrap(
-                              spacing: 12,
-                              runSpacing: 12,
-                              children: _themePresets
-                                  .map((preset) {
-                                    final selected =
-                                        _activeThemeSource == preset.sourceId;
-                                    return _ThemePresetButton(
-                                      preset: preset,
-                                      selected: selected,
-                                      onPressed: () =>
-                                          _applyThemePreset(preset),
-                                    );
-                                  })
-                                  .toList(growable: false),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  _buildGlassCard(
-                    context: context,
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.tune,
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Hue Cohesion',
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'Drag the slider to see the artwork palette tighten or loosen around the cover art hues.',
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                          const SizedBox(height: 12),
-                          Slider(
-                            value: _hueCohesion,
-                            min: 0.0,
-                            max: 1.0,
-                            divisions: 100,
-                            label: _hueCohesion.toStringAsFixed(2),
-                            onChanged: (value) {
-                              setState(() => _hueCohesion = value);
-                              _refreshPalette(immediate: false);
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  _buildGlassCard(
-                    context: context,
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.auto_fix_high,
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Mesh Muddy Penalty',
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'Higher values lead to cleaner, more harmonious colors by penalizing clashing combinations.',
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                          const SizedBox(height: 12),
-                          Slider(
-                            value: _meshMuddyPenaltyMultiplier,
-                            min: 0.0,
-                            max: 10.0,
-                            divisions: 100,
-                            label: _meshMuddyPenaltyMultiplier.toStringAsFixed(
-                              2,
-                            ),
-                            onChanged: (value) {
-                              setState(
-                                () => _meshMuddyPenaltyMultiplier = value,
-                              );
-                              _refreshPalette(immediate: false);
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  _buildGlassCard(
-                    context: context,
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.color_lens_outlined,
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Mesh Colors',
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Wrap(
-                            spacing: 12,
-                            runSpacing: 12,
-                            children: List.generate(_meshColors.length, (
-                              index,
-                            ) {
-                              final color = _meshColors[index];
-                              return _ColorSwatch(
-                                color: color,
-                                label: _formatHex(color),
-                              );
-                            }),
-                          ),
-                          if (_statusText != null) ...[
-                            const SizedBox(height: 16),
-                            Text(
-                              _statusText!,
-                              style: Theme.of(context).textTheme.bodyMedium,
-                            ),
-                          ],
-                          if (_errorText != null) ...[
-                            const SizedBox(height: 8),
-                            Text(
-                              _errorText!,
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(
-                                    color: Theme.of(context).colorScheme.error,
+                                const SizedBox(height: 12),
+                                if (_themePresets.isNotEmpty)
+                                  SingleChildScrollView(
+                                    scrollDirection: Axis.horizontal,
+                                    child: Row(
+                                      children: _themePresets.map((preset) {
+                                        final selected =
+                                            _activeThemeSource ==
+                                            preset.sourceId;
+                                        return Padding(
+                                          padding: const EdgeInsets.only(
+                                            right: 8,
+                                          ),
+                                          child: _ThemePresetButton(
+                                            preset: preset,
+                                            selected: selected,
+                                            onPressed: () =>
+                                                _applyThemePreset(preset),
+                                          ),
+                                        );
+                                      }).toList(),
+                                    ),
                                   ),
+                              ],
                             ),
-                          ],
-                        ],
-                      ),
-                    ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _buildGlassCard(
+                          context: context,
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.color_lens_outlined,
+                                      size: 20,
+                                      color:
+                                          Theme.of(context).colorScheme.primary,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Mesh Colors',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.titleSmall,
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: List.generate(_meshColors.length, (
+                                    index,
+                                  ) {
+                                    final color = _meshColors[index];
+                                    return _ColorSwatch(
+                                      color: color,
+                                      label: _formatHex(color),
+                                    );
+                                  }),
+                                ),
+                                if (_statusText != null) ...[
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    _statusText!,
+                                    style:
+                                        Theme.of(context).textTheme.bodySmall,
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
+              _buildCompactControls(context),
+              const SizedBox(height: 16),
+            ],
           ),
+        ),
         Positioned(
           top: 12,
           right: 12,
           child: SafeArea(
             child: IconButton.filledTonal(
               onPressed: _toggleUiVisibility,
-              icon: Icon(_showUi ? Icons.fullscreen : Icons.dashboard_outlined),
-              tooltip: _showUi ? 'Hide UI' : 'Show UI',
+              icon: Icon(
+                _showFullUi ? Icons.fullscreen : Icons.dashboard_outlined,
+              ),
+              tooltip: _showFullUi ? 'Hide Details' : 'Show Details',
             ),
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildCompactControls(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: _buildGlassCard(
+        context: context,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  IconButton.filledTonal(
+                    iconSize: 20,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 40,
+                      minHeight: 40,
+                    ),
+                    icon: const Icon(Icons.skip_previous),
+                    onPressed: () => widget.controller.playlist.playPrevious(),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton.filledTonal(
+                    iconSize: 20,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 40,
+                      minHeight: 40,
+                    ),
+                    icon: const Icon(Icons.skip_next),
+                    onPressed: () => widget.controller.playlist.playNext(),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        _buildDenseSlider(
+                          label: 'Hue',
+                          value: _hueCohesion,
+                          min: 0.0,
+                          max: 1.0,
+                          onChanged: (v) {
+                            setState(() => _hueCohesion = v);
+                            _refreshPalette(immediate: false);
+                          },
+                        ),
+                        _buildDenseSlider(
+                          label: 'Mud',
+                          value: _meshMuddyPenaltyMultiplier,
+                          min: 0.0,
+                          max: 2.0,
+                          onChanged: (v) {
+                            setState(() => _meshMuddyPenaltyMultiplier = v);
+                            _refreshPalette(immediate: false);
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDenseSlider({
+    required String label,
+    required double value,
+    required double min,
+    required double max,
+    required ValueChanged<double> onChanged,
+  }) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 32,
+          child: Text(
+            label,
+            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+          ),
+        ),
+        Expanded(
+          child: SizedBox(
+            height: 32,
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 2,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+              ),
+              child: Slider(
+                value: value,
+                min: min,
+                max: max,
+                onChanged: onChanged,
+              ),
+            ),
+          ),
+        ),
+        SizedBox(
+          width: 32,
+          child: Text(
+            value.toStringAsFixed(2),
+            textAlign: TextAlign.end,
+            style: const TextStyle(fontSize: 10),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildArtworkCover() {
+    final image = _artworkPath != null && File(_artworkPath!).existsSync()
+        ? FileImage(File(_artworkPath!))
+        : null;
+
+    return Center(
+      child: Container(
+        width: 380,
+        height: 380,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(32),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.24),
+              blurRadius: 40,
+              offset: const Offset(0, 20),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(32),
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 500),
+            child: image != null
+                ? Image(
+                    key: ValueKey(_artworkPath),
+                    image: image,
+                    width: 380,
+                    height: 380,
+                    fit: BoxFit.cover,
+                  )
+                : Container(
+                    key: const ValueKey('fallback'),
+                    width: 380,
+                    height: 380,
+                    color: Colors.white.withValues(alpha: 0.1),
+                    child: const Icon(
+                      Icons.music_note,
+                      size: 120,
+                      color: Colors.white24,
+                    ),
+                  ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -713,8 +773,8 @@ class _ColorSwatch extends StatelessWidget {
         : Colors.black;
 
     return Container(
-      width: 110,
-      padding: const EdgeInsets.all(12),
+      width: 80,
+      padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: color,
         borderRadius: BorderRadius.circular(18),
@@ -774,8 +834,8 @@ class _ThemePresetButton extends StatelessWidget {
         onTap: onPressed,
         borderRadius: BorderRadius.circular(20),
         child: Container(
-          width: 180,
-          padding: const EdgeInsets.all(12),
+          width: 150,
+          padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(20),
             border: Border.all(color: outlineColor, width: selected ? 1.5 : 1),
