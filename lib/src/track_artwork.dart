@@ -8,7 +8,7 @@ class TrackArtworkOptions {
   const TrackArtworkOptions({
     this.thumbnailSize = generatedArtworkThumbnailSize,
     this.hueCohesion = 0.0,
-    this.meshMuddyPenaltyMultiplier = 0.0,
+    this.meshMuddyPenaltyMultiplier = 1.0,
   });
 
   final int thumbnailSize;

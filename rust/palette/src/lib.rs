@@ -20,7 +20,8 @@ pub fn build_theme_colors_from_pixels_with_options(
     channels_per_pixel: usize,
     options: ThemePaletteOptions,
 ) -> Option<BTreeMap<String, u32>> {
-    let (palette_colors, mesh_colors) = quantize_palette_colors(pixels, channels_per_pixel, PALETTE_MAX_COLORS);
+    let (palette_colors, mesh_colors) =
+        quantize_palette_colors(pixels, channels_per_pixel, PALETTE_MAX_COLORS);
     let theme_colors = select_theme_colors(palette_colors, mesh_colors, options);
     if theme_colors.is_empty() {
         return None;
@@ -187,7 +188,9 @@ fn select_theme_colors(
 
     harmonize_theme_colors(&mut theme_colors, &hue_anchors, hue_cohesion);
 
-    if let Some(mesh_combo) = select_mesh_colors(&mesh_colors, options.mesh_muddy_penalty_multiplier) {
+    if let Some(mesh_combo) =
+        select_mesh_colors(&mesh_colors, options.mesh_muddy_penalty_multiplier)
+    {
         theme_colors.insert("mesh1".to_string(), mesh_combo[0].clone());
         theme_colors.insert("mesh2".to_string(), mesh_combo[1].clone());
         theme_colors.insert("mesh3".to_string(), mesh_combo[2].clone());
@@ -897,13 +900,21 @@ fn oklab_distance(c1: &OklabColor, c2: &OklabColor) -> f64 {
     ((c1.l - c2.l).powi(2) + (c1.a - c2.a).powi(2) + (c1.b - c2.b).powi(2)).sqrt()
 }
 
-fn select_mesh_colors(palette_colors: &[PaletteColor], muddy_penalty_multiplier: f64) -> Option<[PaletteColor; 4]> {
+fn select_mesh_colors(
+    palette_colors: &[PaletteColor],
+    muddy_penalty_multiplier: f64,
+) -> Option<[PaletteColor; 4]> {
     let n = palette_colors.len();
     if n < 4 {
         if n == 0 {
             return None;
         }
-        let mut combo = [palette_colors[0].clone(), palette_colors[0].clone(), palette_colors[0].clone(), palette_colors[0].clone()];
+        let mut combo = [
+            palette_colors[0].clone(),
+            palette_colors[0].clone(),
+            palette_colors[0].clone(),
+            palette_colors[0].clone(),
+        ];
         for i in 0..4 {
             combo[i] = palette_colors[i % n].clone();
         }
@@ -919,7 +930,12 @@ fn select_mesh_colors(palette_colors: &[PaletteColor], muddy_penalty_multiplier:
         for j in (i + 1)..n {
             for k in (j + 1)..n {
                 for m in (k + 1)..n {
-                    let combo = [&palette_colors[i], &palette_colors[j], &palette_colors[k], &palette_colors[m]];
+                    let combo = [
+                        &palette_colors[i],
+                        &palette_colors[j],
+                        &palette_colors[k],
+                        &palette_colors[m],
+                    ];
                     let score = evaluate_mesh_combo(&combo, max_pop, muddy_penalty_multiplier);
                     if score > best_score {
                         best_score = score;
@@ -934,7 +950,7 @@ fn select_mesh_colors(palette_colors: &[PaletteColor], muddy_penalty_multiplier:
             }
         }
     }
-    
+
     if let Some(mut combo) = best_combo {
         combo.sort_by(|a, b| b.oklch.l.partial_cmp(&a.oklch.l).unwrap_or(Ordering::Equal));
         Some(combo)
@@ -943,8 +959,15 @@ fn select_mesh_colors(palette_colors: &[PaletteColor], muddy_penalty_multiplier:
     }
 }
 
-fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64, muddy_penalty_multiplier: f64) -> f64 {
-    let pop_score = combo.iter().map(|c| c.population as f64 / max_pop).sum::<f64>();
+fn evaluate_mesh_combo(
+    combo: &[&PaletteColor; 4],
+    max_pop: f64,
+    muddy_penalty_multiplier: f64,
+) -> f64 {
+    let pop_score = combo
+        .iter()
+        .map(|c| c.population as f64 / max_pop)
+        .sum::<f64>();
 
     let mut min_dist = f64::INFINITY;
     for i in 0..4 {
@@ -953,23 +976,22 @@ fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64, muddy_penalty_m
             min_dist = min_dist.min(dist);
         }
     }
-    
+
     let distinct_score = if min_dist < 0.04 {
         -20.0
     } else {
         (min_dist.min(0.15) - 0.04) * 10.0
     };
 
+    let template_bonus = mesh_template_bonus(combo);
+
     let mut clash_penalty = 0.0;
-    let mut contrast_reward = 0.0;
     for i in 0..4 {
         for j in (i + 1)..4 {
             let h_dist = circular_hue_distance(combo[i].oklch.h, combo[j].oklch.h);
             let chroma_product = combo[i].oklch.c * combo[j].oklch.c;
             if h_dist > 45.0 && h_dist < 120.0 {
-                clash_penalty += chroma_product * 300.0 * muddy_penalty_multiplier;
-            } else if h_dist >= 120.0 {
-                contrast_reward += chroma_product * 25.0;
+                clash_penalty += chroma_product * 420.0 * muddy_penalty_multiplier;
             }
         }
     }
@@ -989,12 +1011,148 @@ fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64, muddy_penalty_m
         l_var += (c.oklch.l - l_mean).powi(2);
         c_var += (c.oklch.c - c_mean).powi(2);
     }
-    
+
     let vibrancy_reward = c_mean * 5.0;
-    let over_chroma_penalty = if c_mean > 0.15 { (c_mean - 0.15) * 15.0 } else { 0.0 };
+    let over_chroma_penalty = if c_mean > 0.15 {
+        (c_mean - 0.15) * 15.0
+    } else {
+        0.0
+    };
     let cohesion_penalty = l_var * 1.0 + c_var * 1.0;
 
-    pop_score * 2.0 + distinct_score + contrast_reward + vibrancy_reward - clash_penalty - cohesion_penalty - over_chroma_penalty
+    pop_score * 2.0 + distinct_score + vibrancy_reward + template_bonus
+        - clash_penalty
+        - cohesion_penalty
+        - over_chroma_penalty
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MeshHueCluster {
+    center_hue: f64,
+    count: usize,
+    span: f64,
+    average_chroma: f64,
+    average_saturation: f64,
+}
+
+fn mesh_template_bonus(combo: &[&PaletteColor; 4]) -> f64 {
+    let hues = combo.iter().map(|color| color.oklch.h).collect::<Vec<_>>();
+    let span = minimal_circular_span(&hues);
+    let Some(cluster) = best_hue_cluster(combo, 45.0) else {
+        return if span > 155.0 {
+            -((span - 155.0) * 0.18)
+        } else {
+            0.0
+        };
+    };
+
+    let mut bonus = match cluster.count {
+        4 => 5.0,
+        3 => 4.0,
+        2 => 1.25,
+        _ => 0.0,
+    };
+
+    if cluster.span <= 48.0 {
+        bonus += (48.0 - cluster.span) / 48.0 * 1.5;
+    }
+
+    if cluster.count == 3 {
+        bonus += accent_bonus(combo, &cluster);
+    }
+
+    if span < 70.0 {
+        bonus += (70.0 - span) / 70.0 * 0.8;
+    } else if span > 155.0 {
+        bonus -= (span - 155.0) * 0.25;
+    }
+
+    bonus
+}
+
+fn best_hue_cluster(combo: &[&PaletteColor; 4], radius: f64) -> Option<MeshHueCluster> {
+    let mut best: Option<MeshHueCluster> = None;
+
+    for pivot in combo {
+        let members = combo
+            .iter()
+            .copied()
+            .filter(|candidate| circular_hue_distance(pivot.oklch.h, candidate.oklch.h) <= radius)
+            .collect::<Vec<_>>();
+
+        let count = members.len();
+        let hues = members
+            .iter()
+            .map(|color| color.oklch.h)
+            .collect::<Vec<_>>();
+        let span = minimal_circular_span(&hues);
+        let average_chroma = members.iter().map(|color| color.oklch.c).sum::<f64>() / count as f64;
+        let average_saturation = members
+            .iter()
+            .map(|color| color.hsl.saturation)
+            .sum::<f64>()
+            / count as f64;
+
+        let candidate = MeshHueCluster {
+            center_hue: pivot.oklch.h,
+            count,
+            span,
+            average_chroma,
+            average_saturation,
+        };
+
+        let replace = best
+            .as_ref()
+            .map(|current| {
+                candidate.count > current.count
+                    || (candidate.count == current.count && candidate.span < current.span)
+            })
+            .unwrap_or(true);
+
+        if replace {
+            best = Some(candidate);
+        }
+    }
+
+    best
+}
+
+fn accent_bonus(combo: &[&PaletteColor; 4], cluster: &MeshHueCluster) -> f64 {
+    let Some(accent) = combo.iter().copied().max_by(|a, b| {
+        circular_hue_distance(cluster.center_hue, a.oklch.h)
+            .partial_cmp(&circular_hue_distance(cluster.center_hue, b.oklch.h))
+            .unwrap_or(Ordering::Equal)
+    }) else {
+        return 0.0;
+    };
+
+    let accent_distance = circular_hue_distance(cluster.center_hue, accent.oklch.h);
+    if !(70.0..=155.0).contains(&accent_distance) {
+        return -1.5;
+    }
+
+    let distance_reward = 1.8 - ((accent_distance - 112.0).abs() / 42.0) * 1.2;
+    let chroma_excess = (accent.oklch.c - cluster.average_chroma * 1.05).max(0.0);
+    let saturation_excess = (accent.hsl.saturation - cluster.average_saturation * 1.15).max(0.0);
+
+    distance_reward - chroma_excess * 12.0 - saturation_excess * 2.0
+}
+
+fn minimal_circular_span(hues: &[f64]) -> f64 {
+    match hues.len() {
+        0 | 1 => 0.0,
+        _ => {
+            let mut sorted = hues.to_vec();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+
+            let mut max_gap: f64 = 0.0;
+            for index in 0..sorted.len() - 1 {
+                max_gap = max_gap.max(sorted[index + 1] - sorted[index]);
+            }
+            max_gap = max_gap.max(360.0 - sorted.last().copied().unwrap_or_default() + sorted[0]);
+            360.0 - max_gap
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1052,12 +1210,18 @@ mod tests {
         let loose = select_theme_colors(
             palette_colors.clone(),
             palette_colors.clone(),
-            ThemePaletteOptions { hue_cohesion: 0.0, ..Default::default() },
+            ThemePaletteOptions {
+                hue_cohesion: 0.0,
+                ..Default::default()
+            },
         );
         let cohesive = select_theme_colors(
             palette_colors.clone(),
             palette_colors,
-            ThemePaletteOptions { hue_cohesion: 1.0, ..Default::default() },
+            ThemePaletteOptions {
+                hue_cohesion: 1.0,
+                ..Default::default()
+            },
         );
 
         assert_eq!(loose.get("darkVibrant").map(|c| c.rgb), Some(0x008484));
@@ -1097,5 +1261,39 @@ mod tests {
         let harmonized = theme_colors.get("lightVibrant").expect("light vibrant");
         assert!(circular_hue_distance(harmonized.hsl.hue, 0.0) < 120.0);
         assert!(harmonized.hsl.saturation > 0.5);
+    }
+
+    #[test]
+    fn mesh_scoring_prefers_cohesive_warm_clusters_over_strong_rgb_contrast() {
+        let cohesive_combo = [
+            PaletteColor::new(pack_rgb(0xf2, 0x87, 0x41), 100),
+            PaletteColor::new(pack_rgb(0xe8, 0x5d, 0x3d), 100),
+            PaletteColor::new(pack_rgb(0xd9, 0x4f, 0x70), 100),
+            PaletteColor::new(pack_rgb(0xf0, 0xa5, 0x6c), 100),
+        ];
+        let clash_combo = [
+            PaletteColor::new(pack_rgb(0xff, 0x20, 0x20), 100),
+            PaletteColor::new(pack_rgb(0x20, 0xff, 0x20), 100),
+            PaletteColor::new(pack_rgb(0x20, 0x20, 0xff), 100),
+            PaletteColor::new(pack_rgb(0xff, 0xe0, 0x20), 100),
+        ];
+
+        let cohesive_refs = [
+            &cohesive_combo[0],
+            &cohesive_combo[1],
+            &cohesive_combo[2],
+            &cohesive_combo[3],
+        ];
+        let clash_refs = [
+            &clash_combo[0],
+            &clash_combo[1],
+            &clash_combo[2],
+            &clash_combo[3],
+        ];
+
+        let cohesive_score = evaluate_mesh_combo(&cohesive_refs, 100.0, 1.0);
+        let clash_score = evaluate_mesh_combo(&clash_refs, 100.0, 1.0);
+
+        assert!(cohesive_score > clash_score);
     }
 }
