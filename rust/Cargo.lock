@@ -132,6 +132,7 @@ dependencies = [
  "lofty",
  "log",
  "ndk-context",
+ "palette_core",
  "realfft",
  "rodio",
  "rusty-chromaprint",
@@ -261,6 +262,12 @@ dependencies = [
  "cpufeatures",
  "rand_core",
 ]
+
+[[package]]
+name = "color_quant"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 
 [[package]]
 name = "combine"
@@ -1220,6 +1227,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "palette_core"
+version = "0.1.0"
+dependencies = [
+ "color_quant",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "parking_lot_core"
 version = "0.9.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1566,6 +1582,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
+ "serde_derive",
 ]
 
 [[package]]

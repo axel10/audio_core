@@ -17,7 +17,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .ok_or("invalid UTF-8 file name")?;
 
         let theme_colors =
-            palette_core::debug_build_theme_colors_from_pixels(&bytes, 3).unwrap_or_default();
+            palette_core::debug_build_theme_colors_from_pixels(&bytes, infer_channels(&raw_file))
+                .unwrap_or_default();
         snapshots.insert(file_name.to_string(), theme_colors);
     }
 
@@ -28,9 +29,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn default_input_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
+        .and_then(|path| path.parent())
         .expect("crate should live under repo root")
         .join("test")
         .join("decoed_imgs")
+}
+
+fn infer_channels(path: &Path) -> usize {
+    match path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("rgba") => 4,
+        _ => 3,
+    }
 }
 
 fn sorted_raw_files(dir: &Path) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
@@ -40,7 +54,9 @@ fn sorted_raw_files(dir: &Path) -> Result<Vec<PathBuf>, Box<dyn std::error::Erro
     entries.retain(|path| {
         path.extension()
             .and_then(|value| value.to_str())
-            .is_some_and(|value| value.eq_ignore_ascii_case("raw"))
+            .is_some_and(|value| {
+                value.eq_ignore_ascii_case("raw") || value.eq_ignore_ascii_case("rgba")
+            })
     });
     entries.sort();
     Ok(entries)
