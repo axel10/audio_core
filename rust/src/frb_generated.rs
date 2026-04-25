@@ -25,7 +25,6 @@
 
 // Section: imports
 
-use std::collections::BTreeMap;
 use crate::api::simple::palette::*;
 use flutter_rust_bridge::for_generated::byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
 use flutter_rust_bridge::for_generated::{transform_result_dco, Lifetimeable, Lockable};
@@ -299,6 +298,7 @@ fn wire__crate__api__simple__metadata__generate_track_artwork_impl(
             let api_save_large_artwork = <bool>::sse_decode(&mut deserializer);
             let api_thumbnail_size = <i32>::sse_decode(&mut deserializer);
             let api_hue_cohesion = <f64>::sse_decode(&mut deserializer);
+            let api_mesh_muddy_penalty_multiplier = <f64>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -309,6 +309,7 @@ fn wire__crate__api__simple__metadata__generate_track_artwork_impl(
                             api_save_large_artwork,
                             api_thumbnail_size,
                             api_hue_cohesion,
+                            api_mesh_muddy_penalty_multiplier,
                         )?;
                         Ok(output_ok)
                     })(),
@@ -2225,14 +2226,14 @@ mod io {
     pub extern "C" fn frbgen_audio_core_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32(
         ptr: *const std::ffi::c_void,
     ) {
-        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BTreeMap < String , u32 >>>::increment_strong_count(ptr as _);
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner< BTreeMap < String , u32 >>>::increment_strong_count(ptr as _);
     }
 
     #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_audio_core_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32(
         ptr: *const std::ffi::c_void,
     ) {
-        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BTreeMap < String , u32 >>>::decrement_strong_count(ptr as _);
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner< BTreeMap < String , u32 >>>::decrement_strong_count(ptr as _);
     }
 
     #[unsafe(no_mangle)]
@@ -2278,14 +2279,14 @@ mod web {
     pub fn rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32(
         ptr: *const std::ffi::c_void,
     ) {
-        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BTreeMap < String , u32 >>>::increment_strong_count(ptr as _);
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner< BTreeMap < String , u32 >>>::increment_strong_count(ptr as _);
     }
 
     #[wasm_bindgen]
     pub fn rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32(
         ptr: *const std::ffi::c_void,
     ) {
-        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BTreeMap < String , u32 >>>::decrement_strong_count(ptr as _);
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner< BTreeMap < String , u32 >>>::decrement_strong_count(ptr as _);
     }
 
     #[wasm_bindgen]

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+pub use std::collections::BTreeMap;
 
 pub use palette_core::ThemePaletteOptions;
 use palette_core::{
@@ -56,7 +56,7 @@ fn build_theme_colors_from_image_with_options(
 pub fn debug_build_theme_colors_from_pixels(
     pixels: &[u8],
     channels_per_pixel: usize,
-) -> Option<BTreeMap<String, u32>> {
+) -> Option<std::collections::BTreeMap<String, u32>> {
     debug_build_theme_colors_from_pixels_core(pixels, channels_per_pixel)
 }
 
@@ -64,6 +64,6 @@ pub fn debug_build_theme_colors_from_pixels_with_options(
     pixels: &[u8],
     channels_per_pixel: usize,
     options: ThemePaletteOptions,
-) -> Option<BTreeMap<String, u32>> {
+) -> Option<std::collections::BTreeMap<String, u32>> {
     debug_build_theme_colors_from_pixels_with_options_core(pixels, channels_per_pixel, options)
 }

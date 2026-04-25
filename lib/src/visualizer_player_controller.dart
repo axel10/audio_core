@@ -1075,6 +1075,7 @@ class AudioCoreController extends ChangeNotifier
     required bool saveLargeArtwork,
     int thumbnailSize = generatedArtworkThumbnailSize,
     double hueCohesion = 0.0,
+    meshMuddyPenaltyMultiplier = 1.0
   }) async {
     if (!_initialized) {
       await initialize();

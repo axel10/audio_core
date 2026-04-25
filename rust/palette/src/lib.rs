@@ -175,7 +175,7 @@ fn select_theme_colors(
 
     harmonize_theme_colors(&mut theme_colors, &hue_anchors, hue_cohesion);
 
-    if let Some(mesh_combo) = select_mesh_colors(&palette_colors) {
+    if let Some(mesh_combo) = select_mesh_colors(&palette_colors, options.mesh_muddy_penalty_multiplier) {
         theme_colors.insert("mesh1".to_string(), mesh_combo[0].clone());
         theme_colors.insert("mesh2".to_string(), mesh_combo[1].clone());
         theme_colors.insert("mesh3".to_string(), mesh_combo[2].clone());
@@ -369,12 +369,24 @@ impl PaletteColor {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct ThemePaletteOptions {
     /// `0.0` keeps the current palette behavior.
     /// `1.0` strongly pulls non-dominant colors toward one or two anchor hues
     /// derived from the artwork's main theme.
     pub hue_cohesion: f64,
+    /// Multiplier for the penalty applied to muddy/clashing mesh color combinations.
+    /// Default is 1.0.
+    pub mesh_muddy_penalty_multiplier: f64,
+}
+
+impl Default for ThemePaletteOptions {
+    fn default() -> Self {
+        Self {
+            hue_cohesion: 0.0,
+            mesh_muddy_penalty_multiplier: 1.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -873,7 +885,7 @@ fn oklab_distance(c1: &OklabColor, c2: &OklabColor) -> f64 {
     ((c1.l - c2.l).powi(2) + (c1.a - c2.a).powi(2) + (c1.b - c2.b).powi(2)).sqrt()
 }
 
-fn select_mesh_colors(palette_colors: &[PaletteColor]) -> Option<[PaletteColor; 4]> {
+fn select_mesh_colors(palette_colors: &[PaletteColor], muddy_penalty_multiplier: f64) -> Option<[PaletteColor; 4]> {
     let n = palette_colors.len();
     if n < 4 {
         if n == 0 {
@@ -896,7 +908,7 @@ fn select_mesh_colors(palette_colors: &[PaletteColor]) -> Option<[PaletteColor; 
             for k in (j + 1)..n {
                 for m in (k + 1)..n {
                     let combo = [&palette_colors[i], &palette_colors[j], &palette_colors[k], &palette_colors[m]];
-                    let score = evaluate_mesh_combo(&combo, max_pop);
+                    let score = evaluate_mesh_combo(&combo, max_pop, muddy_penalty_multiplier);
                     if score > best_score {
                         best_score = score;
                         best_combo = Some([
@@ -919,7 +931,7 @@ fn select_mesh_colors(palette_colors: &[PaletteColor]) -> Option<[PaletteColor; 
     }
 }
 
-fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64) -> f64 {
+fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64, muddy_penalty_multiplier: f64) -> f64 {
     let pop_score = combo.iter().map(|c| c.population as f64 / max_pop).sum::<f64>();
 
     let mut min_dist = f64::INFINITY;
@@ -940,9 +952,9 @@ fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64) -> f64 {
     for i in 0..4 {
         for j in (i + 1)..4 {
             let h_dist = circular_hue_distance(combo[i].oklch.h, combo[j].oklch.h);
-            if h_dist > 60.0 && h_dist < 120.0 {
+            if h_dist > 45.0 && h_dist < 135.0 {
                 let chroma_product = combo[i].oklch.c * combo[j].oklch.c;
-                clash_penalty += chroma_product * 50.0;
+                clash_penalty += chroma_product * 1000.0 * muddy_penalty_multiplier;
             }
         }
     }
@@ -1023,10 +1035,10 @@ mod tests {
 
         let loose = select_theme_colors(
             palette_colors.clone(),
-            ThemePaletteOptions { hue_cohesion: 0.0 },
+            ThemePaletteOptions { hue_cohesion: 0.0, ..Default::default() },
         );
         let cohesive =
-            select_theme_colors(palette_colors, ThemePaletteOptions { hue_cohesion: 1.0 });
+            select_theme_colors(palette_colors, ThemePaletteOptions { hue_cohesion: 1.0, ..Default::default() });
 
         assert_eq!(loose.get("darkVibrant").map(|c| c.rgb), Some(0x008484));
         assert_eq!(cohesive.get("darkVibrant").map(|c| c.rgb), Some(0x008484));

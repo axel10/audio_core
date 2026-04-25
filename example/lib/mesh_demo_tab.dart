@@ -29,6 +29,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
 
   late final Directory _cacheRoot;
   double _hueCohesion = 0.58;
+  double _meshMuddyPenaltyMultiplier = 1.0;
   bool _showUi = true;
   List<Color> _meshColors = _fallbackColors;
   List<_MeshThemePreset> _themePresets = const [];
@@ -128,6 +129,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
         cacheRootPath: _cacheRoot.path,
         saveLargeArtwork: false,
         hueCohesion: _hueCohesion,
+        meshMuddyPenaltyMultiplier: _meshMuddyPenaltyMultiplier,
       );
       if (!mounted || requestToken != _requestToken) return;
 
@@ -483,6 +485,15 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
                               ),
                               Chip(
                                 avatar: const Icon(
+                                  Icons.warning_amber_rounded,
+                                  size: 18,
+                                ),
+                                label: Text(
+                                  '${_meshMuddyPenaltyMultiplier.toStringAsFixed(2)} muddy penalty',
+                                ),
+                              ),
+                              Chip(
+                                avatar: const Icon(
                                   Icons.auto_awesome,
                                   size: 18,
                                 ),
@@ -557,6 +568,49 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
                             label: _hueCohesion.toStringAsFixed(2),
                             onChanged: (value) {
                               setState(() => _hueCohesion = value);
+                              _refreshPalette(immediate: false);
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _buildGlassCard(
+                    context: context,
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.auto_fix_high,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Mesh Muddy Penalty',
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Higher values lead to cleaner, more harmonious colors by penalizing clashing combinations.',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                          const SizedBox(height: 12),
+                          Slider(
+                            value: _meshMuddyPenaltyMultiplier,
+                            min: 0.0,
+                            max: 10.0,
+                            divisions: 100,
+                            label:
+                                _meshMuddyPenaltyMultiplier.toStringAsFixed(2),
+                            onChanged: (value) {
+                              setState(() => _meshMuddyPenaltyMultiplier = value);
                               _refreshPalette(immediate: false);
                             },
                           ),

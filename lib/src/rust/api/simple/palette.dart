@@ -27,7 +27,7 @@ Future<BTreeMapStringU32?> debugBuildThemeColorsFromPixelsWithOptions({
       options: options,
     );
 
-// Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BTreeMap < String , u32 >>>
+// Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner< BTreeMap < String , u32 >>>
 abstract class BTreeMapStringU32 implements RustOpaqueInterface {}
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<ThemePaletteOptions>>

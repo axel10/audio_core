@@ -112,6 +112,7 @@ abstract class RustLibApi extends BaseApi {
     required bool saveLargeArtwork,
     required int thumbnailSize,
     required double hueCohesion,
+    required double meshMuddyPenaltyMultiplier,
   });
 
   Future<PlatformInt64> crateApiSimpleControllerGetAudioDurationMs();
@@ -447,6 +448,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required bool saveLargeArtwork,
     required int thumbnailSize,
     required double hueCohesion,
+    required double meshMuddyPenaltyMultiplier,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -457,6 +459,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_bool(saveLargeArtwork, serializer);
           sse_encode_i_32(thumbnailSize, serializer);
           sse_encode_f_64(hueCohesion, serializer);
+          sse_encode_f_64(meshMuddyPenaltyMultiplier, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -475,6 +478,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           saveLargeArtwork,
           thumbnailSize,
           hueCohesion,
+          meshMuddyPenaltyMultiplier,
         ],
         apiImpl: this,
       ),
@@ -490,6 +494,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           "saveLargeArtwork",
           "thumbnailSize",
           "hueCohesion",
+          "meshMuddyPenaltyMultiplier",
         ],
       );
 

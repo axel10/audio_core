@@ -26,12 +26,14 @@ Future<TrackArtworkResult> generateTrackArtwork({
   required bool saveLargeArtwork,
   required int thumbnailSize,
   required double hueCohesion,
+  required double meshMuddyPenaltyMultiplier,
 }) => RustLib.instance.api.crateApiSimpleMetadataGenerateTrackArtwork(
   path: path,
   cacheRootPath: cacheRootPath,
   saveLargeArtwork: saveLargeArtwork,
   thumbnailSize: thumbnailSize,
   hueCohesion: hueCohesion,
+  meshMuddyPenaltyMultiplier: meshMuddyPenaltyMultiplier,
 );
 
 Future<void> removeAllTags({required String path}) =>

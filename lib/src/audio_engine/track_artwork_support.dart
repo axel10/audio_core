@@ -10,6 +10,7 @@ mixin TrackArtworkSupport {
     required bool saveLargeArtwork,
     int thumbnailSize = generatedArtworkThumbnailSize,
     double hueCohesion = 0.0,
+    double meshMuddyPenaltyMultiplier = 1.0,
   }) async {
     final result = await rust.generateTrackArtwork(
       path: normalizeArtworkPath(path),
@@ -17,6 +18,7 @@ mixin TrackArtworkSupport {
       saveLargeArtwork: saveLargeArtwork,
       thumbnailSize: thumbnailSize,
       hueCohesion: hueCohesion,
+      meshMuddyPenaltyMultiplier: meshMuddyPenaltyMultiplier,
     );
     return GeneratedTrackArtwork.fromRust(result);
   }

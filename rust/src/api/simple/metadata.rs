@@ -83,6 +83,7 @@ pub fn generate_track_artwork(
     save_large_artwork: bool,
     thumbnail_size: i32,
     hue_cohesion: f64,
+    mesh_muddy_penalty_multiplier: f64,
 ) -> anyhow::Result<TrackArtworkResult> {
     let picture = extract_embedded_artwork(&path);
     let Some(picture) = picture else {
@@ -103,7 +104,10 @@ pub fn generate_track_artwork(
         build_square_thumbnail(&picture.bytes, thumbnail_size.max(1) as usize)?;
     let theme_colors_blob = build_theme_colors_blob_with_options(
         &thumbnail_image,
-        ThemePaletteOptions { hue_cohesion },
+        ThemePaletteOptions {
+            hue_cohesion,
+            mesh_muddy_penalty_multiplier,
+        },
     )
     .unwrap_or_else(|err| {
         log::warn!("failed to calculate artwork palette for {path}: {err}");
