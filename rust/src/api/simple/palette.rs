@@ -53,6 +53,13 @@ fn build_theme_colors_from_pixels(
     Some(theme_colors)
 }
 
+pub fn debug_build_theme_colors_from_pixels(
+    pixels: &[u8],
+    channels_per_pixel: usize,
+) -> Option<BTreeMap<String, u32>> {
+    build_theme_colors_from_pixels(pixels, channels_per_pixel)
+}
+
 fn quantize_palette_colors(
     pixels: &[u8],
     channels_per_pixel: usize,
@@ -104,12 +111,12 @@ fn quantize_histogram(
     }
 
     let mut priority_queue = BinaryHeap::new();
-    priority_queue.push(PriorityColorBox::from_box(ColorVolumeBox::new(
-        0,
-        colors.len() - 1,
-        &colors,
-        &histogram,
-    )));
+    let mut next_sequence = 0usize;
+    priority_queue.push(PriorityColorBox::from_box(
+        ColorVolumeBox::new(0, colors.len() - 1, &colors, &histogram),
+        next_sequence,
+    ));
+    next_sequence += 1;
 
     while priority_queue.len() < max_colors {
         let Some(mut color_box) = priority_queue.pop().map(PriorityColorBox::into_inner) else {
@@ -117,23 +124,27 @@ fn quantize_histogram(
         };
 
         if !color_box.can_split() {
-            priority_queue.push(PriorityColorBox::from_box(color_box));
+            priority_queue.push(PriorityColorBox::from_box(color_box, next_sequence));
+            next_sequence += 1;
             break;
         }
 
         let new_box = color_box.split_box(&mut colors, &histogram);
-        priority_queue.push(PriorityColorBox::from_box(new_box));
-        priority_queue.push(PriorityColorBox::from_box(color_box));
+        priority_queue.push(PriorityColorBox::from_box(new_box, next_sequence));
+        next_sequence += 1;
+        priority_queue.push(PriorityColorBox::from_box(color_box, next_sequence));
+        next_sequence += 1;
     }
 
-    priority_queue
-        .into_iter()
-        .map(PriorityColorBox::into_inner)
-        .filter_map(|color_box| {
-            let average_color = color_box.average_color(&colors, &histogram);
-            (!should_ignore_color(average_color.rgb)).then_some(average_color)
-        })
-        .collect()
+    let mut palette_colors = Vec::with_capacity(priority_queue.len());
+    while let Some(color_box) = priority_queue.pop().map(PriorityColorBox::into_inner) {
+        let average_color = color_box.average_color(&colors, &histogram);
+        if !should_ignore_color(average_color.rgb) {
+            palette_colors.push(average_color);
+        }
+    }
+
+    palette_colors
 }
 
 fn select_theme_colors(mut palette_colors: Vec<PaletteColor>) -> BTreeMap<String, u32> {
@@ -566,21 +577,27 @@ enum ColorComponent {
 }
 
 #[derive(Debug, Clone)]
-struct PriorityColorBox(ColorVolumeBox);
+struct PriorityColorBox {
+    color_box: ColorVolumeBox,
+    sequence: usize,
+}
 
 impl PriorityColorBox {
-    fn from_box(color_box: ColorVolumeBox) -> Self {
-        Self(color_box)
+    fn from_box(color_box: ColorVolumeBox, sequence: usize) -> Self {
+        Self {
+            color_box,
+            sequence,
+        }
     }
 
     fn into_inner(self) -> ColorVolumeBox {
-        self.0
+        self.color_box
     }
 }
 
 impl PartialEq for PriorityColorBox {
     fn eq(&self, other: &Self) -> bool {
-        self.0.volume() == other.0.volume()
+        self.color_box.volume() == other.color_box.volume() && self.sequence == other.sequence
     }
 }
 
@@ -594,7 +611,10 @@ impl PartialOrd for PriorityColorBox {
 
 impl Ord for PriorityColorBox {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.0.volume().cmp(&other.0.volume())
+        self.color_box
+            .volume()
+            .cmp(&other.color_box.volume())
+            .then_with(|| self.sequence.cmp(&other.sequence))
     }
 }
 

@@ -1,29 +1,43 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math' as math;
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 
-import 'package:audio_core/audio_core.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
 import 'palette/palette_generator.dart' as original_palette;
 
-const int _paletteMaxColors = 16;
+const int _decodedImageWidth = 300;
+const int _decodedImageHeight = 300;
+const int _rawRgbChannels = 3;
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  setUpAll(() async {
-    await RustLib.init();
-  });
-
-  test('generateTrackArtwork matches the original palette algorithm', () async {
+  test('palette.rs matches the original palette algorithm on decoded images', () async {
+    final rawDir = _resolveExistingDirectory(const <String>[
+      '../test/decoed_imgs',
+      'test/decoed_imgs',
+    ]);
+    final rustDir = _resolveExistingDirectory(const <String>['../rust', 'rust']);
+    final rawFiles = _discoverRawFiles(rawDir);
+    final actualByFile = await _generateRustThemeColors(rawDir, rustDir);
     final mismatches = <String>[];
 
-    for (final imageFile in _discoverTestImages()) {
-      final diff = await _compareThemeColors(imageFile);
+    for (final rawFile in rawFiles) {
+      final fileName = rawFile.uri.pathSegments.last;
+      final actualThemeColors = actualByFile[fileName];
+      if (actualThemeColors == null) {
+        mismatches.add('Rust result is missing $fileName');
+        continue;
+      }
+
+      final expectedThemeColors = await _generateOriginalThemeColors(rawFile);
+      final diff = _compareThemeColors(
+        label: rawFile.path,
+        actualThemeColors: actualThemeColors,
+        expectedThemeColors: expectedThemeColors,
+      );
       if (diff != null) {
         mismatches.add(diff);
       }
@@ -33,170 +47,85 @@ void main() {
   });
 }
 
-Future<Map<String, int>> _generateRustThemeColors(File imageFile) async {
-  final tempDir = await Directory.systemTemp.createTemp('audio_core_palette_');
-  addTearDown(() async {
-    if (await tempDir.exists()) {
-      await tempDir.delete(recursive: true);
+Future<Map<String, Map<String, int>>> _generateRustThemeColors(
+  Directory rawDir,
+  Directory rustDir,
+) async {
+  final result = await Process.run('cargo', <String>[
+    'run',
+    '--quiet',
+    '--bin',
+    'palette_parity',
+    '--',
+    rawDir.path,
+  ], workingDirectory: rustDir.path);
+
+  if (result.exitCode != 0) {
+    throw StateError(
+      'Failed to run palette parity helper.\n'
+      'exitCode=${result.exitCode}\n'
+      'stdout=${result.stdout}\n'
+      'stderr=${result.stderr}',
+    );
+  }
+
+  final decoded = jsonDecode(result.stdout as String);
+  if (decoded is! Map) {
+    throw StateError('Unexpected Rust palette output: $decoded');
+  }
+
+  return decoded.map<String, Map<String, int>>((key, value) {
+    if (value is! Map) {
+      throw StateError('Unexpected palette map for $key: $value');
     }
+
+    final themeColors = value.map<String, int>((themeKey, themeValue) {
+      if (themeValue is! num) {
+        throw StateError(
+          'Unexpected palette value for "$themeKey" in "$key": $themeValue',
+        );
+      }
+      return MapEntry(themeKey.toString(), themeValue.toInt());
+    });
+    return MapEntry(key.toString(), themeColors);
   });
-
-  final sampleAudioSource = _resolveExistingFile(const <String>[
-    'rust/lofty-rs/tests/files/assets/minimal/full_test.mp3',
-    'rust/lofty-rs/tests/taglib/data/bladeenc.mp3',
-    'android/src/main/cpp/chromaprint/tests/data/test.mp3',
-  ]);
-
-  final tempAudio = File('${tempDir.path}${Platform.pathSeparator}sample.mp3');
-  await sampleAudioSource.copy(tempAudio.path);
-
-  await removeAllTags(path: tempAudio.path);
-  await updateTrackMetadata(
-    path: tempAudio.path,
-    metadata: TrackMetadataUpdate(
-      genres: const <String>[],
-      pictures: <TrackPicture>[
-        TrackPicture(
-          bytes: await imageFile.readAsBytes(),
-          mimeType: 'image/jpeg',
-          pictureType: 'Front Cover',
-        ),
-      ],
-    ),
-  );
-
-  final cacheRoot = Directory('${tempDir.path}${Platform.pathSeparator}cache');
-  await cacheRoot.create(recursive: true);
-
-  final result = await generateTrackArtwork(
-    path: tempAudio.path,
-    cacheRootPath: cacheRoot.path,
-    saveLargeArtwork: false,
-    thumbnailSize: generatedArtworkThumbnailSize,
-  );
-
-  expect(
-    result.artworkFound,
-    isTrue,
-    reason: 'Expected embedded artwork to be written for ${imageFile.path}',
-  );
-  expect(
-    result.themeColorsBlob,
-    isNotNull,
-    reason: 'Expected theme colors blob for ${imageFile.path}',
-  );
-  expect(
-    result.thumbnailPath,
-    isNotNull,
-    reason: 'Expected thumbnail path for ${imageFile.path}',
-  );
-
-  return _decodeThemeColorsBlob(result.themeColorsBlob!);
 }
 
-Future<Map<String, int>> _generateOriginalThemeColors(File imageFile) async {
-  final thumbnailPath = await _generateRustThumbnailPath(imageFile);
-  final encodedImage = await _readEncodedImageFromFile(File(thumbnailPath));
+Future<Map<String, int>> _generateOriginalThemeColors(File rawFile) async {
+  final encodedImage = await _readEncodedImageFromRawFile(rawFile);
   final palette = await original_palette.PaletteGenerator.fromByteData(
     encodedImage,
-    maximumColorCount: _paletteMaxColors,
   );
   return _themeColorsFromPalette(palette);
 }
 
-Future<String> _generateRustThumbnailPath(File imageFile) async {
-  final tempDir = await Directory.systemTemp.createTemp('audio_core_palette_ref_');
-  addTearDown(() async {
-    if (await tempDir.exists()) {
-      await tempDir.delete(recursive: true);
-    }
-  });
-
-  final sampleAudioSource = _resolveExistingFile(const <String>[
-    'rust/lofty-rs/tests/files/assets/minimal/full_test.mp3',
-    'rust/lofty-rs/tests/taglib/data/bladeenc.mp3',
-    'android/src/main/cpp/chromaprint/tests/data/test.mp3',
-  ]);
-
-  final tempAudio = File('${tempDir.path}${Platform.pathSeparator}sample.mp3');
-  await sampleAudioSource.copy(tempAudio.path);
-
-  await removeAllTags(path: tempAudio.path);
-  await updateTrackMetadata(
-    path: tempAudio.path,
-    metadata: TrackMetadataUpdate(
-      genres: const <String>[],
-      pictures: <TrackPicture>[
-        TrackPicture(
-          bytes: await imageFile.readAsBytes(),
-          mimeType: 'image/jpeg',
-          pictureType: 'Front Cover',
-        ),
-      ],
-    ),
-  );
-
-  final cacheRoot = Directory('${tempDir.path}${Platform.pathSeparator}cache');
-  await cacheRoot.create(recursive: true);
-
-  final result = await generateTrackArtwork(
-    path: tempAudio.path,
-    cacheRootPath: cacheRoot.path,
-    saveLargeArtwork: false,
-    thumbnailSize: generatedArtworkThumbnailSize,
-  );
-
-  expect(
-    result.thumbnailPath,
-    isNotNull,
-    reason: 'Expected thumbnail path for ${imageFile.path}',
-  );
-  return result.thumbnailPath!;
-}
-
-Future<original_palette.EncodedImage> _readEncodedImageFromFile(
-  File imageFile,
+Future<original_palette.EncodedImage> _readEncodedImageFromRawFile(
+  File rawFile,
 ) async {
-  final bytes = await imageFile.readAsBytes();
-  final codec = await ui.instantiateImageCodec(bytes);
-  final frame = await codec.getNextFrame();
-  final thumbnail = await _buildSquareThumbnail(
-    frame.image,
-    generatedArtworkThumbnailSize,
-  );
-  final byteData = await thumbnail.toByteData(
-    format: ui.ImageByteFormat.rawRgba,
-  );
-  frame.image.dispose();
-  thumbnail.dispose();
-
+  final rawBytes = await rawFile.readAsBytes();
+  final expectedLength =
+      _decodedImageWidth * _decodedImageHeight * _rawRgbChannels;
   expect(
-    byteData,
-    isNotNull,
-    reason: 'Failed to decode ${imageFile.path} into raw RGBA bytes',
+    rawBytes.length,
+    expectedLength,
+    reason: 'Unexpected raw RGB length for ${rawFile.path}',
   );
 
+  final rgbaBytes =
+      Uint8List(_decodedImageWidth * _decodedImageHeight * 4);
+  for (int src = 0, dst = 0; src < rawBytes.length; src += 3, dst += 4) {
+    rgbaBytes[dst] = rawBytes[src];
+    rgbaBytes[dst + 1] = rawBytes[src + 1];
+    rgbaBytes[dst + 2] = rawBytes[src + 2];
+    rgbaBytes[dst + 3] = 0xff;
+  }
+
+  final byteData = ByteData.sublistView(rgbaBytes);
   return original_palette.EncodedImage(
-    byteData!,
-    width: generatedArtworkThumbnailSize,
-    height: generatedArtworkThumbnailSize,
+    byteData,
+    width: _decodedImageWidth,
+    height: _decodedImageHeight,
   );
-}
-
-Future<ui.Image> _buildSquareThumbnail(ui.Image source, int size) async {
-  final recorder = ui.PictureRecorder();
-  final canvas = ui.Canvas(recorder);
-  final paint = ui.Paint()..filterQuality = ui.FilterQuality.high;
-
-  final cropSize = math.min(source.width, source.height).toDouble();
-  final offsetX = (source.width - cropSize) / 2.0;
-  final offsetY = (source.height - cropSize) / 2.0;
-  final sourceRect = ui.Rect.fromLTWH(offsetX, offsetY, cropSize, cropSize);
-  final targetRect = ui.Rect.fromLTWH(0, 0, size.toDouble(), size.toDouble());
-
-  canvas.drawImageRect(source, sourceRect, targetRect, paint);
-  final picture = recorder.endRecording();
-  return picture.toImage(size, size);
 }
 
 Map<String, int> _themeColorsFromPalette(
@@ -221,17 +150,18 @@ Map<String, int> _themeColorsFromPalette(
   return themeColors;
 }
 
-Future<String?> _compareThemeColors(File imageFile) async {
-  final actualThemeColors = await _generateRustThemeColors(imageFile);
-  final expectedThemeColors = await _generateOriginalThemeColors(imageFile);
-
+String? _compareThemeColors({
+  required String label,
+  required Map<String, int> actualThemeColors,
+  required Map<String, int> expectedThemeColors,
+}) {
   final actualKeys = actualThemeColors.keys.toSet();
   final expectedKeys = expectedThemeColors.keys.toSet();
   if (actualKeys.length != expectedKeys.length ||
       !actualKeys.containsAll(expectedKeys) ||
       !expectedKeys.containsAll(actualKeys)) {
     return [
-      'Theme color keys differ for ${imageFile.path}',
+      'Theme color keys differ for $label',
       'Actual keys: $actualKeys',
       'Expected keys: $expectedKeys',
       'Actual map: $actualThemeColors',
@@ -253,49 +183,27 @@ Future<String?> _compareThemeColors(File imageFile) async {
   }
 
   return [
-    'Theme color mismatch for ${imageFile.path}',
+    'Theme color mismatch for $label',
     ...differences,
     'Actual map: $actualThemeColors',
     'Expected map: $expectedThemeColors',
   ].join('\n');
 }
 
-Map<String, int> _decodeThemeColorsBlob(Uint8List blob) {
-  final decoded = jsonDecode(utf8.decode(blob));
-  if (decoded is! Map) {
-    throw StateError('Unexpected theme colors blob format: $decoded');
-  }
-
-  return decoded.map<String, int>((key, value) {
-    if (value is! num) {
-      throw StateError(
-        'Unexpected value for "$key" in theme colors blob: $value',
-      );
-    }
-    return MapEntry(key.toString(), value.toInt());
-  });
-}
-
-List<File> _discoverTestImages() {
-  final directory = _resolveExistingDirectory(const <String>['test/test_imgs']);
-
-  final images =
+List<File> _discoverRawFiles(Directory directory) {
+  final rawFiles =
       directory
           .listSync()
           .whereType<File>()
-          .where(
-            (file) =>
-                file.path.toLowerCase().endsWith('.jpg') ||
-                file.path.toLowerCase().endsWith('.jpeg'),
-          )
+          .where((file) => file.path.toLowerCase().endsWith('.raw'))
           .toList()
         ..sort((a, b) => a.path.compareTo(b.path));
 
-  if (images.isEmpty) {
-    throw StateError('No test images found in ${directory.path}.');
+  if (rawFiles.isEmpty) {
+    throw StateError('No raw images found in ${directory.path}.');
   }
 
-  return images;
+  return rawFiles;
 }
 
 Directory _resolveExistingDirectory(List<String> relativePaths) {
@@ -309,19 +217,6 @@ Directory _resolveExistingDirectory(List<String> relativePaths) {
   }
 
   throw StateError('Unable to locate any of these directories: $relativePaths');
-}
-
-File _resolveExistingFile(List<String> relativePaths) {
-  for (final root in _candidateRoots()) {
-    for (final relativePath in relativePaths) {
-      final file = File(_joinPath(root, relativePath));
-      if (file.existsSync()) {
-        return file;
-      }
-    }
-  }
-
-  throw StateError('Unable to locate any of these files: $relativePaths');
 }
 
 Iterable<String> _candidateRoots() sync* {
