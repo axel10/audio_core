@@ -961,12 +961,15 @@ fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64, muddy_penalty_m
     };
 
     let mut clash_penalty = 0.0;
+    let mut contrast_reward = 0.0;
     for i in 0..4 {
         for j in (i + 1)..4 {
             let h_dist = circular_hue_distance(combo[i].oklch.h, combo[j].oklch.h);
-            if h_dist > 45.0 && h_dist < 135.0 {
-                let chroma_product = combo[i].oklch.c * combo[j].oklch.c;
+            let chroma_product = combo[i].oklch.c * combo[j].oklch.c;
+            if h_dist > 45.0 && h_dist < 120.0 {
                 clash_penalty += chroma_product * 300.0 * muddy_penalty_multiplier;
+            } else if h_dist >= 120.0 {
+                contrast_reward += chroma_product * 25.0;
             }
         }
     }
@@ -987,10 +990,11 @@ fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64, muddy_penalty_m
         c_var += (c.oklch.c - c_mean).powi(2);
     }
     
-    let over_chroma_penalty = if c_mean > 0.15 { (c_mean - 0.15) * 5.0 } else { 0.0 };
+    let vibrancy_reward = c_mean * 5.0;
+    let over_chroma_penalty = if c_mean > 0.15 { (c_mean - 0.15) * 15.0 } else { 0.0 };
     let cohesion_penalty = l_var * 1.0 + c_var * 1.0;
 
-    pop_score * 2.0 + distinct_score - clash_penalty - cohesion_penalty - over_chroma_penalty
+    pop_score * 2.0 + distinct_score + contrast_reward + vibrancy_reward - clash_penalty - cohesion_penalty - over_chroma_penalty
 }
 
 #[cfg(test)]
