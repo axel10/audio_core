@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'rust/api/simple/metadata.dart' as rust;
+
 const int generatedArtworkThumbnailSize = 300;
 
 class GeneratedTrackArtwork {
@@ -18,6 +20,17 @@ class GeneratedTrackArtwork {
   final int? artworkWidth;
   final int? artworkHeight;
   final Uint8List? themeColorsBlob;
+
+  factory GeneratedTrackArtwork.fromRust(rust.TrackArtworkResult result) {
+    return GeneratedTrackArtwork(
+      artworkFound: result.artworkFound,
+      artworkPath: result.artworkPath,
+      thumbnailPath: result.thumbnailPath,
+      artworkWidth: result.artworkWidth,
+      artworkHeight: result.artworkHeight,
+      themeColorsBlob: result.themeColorsBlob,
+    );
+  }
 
   Map<String, Object?> toMap() {
     return <String, Object?>{

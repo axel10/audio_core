@@ -7,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import 'equalizer_panel.dart';
 import 'fade_demo_tab.dart';
 import 'metadata_tab.dart';
+import 'mesh_demo_tab.dart';
 import 'widgets.dart';
 import 'random_lab_tab.dart';
 import 'audio_handler.dart';
@@ -16,54 +17,57 @@ import 'package:audio_service/audio_service.dart';
 late AudioCoreHandler audioHandler;
 
 void main() {
-  runZonedGuarded(() async {
-    // 确保 Flutter 绑定已初始化
-    WidgetsFlutterBinding.ensureInitialized();
-    await AppLog.ensureInitialized();
-    AppLog.install();
-    AppLog.installFlutterErrorHandlers();
+  runZonedGuarded(
+    () async {
+      // 确保 Flutter 绑定已初始化
+      WidgetsFlutterBinding.ensureInitialized();
+      await AppLog.ensureInitialized();
+      AppLog.install();
+      AppLog.installFlutterErrorHandlers();
 
-    final controller = AudioCoreController(
-      fftSize: 1024,
-      analysisFrequencyHz: 30,
-      fadeSettings: const FadeSettings(
-        fadeOnSwitch: true,
-        fadeOnPauseResume: true,
-        duration: Duration(milliseconds: 500),
-        mode: FadeMode.crossfade,
-      ),
-      visualOptions: const VisualizerOptimizationOptions(
-        smoothingCoefficient: 0.35,
-        gravityCoefficient: 10,
-        logarithmicScale: 4,
-        normalizationFloorDb: -85,
-        aggregationMode: FftAggregationMode.peak,
-        frequencyGroups: 64,
-        targetFrameRate: 60,
-        groupContrastExponent: 1.6,
-        overallMultiplier: 1.2,
-      ),
-    );
+      final controller = AudioCoreController(
+        fftSize: 1024,
+        analysisFrequencyHz: 30,
+        fadeSettings: const FadeSettings(
+          fadeOnSwitch: true,
+          fadeOnPauseResume: true,
+          duration: Duration(milliseconds: 500),
+          mode: FadeMode.crossfade,
+        ),
+        visualOptions: const VisualizerOptimizationOptions(
+          smoothingCoefficient: 0.35,
+          gravityCoefficient: 10,
+          logarithmicScale: 4,
+          normalizationFloorDb: -85,
+          aggregationMode: FftAggregationMode.peak,
+          frequencyGroups: 64,
+          targetFrameRate: 60,
+          groupContrastExponent: 1.6,
+          overallMultiplier: 1.2,
+        ),
+      );
 
-    audioHandler = await AudioService.init(
-      builder: () => AudioCoreHandler(controller),
-      config: const AudioServiceConfig(
-        androidNotificationChannelId:
-            'com.flutter_rust_bridge.audio_core.channel.audio',
-        androidNotificationChannelName: 'Audio Playback',
-        androidNotificationOngoing: true,
-      ),
-    );
+      audioHandler = await AudioService.init(
+        builder: () => AudioCoreHandler(controller),
+        config: const AudioServiceConfig(
+          androidNotificationChannelId:
+              'com.flutter_rust_bridge.audio_core.channel.audio',
+          androidNotificationChannelName: 'Audio Playback',
+          androidNotificationOngoing: true,
+        ),
+      );
 
-    runApp(MyApp(controller: controller));
-  }, (error, stack) {
-    AppLog.e(
-      'Uncaught Flutter zone error',
-      tag: 'Flutter',
-      error: error,
-      stackTrace: stack,
-    );
-  });
+      runApp(MyApp(controller: controller));
+    },
+    (error, stack) {
+      AppLog.e(
+        'Uncaught Flutter zone error',
+        tag: 'Flutter',
+        error: error,
+        stackTrace: stack,
+      );
+    },
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -339,7 +343,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
       animation: _controller,
       builder: (context, _) {
         return DefaultTabController(
-          length: 5,
+          length: 6,
           child: Scaffold(
             appBar: AppBar(
               title: const Text('Audio Visualizer Player Plugin Demo'),
@@ -349,6 +353,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                   Tab(icon: Icon(Icons.music_note), text: 'Player'),
                   Tab(icon: Icon(Icons.info_outline), text: 'Metadata'),
                   Tab(icon: Icon(Icons.tune), text: 'Fade Demo'),
+                  Tab(icon: Icon(Icons.blur_on), text: 'Mesh'),
                   Tab(icon: Icon(Icons.shuffle), text: 'Random Lab'),
                   Tab(icon: Icon(Icons.equalizer), text: 'Equalizer'),
                 ],
@@ -402,9 +407,11 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                   onLoadMusicWithFadePressed: (fadeSetting) =>
                       _pickAudio(fadeSetting: fadeSetting),
                 ),
-                // 第四页: 随机播放实验台
+                // 第四页: 封面驱动的 mesh 动画背景
+                MeshDemoTab(controller: _controller),
+                // 第五页: 随机播放实验台
                 RandomLabTab(key: _randomLabKey, controller: _controller),
-                // 第五页: 均衡器界面
+                // 第六页: 均衡器界面
                 SingleChildScrollView(
                   padding: const EdgeInsets.all(16),
                   child: EqualizerPanel(controller: _controller),

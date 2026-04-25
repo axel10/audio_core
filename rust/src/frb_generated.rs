@@ -25,6 +25,8 @@
 
 // Section: imports
 
+use std::collections::BTreeMap;
+use crate::api::simple::palette::*;
 use flutter_rust_bridge::for_generated::byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
 use flutter_rust_bridge::for_generated::{transform_result_dco, Lifetimeable, Lockable};
 use flutter_rust_bridge::{Handler, IntoIntoDart};
@@ -37,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -724961742;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1166615932;
 
 // Section: executor
 
@@ -81,6 +83,62 @@ fn wire__crate__api__simple__controller__crossfade_to_audio_file_impl(
             }
         },
     )
+}
+fn wire__crate__api__simple__palette__debug_build_theme_colors_from_pixels_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "debug_build_theme_colors_from_pixels",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_pixels = <Vec<u8>>::sse_decode(&mut deserializer);
+            let api_channels_per_pixel = <usize>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok = Result::<_, ()>::Ok(
+                        crate::api::simple::palette::debug_build_theme_colors_from_pixels(
+                            &api_pixels,
+                            api_channels_per_pixel,
+                        ),
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__simple__palette__debug_build_theme_colors_from_pixels_with_options_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec,_,_>(flutter_rust_bridge::for_generated::TaskInfo{ debug_name: "debug_build_theme_colors_from_pixels_with_options", port: Some(port_), mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal }, move || { 
+            let message = unsafe { flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(ptr_, rust_vec_len_, data_len_) };
+            let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_pixels = <Vec<u8>>::sse_decode(&mut deserializer);
+let api_channels_per_pixel = <usize>::sse_decode(&mut deserializer);
+let api_options = <ThemePaletteOptions>::sse_decode(&mut deserializer);deserializer.end(); move |context|  {
+                    transform_result_sse::<_, ()>((move ||  {
+                         let output_ok = Result::<_,()>::Ok(crate::api::simple::palette::debug_build_theme_colors_from_pixels_with_options(&api_pixels, api_channels_per_pixel, api_options))?;   Ok(output_ok)
+                    })())
+                } })
 }
 fn wire__crate__api__simple__controller__dispose_audio_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
@@ -240,6 +298,7 @@ fn wire__crate__api__simple__metadata__generate_track_artwork_impl(
             let api_cache_root_path = <String>::sse_decode(&mut deserializer);
             let api_save_large_artwork = <bool>::sse_decode(&mut deserializer);
             let api_thumbnail_size = <i32>::sse_decode(&mut deserializer);
+            let api_hue_cohesion = <f64>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -249,6 +308,7 @@ fn wire__crate__api__simple__metadata__generate_track_artwork_impl(
                             api_cache_root_path,
                             api_save_large_artwork,
                             api_thumbnail_size,
+                            api_hue_cohesion,
                         )?;
                         Ok(output_ok)
                     })(),
@@ -1173,6 +1233,15 @@ fn wire__crate__api__simple__metadata__update_track_metadata_impl(
     )
 }
 
+// Section: related_funcs
+
+flutter_rust_bridge::frb_generated_moi_arc_impl_value!(
+    flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BTreeMap<String, u32>>
+);
+flutter_rust_bridge::frb_generated_moi_arc_impl_value!(
+    flutter_rust_bridge::for_generated::RustAutoOpaqueInner<ThemePaletteOptions>
+);
+
 // Section: dart2rust
 
 impl SseDecode for flutter_rust_bridge::for_generated::anyhow::Error {
@@ -1180,6 +1249,48 @@ impl SseDecode for flutter_rust_bridge::for_generated::anyhow::Error {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut inner = <String>::sse_decode(deserializer);
         return flutter_rust_bridge::for_generated::anyhow::anyhow!("{}", inner);
+    }
+}
+
+impl SseDecode for BTreeMap<String, u32> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <RustOpaqueMoi<
+            flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BTreeMap<String, u32>>,
+        >>::sse_decode(deserializer);
+        return flutter_rust_bridge::for_generated::rust_auto_opaque_decode_owned(inner);
+    }
+}
+
+impl SseDecode for ThemePaletteOptions {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <RustOpaqueMoi<
+            flutter_rust_bridge::for_generated::RustAutoOpaqueInner<ThemePaletteOptions>,
+        >>::sse_decode(deserializer);
+        return flutter_rust_bridge::for_generated::rust_auto_opaque_decode_owned(inner);
+    }
+}
+
+impl SseDecode
+    for RustOpaqueMoi<
+        flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BTreeMap<String, u32>>,
+    >
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <usize>::sse_decode(deserializer);
+        return decode_rust_opaque_moi(inner);
+    }
+}
+
+impl SseDecode
+    for RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<ThemePaletteOptions>>
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <usize>::sse_decode(deserializer);
+        return decode_rust_opaque_moi(inner);
     }
 }
 
@@ -1237,6 +1348,13 @@ impl SseDecode for f32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         deserializer.cursor.read_f32::<NativeEndian>().unwrap()
+    }
+}
+
+impl SseDecode for f64 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        deserializer.cursor.read_f64::<NativeEndian>().unwrap()
     }
 }
 
@@ -1337,6 +1455,17 @@ impl SseDecode for Option<String> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<String>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<BTreeMap<String, u32>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<BTreeMap<String, u32>>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -1496,188 +1625,41 @@ fn pde_ffi_dispatcher_primary_impl(
 ) {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
-        1 => wire__crate__api__simple__controller__crossfade_to_audio_file_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        2 => wire__crate__api__simple__controller__dispose_audio_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        3 => wire__crate__api__simple__equalizer__equalizer_config_default_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        4 => wire__crate__api__simple__controller__fade_settings_default_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        5 => wire__crate__api__simple__controller__finish_file_write_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        6 => wire__crate__api__simple__metadata__generate_track_artwork_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        7 => wire__crate__api__simple__controller__get_audio_duration_ms_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        8 => wire__crate__api__simple__controller__get_audio_equalizer_config_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        9 => wire__crate__api__simple__audio_fingerprint__get_audio_fingerprint_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        10 => wire__crate__api__simple__controller__get_audio_pcm_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        11 => wire__crate__api__simple__controller__get_audio_pcm_channel_count_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        12 => wire__crate__api__simple__controller__get_audio_position_ms_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        13 => wire__crate__api__simple__controller__get_latest_fft_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        14 => wire__crate__api__simple__controller__get_loaded_audio_path_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        15 => wire__crate__api__simple__metadata__get_track_metadata_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        17 => wire__crate__api__simple__controller__handle_device_changed_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        18 => {
-            wire__crate__api__simple__controller__init_app_impl(port, ptr, rust_vec_len, data_len)
-        }
-        19 => wire__crate__api__simple__controller__is_audio_playing_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        20 => wire__crate__api__simple__controller__load_audio_file_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        21 => wire__crate__api__simple__controller__pause_audio_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        22 => {
-            wire__crate__api__simple__controller__play_audio_impl(port, ptr, rust_vec_len, data_len)
-        }
-        23 => wire__crate__api__simple__controller__prepare_for_file_write_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        24 => wire__crate__api__simple__metadata__remove_all_tags_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        25 => wire__crate__api__simple__controller__seek_audio_ms_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        26 => wire__crate__api__simple__controller__set_audio_equalizer_config_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        27 => wire__crate__api__simple__controller__set_audio_volume_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        29 => wire__crate__api__simple__controller__toggle_audio_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        30 => wire__crate__api__simple__metadata__track_artwork_result_default_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        31 => wire__crate__api__simple__metadata__track_metadata_update_default_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        32 => wire__crate__api__simple__metadata__track_picture_default_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        33 => wire__crate__api__simple__metadata__update_track_metadata_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
-        _ => unreachable!(),
-    }
+                        1 => wire__crate__api__simple__controller__crossfade_to_audio_file_impl(port, ptr, rust_vec_len, data_len),
+2 => wire__crate__api__simple__palette__debug_build_theme_colors_from_pixels_impl(port, ptr, rust_vec_len, data_len),
+3 => wire__crate__api__simple__palette__debug_build_theme_colors_from_pixels_with_options_impl(port, ptr, rust_vec_len, data_len),
+4 => wire__crate__api__simple__controller__dispose_audio_impl(port, ptr, rust_vec_len, data_len),
+5 => wire__crate__api__simple__equalizer__equalizer_config_default_impl(port, ptr, rust_vec_len, data_len),
+6 => wire__crate__api__simple__controller__fade_settings_default_impl(port, ptr, rust_vec_len, data_len),
+7 => wire__crate__api__simple__controller__finish_file_write_impl(port, ptr, rust_vec_len, data_len),
+8 => wire__crate__api__simple__metadata__generate_track_artwork_impl(port, ptr, rust_vec_len, data_len),
+9 => wire__crate__api__simple__controller__get_audio_duration_ms_impl(port, ptr, rust_vec_len, data_len),
+10 => wire__crate__api__simple__controller__get_audio_equalizer_config_impl(port, ptr, rust_vec_len, data_len),
+11 => wire__crate__api__simple__audio_fingerprint__get_audio_fingerprint_impl(port, ptr, rust_vec_len, data_len),
+12 => wire__crate__api__simple__controller__get_audio_pcm_impl(port, ptr, rust_vec_len, data_len),
+13 => wire__crate__api__simple__controller__get_audio_pcm_channel_count_impl(port, ptr, rust_vec_len, data_len),
+14 => wire__crate__api__simple__controller__get_audio_position_ms_impl(port, ptr, rust_vec_len, data_len),
+15 => wire__crate__api__simple__controller__get_latest_fft_impl(port, ptr, rust_vec_len, data_len),
+16 => wire__crate__api__simple__controller__get_loaded_audio_path_impl(port, ptr, rust_vec_len, data_len),
+17 => wire__crate__api__simple__metadata__get_track_metadata_impl(port, ptr, rust_vec_len, data_len),
+19 => wire__crate__api__simple__controller__handle_device_changed_impl(port, ptr, rust_vec_len, data_len),
+20 => wire__crate__api__simple__controller__init_app_impl(port, ptr, rust_vec_len, data_len),
+21 => wire__crate__api__simple__controller__is_audio_playing_impl(port, ptr, rust_vec_len, data_len),
+22 => wire__crate__api__simple__controller__load_audio_file_impl(port, ptr, rust_vec_len, data_len),
+23 => wire__crate__api__simple__controller__pause_audio_impl(port, ptr, rust_vec_len, data_len),
+24 => wire__crate__api__simple__controller__play_audio_impl(port, ptr, rust_vec_len, data_len),
+25 => wire__crate__api__simple__controller__prepare_for_file_write_impl(port, ptr, rust_vec_len, data_len),
+26 => wire__crate__api__simple__metadata__remove_all_tags_impl(port, ptr, rust_vec_len, data_len),
+27 => wire__crate__api__simple__controller__seek_audio_ms_impl(port, ptr, rust_vec_len, data_len),
+28 => wire__crate__api__simple__controller__set_audio_equalizer_config_impl(port, ptr, rust_vec_len, data_len),
+29 => wire__crate__api__simple__controller__set_audio_volume_impl(port, ptr, rust_vec_len, data_len),
+31 => wire__crate__api__simple__controller__toggle_audio_impl(port, ptr, rust_vec_len, data_len),
+32 => wire__crate__api__simple__metadata__track_artwork_result_default_impl(port, ptr, rust_vec_len, data_len),
+33 => wire__crate__api__simple__metadata__track_metadata_update_default_impl(port, ptr, rust_vec_len, data_len),
+34 => wire__crate__api__simple__metadata__track_picture_default_impl(port, ptr, rust_vec_len, data_len),
+35 => wire__crate__api__simple__metadata__update_track_metadata_impl(port, ptr, rust_vec_len, data_len),
+                        _ => unreachable!(),
+                    }
 }
 
 fn pde_ffi_dispatcher_sync_impl(
@@ -1688,13 +1670,51 @@ fn pde_ffi_dispatcher_sync_impl(
 ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
-        16 => wire__crate__api__simple__greet_impl(ptr, rust_vec_len, data_len),
-        28 => wire__crate__api__simple__subscribe_playback_state_impl(ptr, rust_vec_len, data_len),
+        18 => wire__crate__api__simple__greet_impl(ptr, rust_vec_len, data_len),
+        30 => wire__crate__api__simple__subscribe_playback_state_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
 
 // Section: rust2dart
+
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<BTreeMap<String, u32>> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, MoiArc<_>>(self.0)
+            .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for FrbWrapper<BTreeMap<String, u32>>
+{
+}
+
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<BTreeMap<String, u32>>>
+    for BTreeMap<String, u32>
+{
+    fn into_into_dart(self) -> FrbWrapper<BTreeMap<String, u32>> {
+        self.into()
+    }
+}
+
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<ThemePaletteOptions> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, MoiArc<_>>(self.0)
+            .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for FrbWrapper<ThemePaletteOptions>
+{
+}
+
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<ThemePaletteOptions>> for ThemePaletteOptions {
+    fn into_into_dart(self) -> FrbWrapper<ThemePaletteOptions> {
+        self.into()
+    }
+}
 
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::simple::equalizer::EqualizerConfig {
@@ -1885,6 +1905,49 @@ impl SseEncode for flutter_rust_bridge::for_generated::anyhow::Error {
     }
 }
 
+impl SseEncode for BTreeMap<String, u32> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <RustOpaqueMoi<
+            flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BTreeMap<String, u32>>,
+        >>::sse_encode(
+            flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, MoiArc<_>>(self),
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for ThemePaletteOptions {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<ThemePaletteOptions>>>::sse_encode(flutter_rust_bridge::for_generated::rust_auto_opaque_encode::<_, MoiArc<_>>(self), serializer);
+    }
+}
+
+impl SseEncode
+    for RustOpaqueMoi<
+        flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BTreeMap<String, u32>>,
+    >
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        let (ptr, size) = self.sse_encode_raw();
+        <usize>::sse_encode(ptr, serializer);
+        <i32>::sse_encode(size, serializer);
+    }
+}
+
+impl SseEncode
+    for RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<ThemePaletteOptions>>
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        let (ptr, size) = self.sse_encode_raw();
+        <usize>::sse_encode(ptr, serializer);
+        <i32>::sse_encode(size, serializer);
+    }
+}
+
 impl SseEncode
     for StreamSink<
         crate::api::simple::controller::PlaybackState,
@@ -1928,6 +1991,13 @@ impl SseEncode for f32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         serializer.cursor.write_f32::<NativeEndian>(self).unwrap();
+    }
+}
+
+impl SseEncode for f64 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        serializer.cursor.write_f64::<NativeEndian>(self).unwrap();
     }
 }
 
@@ -2017,6 +2087,16 @@ impl SseEncode for Option<String> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <String>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<BTreeMap<String, u32>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <BTreeMap<String, u32>>::sse_encode(value, serializer);
         }
     }
 }
@@ -2130,6 +2210,7 @@ mod io {
     // Section: imports
 
     use super::*;
+    use crate::api::simple::palette::*;
     use flutter_rust_bridge::for_generated::byteorder::{
         NativeEndian, ReadBytesExt, WriteBytesExt,
     };
@@ -2139,6 +2220,34 @@ mod io {
     // Section: boilerplate
 
     flutter_rust_bridge::frb_generated_boilerplate_io!();
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_audio_core_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BTreeMap < String , u32 >>>::increment_strong_count(ptr as _);
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_audio_core_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BTreeMap < String , u32 >>>::decrement_strong_count(ptr as _);
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_audio_core_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerThemePaletteOptions(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<ThemePaletteOptions>>::increment_strong_count(ptr as _);
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_audio_core_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerThemePaletteOptions(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<ThemePaletteOptions>>::decrement_strong_count(ptr as _);
+    }
 }
 #[cfg(not(target_family = "wasm"))]
 pub use io::*;
@@ -2152,6 +2261,7 @@ mod web {
     // Section: imports
 
     use super::*;
+    use crate::api::simple::palette::*;
     use flutter_rust_bridge::for_generated::byteorder::{
         NativeEndian, ReadBytesExt, WriteBytesExt,
     };
@@ -2163,6 +2273,34 @@ mod web {
     // Section: boilerplate
 
     flutter_rust_bridge::frb_generated_boilerplate_web!();
+
+    #[wasm_bindgen]
+    pub fn rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BTreeMap < String , u32 >>>::increment_strong_count(ptr as _);
+    }
+
+    #[wasm_bindgen]
+    pub fn rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BTreeMap < String , u32 >>>::decrement_strong_count(ptr as _);
+    }
+
+    #[wasm_bindgen]
+    pub fn rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerThemePaletteOptions(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<ThemePaletteOptions>>::increment_strong_count(ptr as _);
+    }
+
+    #[wasm_bindgen]
+    pub fn rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerThemePaletteOptions(
+        ptr: *const std::ffi::c_void,
+    ) {
+        MoiArc::<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<ThemePaletteOptions>>::decrement_strong_count(ptr as _);
+    }
 }
 #[cfg(target_family = "wasm")]
 pub use web::*;

@@ -2,13 +2,12 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import '../fft_processor.dart';
-import '../rust/api/simple_api.dart' as rust;
 import '../rust/api/simple/equalizer.dart';
-import '../track_artwork.dart';
 import '../track_metadata.dart';
 import 'audio_engine_interface.dart';
+import 'track_artwork_support.dart';
 
-class AndroidAudioEngine implements AudioEngine {
+class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   static const MethodChannel _channel = MethodChannel('my_exoplayer');
   static const EventChannel _fftChannel = EventChannel('my_exoplayer/fft');
 
@@ -341,6 +340,9 @@ class AndroidAudioEngine implements AudioEngine {
   bool get supportsCrossfade => true;
 
   @override
+  String normalizeArtworkPath(String path) => path;
+
+  @override
   Future<String?> extractFingerprint(String path) async {
     try {
       final String? fingerprint = await _channel.invokeMethod(
@@ -448,29 +450,6 @@ class AndroidAudioEngine implements AudioEngine {
         pictures: const [],
       );
     }
-  }
-
-  @override
-  Future<GeneratedTrackArtwork> generateTrackArtwork({
-    required String path,
-    required String cacheRootPath,
-    required bool saveLargeArtwork,
-    int thumbnailSize = generatedArtworkThumbnailSize,
-  }) async {
-    final result = await rust.generateTrackArtwork(
-      path: path,
-      cacheRootPath: cacheRootPath,
-      saveLargeArtwork: saveLargeArtwork,
-      thumbnailSize: thumbnailSize,
-    );
-    return GeneratedTrackArtwork(
-      artworkFound: result.artworkFound,
-      artworkPath: result.artworkPath,
-      thumbnailPath: result.thumbnailPath,
-      artworkWidth: result.artworkWidth,
-      artworkHeight: result.artworkHeight,
-      themeColorsBlob: result.themeColorsBlob,
-    );
   }
 
   @override

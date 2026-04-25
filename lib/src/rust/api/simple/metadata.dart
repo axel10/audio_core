@@ -6,9 +6,8 @@
 import '../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `argb`, `average_color`, `build_square_thumbnail`, `build_theme_colors_blob`, `can_split`, `color_count`, `current_time_millis`, `dark_muted`, `dark_vibrant`, `extract_embedded_artwork_with_id3`, `extract_embedded_artwork_with_lofty`, `extract_embedded_artwork`, `file_token`, `find_split_point`, `first_extended_text_value`, `first_tag_value`, `first_text_frame_value`, `fit_minimum_box`, `from_box`, `generate_palette_score`, `get_max_scored_palette_color`, `id3_picture_type_to_label`, `into_inner`, `light_muted`, `light_vibrant`, `lofty_picture_type_to_label`, `longest_dimension`, `muted`, `new`, `new`, `new`, `normalize_weights`, `pack_rgb`, `palette_targets`, `path_to_string`, `quantize_histogram`, `quantize_palette_colors`, `quantize_rgb`, `read_track_metadata_with_id3`, `read_track_metadata_with_lofty`, `rgb_to_hsl`, `select_theme_colors`, `should_ignore_color`, `should_score_for_target`, `should_use_id3`, `split_box`, `unpack_rgb`, `update_track_metadata_with_id3`, `update_track_metadata_with_lofty`, `vibrant`, `volume`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ColorComponent`, `ColorVolumeBox`, `HslColor`, `PaletteColor`, `PaletteTarget`, `PriorityColorBox`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `cmp`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `partial_cmp`
+// These functions are ignored because they are not marked as `pub`: `build_square_thumbnail`, `current_time_millis`, `extract_embedded_artwork_with_id3`, `extract_embedded_artwork_with_lofty`, `extract_embedded_artwork`, `file_token`, `first_extended_text_value`, `first_tag_value`, `first_text_frame_value`, `id3_picture_type_to_label`, `lofty_picture_type_to_label`, `path_to_string`, `read_track_metadata_with_id3`, `read_track_metadata_with_lofty`, `should_use_id3`, `update_track_metadata_with_id3`, `update_track_metadata_with_lofty`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`
 
 Future<void> updateTrackMetadata({
   required String path,
@@ -26,11 +25,13 @@ Future<TrackArtworkResult> generateTrackArtwork({
   required String cacheRootPath,
   required bool saveLargeArtwork,
   required int thumbnailSize,
+  required double hueCohesion,
 }) => RustLib.instance.api.crateApiSimpleMetadataGenerateTrackArtwork(
   path: path,
   cacheRootPath: cacheRootPath,
   saveLargeArtwork: saveLargeArtwork,
   thumbnailSize: thumbnailSize,
+  hueCohesion: hueCohesion,
 );
 
 Future<void> removeAllTags({required String path}) =>

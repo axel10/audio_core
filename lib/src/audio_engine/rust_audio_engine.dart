@@ -1,15 +1,15 @@
 import 'dart:async';
 import 'dart:typed_data';
 import '../fft_processor.dart';
-import '../track_artwork.dart';
 import '../rust/api/simple_api.dart' as rust;
 import '../rust/api/simple/equalizer.dart';
 import '../track_metadata.dart';
 import 'audio_engine_interface.dart';
 import 'pcm_waveform_support.dart';
 import 'rust_metadata_bridge.dart';
+import 'track_artwork_support.dart';
 
-class RustAudioEngine with PcmWaveformSupport implements AudioEngine {
+class RustAudioEngine with PcmWaveformSupport, TrackArtworkSupport implements AudioEngine {
   final _statusController = StreamController<AudioStatus>.broadcast();
   StreamSubscription? _subscription;
   double _currentVolume = 1.0;
@@ -169,6 +169,9 @@ class RustAudioEngine with PcmWaveformSupport implements AudioEngine {
   bool get supportsCrossfade => true;
 
   @override
+  String normalizeArtworkPath(String path) => path;
+
+  @override
   Future<String?> extractFingerprint(String path) async {
     try {
       return await rust.getAudioFingerprint(path: path);
@@ -214,29 +217,6 @@ class RustAudioEngine with PcmWaveformSupport implements AudioEngine {
   }) async {
     final metadata = await rust.getTrackMetadata(path: path);
     return trackMetadataFromRust(metadata);
-  }
-
-  @override
-  Future<GeneratedTrackArtwork> generateTrackArtwork({
-    required String path,
-    required String cacheRootPath,
-    required bool saveLargeArtwork,
-    int thumbnailSize = generatedArtworkThumbnailSize,
-  }) async {
-    final result = await rust.generateTrackArtwork(
-      path: path,
-      cacheRootPath: cacheRootPath,
-      saveLargeArtwork: saveLargeArtwork,
-      thumbnailSize: thumbnailSize,
-    );
-    return GeneratedTrackArtwork(
-      artworkFound: result.artworkFound,
-      artworkPath: result.artworkPath,
-      thumbnailPath: result.thumbnailPath,
-      artworkWidth: result.artworkWidth,
-      artworkHeight: result.artworkHeight,
-      themeColorsBlob: result.themeColorsBlob,
-    );
   }
 
   @override

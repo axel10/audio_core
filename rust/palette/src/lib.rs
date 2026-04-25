@@ -8,8 +8,20 @@ pub fn build_theme_colors_from_pixels(
     pixels: &[u8],
     channels_per_pixel: usize,
 ) -> Option<BTreeMap<String, u32>> {
+    build_theme_colors_from_pixels_with_options(
+        pixels,
+        channels_per_pixel,
+        ThemePaletteOptions::default(),
+    )
+}
+
+pub fn build_theme_colors_from_pixels_with_options(
+    pixels: &[u8],
+    channels_per_pixel: usize,
+    options: ThemePaletteOptions,
+) -> Option<BTreeMap<String, u32>> {
     let palette_colors = quantize_palette_colors(pixels, channels_per_pixel, PALETTE_MAX_COLORS);
-    let theme_colors = select_theme_colors(palette_colors);
+    let theme_colors = select_theme_colors(palette_colors, options);
     if theme_colors.is_empty() {
         return None;
     }
@@ -27,6 +39,14 @@ pub fn debug_build_theme_colors_from_pixels(
     channels_per_pixel: usize,
 ) -> Option<BTreeMap<String, u32>> {
     build_theme_colors_from_pixels(pixels, channels_per_pixel)
+}
+
+pub fn debug_build_theme_colors_from_pixels_with_options(
+    pixels: &[u8],
+    channels_per_pixel: usize,
+    options: ThemePaletteOptions,
+) -> Option<BTreeMap<String, u32>> {
+    build_theme_colors_from_pixels_with_options(pixels, channels_per_pixel, options)
 }
 
 fn quantize_palette_colors(
@@ -117,7 +137,10 @@ fn quantize_histogram(
     palette_colors
 }
 
-fn select_theme_colors(mut palette_colors: Vec<PaletteColor>) -> BTreeMap<String, PaletteColor> {
+fn select_theme_colors(
+    mut palette_colors: Vec<PaletteColor>,
+    options: ThemePaletteOptions,
+) -> BTreeMap<String, PaletteColor> {
     if palette_colors.is_empty() {
         return BTreeMap::new();
     }
@@ -125,8 +148,12 @@ fn select_theme_colors(mut palette_colors: Vec<PaletteColor>) -> BTreeMap<String
     palette_colors.sort_by(|a, b| b.population.cmp(&a.population));
     let dominant = palette_colors[0].clone();
     let dominant_population = dominant.population.max(1) as f64;
+    let hue_cohesion = options.hue_cohesion.clamp(0.0, 1.0);
+    let hue_anchors = build_hue_anchors(&palette_colors, &dominant, hue_cohesion);
     let mut theme_colors = BTreeMap::new();
     let mut used_colors = HashSet::<u32>::new();
+
+    println!(" hue_cohesion: {hue_cohesion:?}");
 
     theme_colors.insert("dominant".to_string(), dominant.clone());
 
@@ -136,6 +163,8 @@ fn select_theme_colors(mut palette_colors: Vec<PaletteColor>) -> BTreeMap<String
             &target,
             dominant_population,
             &used_colors,
+            &hue_anchors,
+            hue_cohesion,
         ) {
             theme_colors.insert(name.to_string(), color.clone());
             if target.is_exclusive {
@@ -144,6 +173,7 @@ fn select_theme_colors(mut palette_colors: Vec<PaletteColor>) -> BTreeMap<String
         }
     }
 
+    harmonize_theme_colors(&mut theme_colors, &hue_anchors, hue_cohesion);
     theme_colors
 }
 
@@ -152,6 +182,8 @@ fn get_max_scored_palette_color<'a>(
     target: &PaletteTarget,
     dominant_population: f64,
     used_colors: &HashSet<u32>,
+    hue_anchors: &[f64],
+    hue_cohesion: f64,
 ) -> Option<&'a PaletteColor> {
     let mut best_score = 0.0;
     let mut best_color = None;
@@ -161,7 +193,13 @@ fn get_max_scored_palette_color<'a>(
             continue;
         }
 
-        let score = generate_palette_score(color, target, dominant_population);
+        let score = generate_palette_score(
+            color,
+            target,
+            dominant_population,
+            hue_anchors,
+            hue_cohesion,
+        );
         if best_color.is_none() || score > best_score {
             best_score = score;
             best_color = Some(color);
@@ -187,6 +225,8 @@ fn generate_palette_score(
     color: &PaletteColor,
     target: &PaletteTarget,
     dominant_population: f64,
+    hue_anchors: &[f64],
+    hue_cohesion: f64,
 ) -> f64 {
     let saturation_score = if target.saturation_weight > 0.0 {
         target.saturation_weight * (1.0 - (color.hsl.saturation - target.target_saturation).abs())
@@ -204,7 +244,18 @@ fn generate_palette_score(
         0.0
     };
 
-    saturation_score + lightness_score + population_score
+    let hue_score = if hue_cohesion > 0.0 && !hue_anchors.is_empty() && color.hsl.saturation > 0.08
+    {
+        let similarity = hue_anchors
+            .iter()
+            .map(|anchor| hue_similarity(color.hsl.hue, *anchor))
+            .fold(0.0, f64::max);
+        0.2 * hue_cohesion * similarity
+    } else {
+        0.0
+    };
+
+    saturation_score + lightness_score + population_score + hue_score
 }
 
 fn palette_targets() -> [(&'static str, PaletteTarget); 6] {
@@ -301,6 +352,14 @@ impl PaletteColor {
     fn argb(&self) -> u32 {
         0xff00_0000 | self.rgb
     }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ThemePaletteOptions {
+    /// `0.0` keeps the current palette behavior.
+    /// `1.0` strongly pulls non-dominant colors toward one or two anchor hues
+    /// derived from the artwork's main theme.
+    pub hue_cohesion: f64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -580,6 +639,165 @@ impl Ord for PriorityColorBox {
     }
 }
 
+fn build_hue_anchors(
+    palette_colors: &[PaletteColor],
+    dominant: &PaletteColor,
+    hue_cohesion: f64,
+) -> Vec<f64> {
+    if hue_cohesion <= 0.0 || dominant.hsl.saturation <= 0.08 {
+        return Vec::new();
+    }
+
+    let mut anchors = vec![dominant.hsl.hue];
+    let dominant_population = dominant.population.max(1) as f64;
+    let mut best_secondary_score = 0.0;
+    let mut best_secondary_hue = None;
+
+    for color in palette_colors.iter().skip(1) {
+        if color.hsl.saturation <= 0.16 {
+            continue;
+        }
+
+        let distance = circular_hue_distance(dominant.hsl.hue, color.hsl.hue);
+        if !(72.0..=180.0).contains(&distance) {
+            continue;
+        }
+
+        let population_score = color.population as f64 / dominant_population;
+        let saturation_score = color.hsl.saturation;
+        let spacing_score = if distance <= 120.0 {
+            (distance - 72.0) / 48.0
+        } else {
+            1.0 - ((distance - 120.0) / 60.0)
+        }
+        .clamp(0.0, 1.0);
+        let score = population_score * 0.7 + saturation_score * 0.1 + spacing_score * 0.2;
+        if score > best_secondary_score {
+            best_secondary_score = score;
+            best_secondary_hue = Some(color.hsl.hue);
+        }
+    }
+
+    if best_secondary_score >= 0.3 {
+        if let Some(hue) = best_secondary_hue {
+            anchors.push(hue);
+        }
+    }
+
+    anchors
+}
+
+fn harmonize_theme_colors(
+    theme_colors: &mut BTreeMap<String, PaletteColor>,
+    hue_anchors: &[f64],
+    hue_cohesion: f64,
+) {
+    if hue_cohesion <= 0.0 || hue_anchors.is_empty() {
+        return;
+    }
+
+    let shift_strength = 0.55 * hue_cohesion;
+    let max_shift = 48.0 * hue_cohesion;
+
+    for (name, color) in theme_colors.iter_mut() {
+        if name == "dominant" || color.hsl.saturation <= 0.08 {
+            continue;
+        }
+
+        let Some(anchor_hue) = nearest_hue_anchor(color.hsl.hue, hue_anchors) else {
+            continue;
+        };
+
+        let new_hue = move_hue_toward(color.hsl.hue, anchor_hue, shift_strength, max_shift);
+        let new_hsl = HslColor {
+            hue: new_hue,
+            saturation: color.hsl.saturation,
+            lightness: color.hsl.lightness,
+        };
+        color.hsl = new_hsl;
+        color.rgb = hsl_to_rgb(new_hsl);
+    }
+}
+
+fn hue_similarity(hue: f64, anchor: f64) -> f64 {
+    (1.0 - circular_hue_distance(hue, anchor) / 90.0).clamp(0.0, 1.0)
+}
+
+fn circular_hue_distance(a: f64, b: f64) -> f64 {
+    let distance = (a - b).abs().rem_euclid(360.0);
+    distance.min(360.0 - distance)
+}
+
+fn nearest_hue_anchor(hue: f64, anchors: &[f64]) -> Option<f64> {
+    anchors.iter().copied().min_by(|a, b| {
+        circular_hue_distance(hue, *a)
+            .partial_cmp(&circular_hue_distance(hue, *b))
+            .unwrap_or(Ordering::Equal)
+    })
+}
+
+fn move_hue_toward(hue: f64, target_hue: f64, strength: f64, max_shift: f64) -> f64 {
+    let delta = shortest_hue_delta(hue, target_hue);
+    let shifted = delta.signum() * (delta.abs() * strength).min(max_shift);
+    (hue + shifted).rem_euclid(360.0)
+}
+
+fn shortest_hue_delta(from: f64, to: f64) -> f64 {
+    let delta = (to - from).rem_euclid(360.0);
+    if delta > 180.0 {
+        delta - 360.0
+    } else {
+        delta
+    }
+}
+
+fn hsl_to_rgb(hsl: HslColor) -> u32 {
+    let hue = hsl.hue.rem_euclid(360.0) / 360.0;
+    let saturation = hsl.saturation.clamp(0.0, 1.0);
+    let lightness = hsl.lightness.clamp(0.0, 1.0);
+
+    if saturation <= f64::EPSILON {
+        let value = (lightness * 255.0).round() as u8;
+        return pack_rgb(value, value, value);
+    }
+
+    let q = if lightness < 0.5 {
+        lightness * (1.0 + saturation)
+    } else {
+        lightness + saturation - lightness * saturation
+    };
+    let p = 2.0 * lightness - q;
+
+    let red = hue_to_rgb(p, q, hue + 1.0 / 3.0);
+    let green = hue_to_rgb(p, q, hue);
+    let blue = hue_to_rgb(p, q, hue - 1.0 / 3.0);
+
+    pack_rgb(
+        (red * 255.0).round() as u8,
+        (green * 255.0).round() as u8,
+        (blue * 255.0).round() as u8,
+    )
+}
+
+fn hue_to_rgb(p: f64, q: f64, mut t: f64) -> f64 {
+    if t < 0.0 {
+        t += 1.0;
+    }
+    if t > 1.0 {
+        t -= 1.0;
+    }
+    if t < 1.0 / 6.0 {
+        return p + (q - p) * 6.0 * t;
+    }
+    if t < 1.0 / 2.0 {
+        return q;
+    }
+    if t < 2.0 / 3.0 {
+        return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+    }
+    p
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -622,5 +840,59 @@ mod tests {
         let theme_colors = build_theme_colors_from_pixels(&pixels, 4).expect("theme colors");
 
         assert_eq!(theme_colors.get("dominant"), Some(&0xff20_90d0));
+    }
+
+    #[test]
+    fn hue_cohesion_biases_dark_vibrant_toward_secondary_theme_hue() {
+        let palette_colors = vec![
+            PaletteColor::new(pack_rgb(0xff, 0x20, 0x20), 100),
+            PaletteColor::new(pack_rgb(0x00, 0x84, 0x84), 95),
+            PaletteColor::new(pack_rgb(0x84, 0x3a, 0x00), 70),
+        ];
+
+        let loose = select_theme_colors(
+            palette_colors.clone(),
+            ThemePaletteOptions { hue_cohesion: 0.0 },
+        );
+        let cohesive =
+            select_theme_colors(palette_colors, ThemePaletteOptions { hue_cohesion: 1.0 });
+
+        assert_eq!(loose.get("darkVibrant").map(|c| c.rgb), Some(0x008484));
+        assert_eq!(cohesive.get("darkVibrant").map(|c| c.rgb), Some(0x008484));
+    }
+
+    #[test]
+    fn hue_anchors_prefer_far_high_population_color() {
+        let dominant = PaletteColor::new(pack_rgb(0xff, 0x20, 0x20), 100);
+        let palette_colors = vec![
+            dominant.clone(),
+            PaletteColor::new(pack_rgb(0xff, 0xa0, 0x20), 90),
+            PaletteColor::new(pack_rgb(0x00, 0x84, 0x84), 80),
+        ];
+
+        let anchors = build_hue_anchors(&palette_colors, &dominant, 1.0);
+
+        assert_eq!(anchors.len(), 2);
+        assert!(circular_hue_distance(anchors[0], anchors[1]) >= 72.0);
+        assert!(circular_hue_distance(anchors[1], 180.0) < 30.0);
+    }
+
+    #[test]
+    fn hue_cohesion_harmonizes_selected_swatches() {
+        let mut theme_colors = BTreeMap::new();
+        theme_colors.insert(
+            "dominant".to_string(),
+            PaletteColor::new(pack_rgb(0xff, 0x20, 0x20), 100),
+        );
+        theme_colors.insert(
+            "lightVibrant".to_string(),
+            PaletteColor::new(pack_rgb(0x20, 0xb4, 0xff), 60),
+        );
+
+        harmonize_theme_colors(&mut theme_colors, &[0.0], 1.0);
+
+        let harmonized = theme_colors.get("lightVibrant").expect("light vibrant");
+        assert!(circular_hue_distance(harmonized.hsl.hue, 0.0) < 120.0);
+        assert!(harmonized.hsl.saturation > 0.5);
     }
 }

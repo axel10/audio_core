@@ -8,13 +8,13 @@ import 'package:dart_chromaprint/dart_chromaprint.dart';
 import '../fft_processor.dart';
 import '../rust/api/simple/equalizer.dart';
 import '../rust/api/simple_api.dart' as rust;
-import '../track_artwork.dart';
 import '../track_metadata.dart';
 import 'audio_engine_interface.dart';
 import 'pcm_waveform_support.dart';
 import 'rust_metadata_bridge.dart';
+import 'track_artwork_support.dart';
 
-class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
+class AppleAudioEngine with PcmWaveformSupport, TrackArtworkSupport implements AudioEngine {
   static const MethodChannel _channel = MethodChannel('my_exoplayer');
 
   final _statusController = StreamController<AudioStatus>.broadcast();
@@ -402,29 +402,6 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
   }
 
   @override
-  Future<GeneratedTrackArtwork> generateTrackArtwork({
-    required String path,
-    required String cacheRootPath,
-    required bool saveLargeArtwork,
-    int thumbnailSize = generatedArtworkThumbnailSize,
-  }) async {
-    final result = await rust.generateTrackArtwork(
-      path: _normalizePath(path),
-      cacheRootPath: _normalizePath(cacheRootPath),
-      saveLargeArtwork: saveLargeArtwork,
-      thumbnailSize: thumbnailSize,
-    );
-    return GeneratedTrackArtwork(
-      artworkFound: result.artworkFound,
-      artworkPath: result.artworkPath,
-      thumbnailPath: result.thumbnailPath,
-      artworkWidth: result.artworkWidth,
-      artworkHeight: result.artworkHeight,
-      themeColorsBlob: result.themeColorsBlob,
-    );
-  }
-
-  @override
   Future<void> removeAllTags({String? path}) async {
     final targetPath = path?.trim();
     if (targetPath == null || targetPath.isEmpty) {
@@ -455,6 +432,9 @@ class AppleAudioEngine with PcmWaveformSupport implements AudioEngine {
     }
     return targetPath;
   }
+
+  @override
+  String normalizeArtworkPath(String path) => _normalizePath(path);
 
   String? _normalizeNullablePath(String? path) {
     final targetPath = path?.trim();

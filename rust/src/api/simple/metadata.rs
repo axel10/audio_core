@@ -13,7 +13,7 @@ use zune_image::traits::OperationsTrait;
 use zune_imageprocs::crop::Crop;
 use zune_imageprocs::resize::{Resize, ResizeMethod};
 
-use super::palette::build_theme_colors_blob;
+use super::palette::{build_theme_colors_blob_with_options, ThemePaletteOptions};
 
 use id3::frame::{
     Comment as Id3Comment, ExtendedText as Id3ExtendedText, Lyrics as Id3Lyrics,
@@ -82,6 +82,7 @@ pub fn generate_track_artwork(
     cache_root_path: String,
     save_large_artwork: bool,
     thumbnail_size: i32,
+    hue_cohesion: f64,
 ) -> anyhow::Result<TrackArtworkResult> {
     let picture = extract_embedded_artwork(&path);
     let Some(picture) = picture else {
@@ -100,7 +101,11 @@ pub fn generate_track_artwork(
 
     let (thumbnail_image, artwork_width, artwork_height) =
         build_square_thumbnail(&picture.bytes, thumbnail_size.max(1) as usize)?;
-    let theme_colors_blob = build_theme_colors_blob(&thumbnail_image).unwrap_or_else(|err| {
+    let theme_colors_blob = build_theme_colors_blob_with_options(
+        &thumbnail_image,
+        ThemePaletteOptions { hue_cohesion },
+    )
+    .unwrap_or_else(|err| {
         log::warn!("failed to calculate artwork palette for {path}: {err}");
         None
     });
