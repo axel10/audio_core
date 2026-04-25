@@ -267,6 +267,15 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
   }
 
   List<Color> _resolveMeshColors(Map<String, int> themeColors) {
+    if (themeColors.containsKey('mesh1') && themeColors.containsKey('mesh4')) {
+      return [
+        Color(themeColors['mesh1']!),
+        Color(themeColors['mesh2']!),
+        Color(themeColors['mesh3']!),
+        Color(themeColors['mesh4']!),
+      ];
+    }
+
     final color1 = _resolveMeshColor(themeColors, const [
       'dominant',
       'vibrant',

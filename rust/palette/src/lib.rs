@@ -174,6 +174,14 @@ fn select_theme_colors(
     }
 
     harmonize_theme_colors(&mut theme_colors, &hue_anchors, hue_cohesion);
+
+    if let Some(mesh_combo) = select_mesh_colors(&palette_colors) {
+        theme_colors.insert("mesh1".to_string(), mesh_combo[0].clone());
+        theme_colors.insert("mesh2".to_string(), mesh_combo[1].clone());
+        theme_colors.insert("mesh3".to_string(), mesh_combo[2].clone());
+        theme_colors.insert("mesh4".to_string(), mesh_combo[3].clone());
+    }
+
     theme_colors
 }
 
@@ -338,14 +346,21 @@ struct PaletteColor {
     rgb: u32,
     population: usize,
     hsl: HslColor,
+    oklab: OklabColor,
+    oklch: OklchColor,
 }
 
 impl PaletteColor {
     fn new(rgb: u32, population: usize) -> Self {
+        let (r, g, b) = unpack_rgb(rgb);
+        let oklab = rgb_to_oklab(r, g, b);
+        let oklch = oklab_to_oklch(oklab);
         Self {
             rgb,
             population,
             hsl: rgb_to_hsl(rgb),
+            oklab,
+            oklch,
         }
     }
 
@@ -796,6 +811,162 @@ fn hue_to_rgb(p: f64, q: f64, mut t: f64) -> f64 {
         return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
     }
     p
+}
+
+#[derive(Debug, Clone, Copy)]
+struct OklabColor {
+    l: f64,
+    a: f64,
+    b: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct OklchColor {
+    l: f64,
+    c: f64,
+    h: f64,
+}
+
+fn srgb_to_linear(c: u8) -> f64 {
+    let c = f64::from(c) / 255.0;
+    if c >= 0.04045 {
+        ((c + 0.055) / 1.055).powf(2.4)
+    } else {
+        c / 12.92
+    }
+}
+
+fn rgb_to_oklab(r: u8, g: u8, b: u8) -> OklabColor {
+    let r = srgb_to_linear(r);
+    let g = srgb_to_linear(g);
+    let b = srgb_to_linear(b);
+
+    let l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b;
+    let m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b;
+    let s = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b;
+
+    let l_ = l.cbrt();
+    let m_ = m.cbrt();
+    let s_ = s.cbrt();
+
+    let l_out = 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_;
+    let a_out = 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_;
+    let b_out = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_;
+
+    OklabColor {
+        l: l_out,
+        a: a_out,
+        b: b_out,
+    }
+}
+
+fn oklab_to_oklch(oklab: OklabColor) -> OklchColor {
+    let c = (oklab.a * oklab.a + oklab.b * oklab.b).sqrt();
+    let mut h = oklab.b.atan2(oklab.a).to_degrees();
+    if h < 0.0 {
+        h += 360.0;
+    }
+    OklchColor { l: oklab.l, c, h }
+}
+
+fn oklab_distance(c1: &OklabColor, c2: &OklabColor) -> f64 {
+    ((c1.l - c2.l).powi(2) + (c1.a - c2.a).powi(2) + (c1.b - c2.b).powi(2)).sqrt()
+}
+
+fn select_mesh_colors(palette_colors: &[PaletteColor]) -> Option<[PaletteColor; 4]> {
+    let n = palette_colors.len();
+    if n < 4 {
+        if n == 0 {
+            return None;
+        }
+        let mut combo = [palette_colors[0].clone(), palette_colors[0].clone(), palette_colors[0].clone(), palette_colors[0].clone()];
+        for i in 0..4 {
+            combo[i] = palette_colors[i % n].clone();
+        }
+        return Some(combo);
+    }
+
+    let mut best_score = f64::NEG_INFINITY;
+    let mut best_combo = None;
+
+    let max_pop = palette_colors[0].population as f64;
+
+    for i in 0..n {
+        for j in (i + 1)..n {
+            for k in (j + 1)..n {
+                for m in (k + 1)..n {
+                    let combo = [&palette_colors[i], &palette_colors[j], &palette_colors[k], &palette_colors[m]];
+                    let score = evaluate_mesh_combo(&combo, max_pop);
+                    if score > best_score {
+                        best_score = score;
+                        best_combo = Some([
+                            palette_colors[i].clone(),
+                            palette_colors[j].clone(),
+                            palette_colors[k].clone(),
+                            palette_colors[m].clone(),
+                        ]);
+                    }
+                }
+            }
+        }
+    }
+    
+    if let Some(mut combo) = best_combo {
+        combo.sort_by(|a, b| b.oklch.l.partial_cmp(&a.oklch.l).unwrap_or(Ordering::Equal));
+        Some(combo)
+    } else {
+        None
+    }
+}
+
+fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64) -> f64 {
+    let pop_score = combo.iter().map(|c| c.population as f64 / max_pop).sum::<f64>();
+
+    let mut min_dist = f64::INFINITY;
+    for i in 0..4 {
+        for j in (i + 1)..4 {
+            let dist = oklab_distance(&combo[i].oklab, &combo[j].oklab);
+            min_dist = min_dist.min(dist);
+        }
+    }
+    
+    let distinct_score = if min_dist < 0.04 {
+        -20.0
+    } else {
+        (min_dist.min(0.15) - 0.04) * 10.0
+    };
+
+    let mut clash_penalty = 0.0;
+    for i in 0..4 {
+        for j in (i + 1)..4 {
+            let h_dist = circular_hue_distance(combo[i].oklch.h, combo[j].oklch.h);
+            if h_dist > 60.0 && h_dist < 120.0 {
+                let chroma_product = combo[i].oklch.c * combo[j].oklch.c;
+                clash_penalty += chroma_product * 50.0;
+            }
+        }
+    }
+
+    let mut l_mean = 0.0;
+    let mut c_mean = 0.0;
+    for c in combo {
+        l_mean += c.oklch.l;
+        c_mean += c.oklch.c;
+    }
+    l_mean /= 4.0;
+    c_mean /= 4.0;
+
+    let mut l_var = 0.0;
+    let mut c_var = 0.0;
+    for c in combo {
+        l_var += (c.oklch.l - l_mean).powi(2);
+        c_var += (c.oklch.c - c_mean).powi(2);
+    }
+    
+    let over_chroma_penalty = if c_mean > 0.15 { (c_mean - 0.15) * 5.0 } else { 0.0 };
+    let cohesion_penalty = l_var * 5.0 + c_var * 5.0;
+
+    pop_score * 2.0 + distinct_score - clash_penalty - cohesion_penalty - over_chroma_penalty
 }
 
 #[cfg(test)]

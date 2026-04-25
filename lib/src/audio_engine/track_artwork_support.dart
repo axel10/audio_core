@@ -9,7 +9,7 @@ mixin TrackArtworkSupport {
     required String cacheRootPath,
     required bool saveLargeArtwork,
     int thumbnailSize = generatedArtworkThumbnailSize,
-    double hueCohesion = 1.0,
+    double hueCohesion = 0.0,
   }) async {
     final result = await rust.generateTrackArtwork(
       path: normalizeArtworkPath(path),
