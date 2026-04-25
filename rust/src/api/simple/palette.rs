@@ -122,8 +122,8 @@ fn quantize_histogram(
         }
 
         let new_box = color_box.split_box(&mut colors, &histogram);
-        priority_queue.push(PriorityColorBox::from_box(color_box));
         priority_queue.push(PriorityColorBox::from_box(new_box));
+        priority_queue.push(PriorityColorBox::from_box(color_box));
     }
 
     priority_queue
