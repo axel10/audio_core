@@ -6,7 +6,7 @@
 import '../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `build_theme_colors_blob_with_options`, `build_theme_colors_blob`, `build_theme_colors_from_image_with_options`
+// These functions are ignored because they are not marked as `pub`: `build_theme_colors_blob_with_options`, `build_theme_colors_blob`, `build_theme_colors_from_image_with_options`, `build_theme_palette_bundle_with_options`
 
 Future<BTreeMapStringU32?> debugBuildThemeColorsFromPixels({
   required List<int> pixels,

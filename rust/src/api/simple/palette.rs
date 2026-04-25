@@ -2,32 +2,34 @@ pub use std::collections::BTreeMap;
 
 pub use palette_core::ThemePaletteOptions;
 use palette_core::{
-    build_theme_colors_from_pixels_with_options as build_theme_colors_from_pixels_with_options_core,
+    build_theme_palette_bundle_from_pixels_with_options as build_theme_palette_bundle_from_pixels_with_options_core,
     debug_build_theme_colors_from_pixels as debug_build_theme_colors_from_pixels_core,
     debug_build_theme_colors_from_pixels_with_options as debug_build_theme_colors_from_pixels_with_options_core,
 };
 use zune_core::colorspace::ColorSpace;
 use zune_image::image::Image;
 
+#[allow(dead_code)]
 pub(crate) fn build_theme_colors_blob(image: &Image) -> anyhow::Result<Option<Vec<u8>>> {
     build_theme_colors_blob_with_options(image, ThemePaletteOptions::default())
 }
 
+#[allow(dead_code)]
 pub(crate) fn build_theme_colors_blob_with_options(
     image: &Image,
     options: ThemePaletteOptions,
 ) -> anyhow::Result<Option<Vec<u8>>> {
-    let Some(theme_colors) = build_theme_colors_from_image_with_options(image, options)? else {
+    let Some(bundle) = build_theme_palette_bundle_with_options(image, options)? else {
         return Ok(None);
     };
 
-    Ok(Some(serde_json::to_vec(&theme_colors)?))
+    Ok(Some(serde_json::to_vec(&bundle.theme_colors)?))
 }
 
-fn build_theme_colors_from_image_with_options(
+pub(crate) fn build_theme_palette_bundle_with_options(
     image: &Image,
     options: ThemePaletteOptions,
-) -> anyhow::Result<Option<BTreeMap<String, u32>>> {
+) -> anyhow::Result<Option<palette_core::ThemePaletteBundle>> {
     let target_colorspace = if image.colorspace().has_alpha() {
         ColorSpace::RGBA
     } else {
@@ -46,7 +48,7 @@ fn build_theme_colors_from_image_with_options(
         return Ok(None);
     };
 
-    Ok(build_theme_colors_from_pixels_with_options_core(
+    Ok(build_theme_palette_bundle_from_pixels_with_options_core(
         pixels,
         target_colorspace.num_components(),
         options,

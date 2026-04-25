@@ -299,6 +299,10 @@ fn wire__crate__api__simple__metadata__generate_track_artwork_impl(
             let api_thumbnail_size = <i32>::sse_decode(&mut deserializer);
             let api_hue_cohesion = <f64>::sse_decode(&mut deserializer);
             let api_mesh_muddy_penalty_multiplier = <f64>::sse_decode(&mut deserializer);
+            let api_mesh_population_strength = <f64>::sse_decode(&mut deserializer);
+            let api_mesh_contrast_strength = <f64>::sse_decode(&mut deserializer);
+            let api_mesh_harmony_strength = <f64>::sse_decode(&mut deserializer);
+            let api_mesh_vibrancy_strength = <f64>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -310,6 +314,10 @@ fn wire__crate__api__simple__metadata__generate_track_artwork_impl(
                             api_thumbnail_size,
                             api_hue_cohesion,
                             api_mesh_muddy_penalty_multiplier,
+                            api_mesh_population_strength,
+                            api_mesh_contrast_strength,
+                            api_mesh_harmony_strength,
+                            api_mesh_vibrancy_strength,
                         )?;
                         Ok(output_ok)
                     })(),
@@ -1526,6 +1534,7 @@ impl SseDecode for crate::api::simple::metadata::TrackArtworkResult {
         let mut var_artworkWidth = <Option<i32>>::sse_decode(deserializer);
         let mut var_artworkHeight = <Option<i32>>::sse_decode(deserializer);
         let mut var_themeColorsBlob = <Option<Vec<u8>>>::sse_decode(deserializer);
+        let mut var_meshDebugBlob = <Option<Vec<u8>>>::sse_decode(deserializer);
         return crate::api::simple::metadata::TrackArtworkResult {
             artwork_found: var_artworkFound,
             artwork_path: var_artworkPath,
@@ -1533,6 +1542,7 @@ impl SseDecode for crate::api::simple::metadata::TrackArtworkResult {
             artwork_width: var_artworkWidth,
             artwork_height: var_artworkHeight,
             theme_colors_blob: var_themeColorsBlob,
+            mesh_debug_blob: var_meshDebugBlob,
         };
     }
 }
@@ -1823,6 +1833,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::simple::metadata::TrackArtwor
             self.artwork_width.into_into_dart().into_dart(),
             self.artwork_height.into_into_dart().into_dart(),
             self.theme_colors_blob.into_into_dart().into_dart(),
+            self.mesh_debug_blob.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -2144,6 +2155,7 @@ impl SseEncode for crate::api::simple::metadata::TrackArtworkResult {
         <Option<i32>>::sse_encode(self.artwork_width, serializer);
         <Option<i32>>::sse_encode(self.artwork_height, serializer);
         <Option<Vec<u8>>>::sse_encode(self.theme_colors_blob, serializer);
+        <Option<Vec<u8>>>::sse_encode(self.mesh_debug_blob, serializer);
     }
 }
 

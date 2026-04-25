@@ -9,11 +9,19 @@ class TrackArtworkOptions {
     this.thumbnailSize = generatedArtworkThumbnailSize,
     this.hueCohesion = 0.0,
     this.meshMuddyPenaltyMultiplier = 1.0,
+    this.meshPopulationStrength = 1.0,
+    this.meshContrastStrength = 1.0,
+    this.meshHarmonyStrength = 1.0,
+    this.meshVibrancyStrength = 1.0,
   });
 
   final int thumbnailSize;
   final double hueCohesion;
   final double meshMuddyPenaltyMultiplier;
+  final double meshPopulationStrength;
+  final double meshContrastStrength;
+  final double meshHarmonyStrength;
+  final double meshVibrancyStrength;
 }
 
 class GeneratedTrackArtwork {
@@ -24,6 +32,7 @@ class GeneratedTrackArtwork {
     this.artworkWidth,
     this.artworkHeight,
     this.themeColorsBlob,
+    this.meshDebugBlob,
   });
 
   final bool artworkFound;
@@ -32,6 +41,7 @@ class GeneratedTrackArtwork {
   final int? artworkWidth;
   final int? artworkHeight;
   final Uint8List? themeColorsBlob;
+  final Uint8List? meshDebugBlob;
 
   factory GeneratedTrackArtwork.fromRust(rust.TrackArtworkResult result) {
     return GeneratedTrackArtwork(
@@ -41,6 +51,7 @@ class GeneratedTrackArtwork {
       artworkWidth: result.artworkWidth,
       artworkHeight: result.artworkHeight,
       themeColorsBlob: result.themeColorsBlob,
+      meshDebugBlob: result.meshDebugBlob,
     );
   }
 
@@ -52,6 +63,7 @@ class GeneratedTrackArtwork {
       'artworkWidth': artworkWidth,
       'artworkHeight': artworkHeight,
       'themeColorsBlob': themeColorsBlob,
+      'meshDebugBlob': meshDebugBlob,
     };
   }
 
@@ -75,6 +87,7 @@ class GeneratedTrackArtwork {
       artworkWidth: readInt(map['artworkWidth']),
       artworkHeight: readInt(map['artworkHeight']),
       themeColorsBlob: readBytes(map['themeColorsBlob']),
+      meshDebugBlob: readBytes(map['meshDebugBlob']),
     );
   }
 }

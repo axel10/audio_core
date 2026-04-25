@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
 
+use serde::Serialize;
+
 const PALETTE_MAX_COLORS: usize = 16;
 const QUANTIZE_WORD_MASK: u8 = 0xF8;
 
@@ -20,19 +22,8 @@ pub fn build_theme_colors_from_pixels_with_options(
     channels_per_pixel: usize,
     options: ThemePaletteOptions,
 ) -> Option<BTreeMap<String, u32>> {
-    let (palette_colors, mesh_colors) =
-        quantize_palette_colors(pixels, channels_per_pixel, PALETTE_MAX_COLORS);
-    let theme_colors = select_theme_colors(palette_colors, mesh_colors, options);
-    if theme_colors.is_empty() {
-        return None;
-    }
-
-    Some(
-        theme_colors
-            .into_iter()
-            .map(|(key, color)| (key, color.argb()))
-            .collect(),
-    )
+    build_theme_palette_bundle_from_pixels_with_options(pixels, channels_per_pixel, options)
+        .map(|bundle| bundle.theme_colors)
 }
 
 pub fn debug_build_theme_colors_from_pixels(
@@ -48,6 +39,27 @@ pub fn debug_build_theme_colors_from_pixels_with_options(
     options: ThemePaletteOptions,
 ) -> Option<BTreeMap<String, u32>> {
     build_theme_colors_from_pixels_with_options(pixels, channels_per_pixel, options)
+}
+
+pub fn build_theme_palette_bundle_from_pixels_with_options(
+    pixels: &[u8],
+    channels_per_pixel: usize,
+    options: ThemePaletteOptions,
+) -> Option<ThemePaletteBundle> {
+    let (palette_colors, mesh_colors) =
+        quantize_palette_colors(pixels, channels_per_pixel, PALETTE_MAX_COLORS);
+    let (theme_colors, mesh_debug) = select_theme_colors(palette_colors, mesh_colors, options);
+    if theme_colors.is_empty() {
+        return None;
+    }
+
+    Some(ThemePaletteBundle {
+        theme_colors: theme_colors
+            .into_iter()
+            .map(|(key, color)| (key, color.argb()))
+            .collect(),
+        mesh_debug,
+    })
 }
 
 fn quantize_palette_colors(
@@ -153,9 +165,9 @@ fn select_theme_colors(
     mut palette_colors: Vec<PaletteColor>,
     mesh_colors: Vec<PaletteColor>,
     options: ThemePaletteOptions,
-) -> BTreeMap<String, PaletteColor> {
+) -> (BTreeMap<String, PaletteColor>, Option<MeshSelectionDebug>) {
     if palette_colors.is_empty() {
-        return BTreeMap::new();
+        return (BTreeMap::new(), None);
     }
 
     palette_colors.sort_by(|a, b| b.population.cmp(&a.population));
@@ -165,8 +177,6 @@ fn select_theme_colors(
     let hue_anchors = build_hue_anchors(&palette_colors, &dominant, hue_cohesion);
     let mut theme_colors = BTreeMap::new();
     let mut used_colors = HashSet::<u32>::new();
-
-    println!(" hue_cohesion: {hue_cohesion:?}");
 
     theme_colors.insert("dominant".to_string(), dominant.clone());
 
@@ -188,16 +198,17 @@ fn select_theme_colors(
 
     harmonize_theme_colors(&mut theme_colors, &hue_anchors, hue_cohesion);
 
-    if let Some(mesh_combo) =
-        select_mesh_colors(&mesh_colors, options.mesh_muddy_penalty_multiplier)
-    {
+    let mesh_scoring = MeshScoringTuning::from_options(options);
+    let mesh_selection = select_mesh_colors(&mesh_colors, mesh_scoring);
+    if let Some(mesh_combo) = mesh_selection.as_ref().map(|selection| &selection.colors) {
         theme_colors.insert("mesh1".to_string(), mesh_combo[0].clone());
         theme_colors.insert("mesh2".to_string(), mesh_combo[1].clone());
         theme_colors.insert("mesh3".to_string(), mesh_combo[2].clone());
         theme_colors.insert("mesh4".to_string(), mesh_combo[3].clone());
     }
 
-    theme_colors
+    let mesh_debug = mesh_selection.map(|selection| selection.debug);
+    (theme_colors, mesh_debug)
 }
 
 fn get_max_scored_palette_color<'a>(
@@ -384,7 +395,7 @@ impl PaletteColor {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct ThemePaletteOptions {
     /// `0.0` keeps the current palette behavior.
     /// `1.0` strongly pulls non-dominant colors toward one or two anchor hues
@@ -393,6 +404,18 @@ pub struct ThemePaletteOptions {
     /// Multiplier for the penalty applied to muddy/clashing mesh color combinations.
     /// Default is 1.0.
     pub mesh_muddy_penalty_multiplier: f64,
+    /// Multiplier for the mesh population bias.
+    /// Default is 1.0.
+    pub mesh_population_strength: f64,
+    /// Multiplier for mesh hue/shape contrast.
+    /// Default is 1.0.
+    pub mesh_contrast_strength: f64,
+    /// Multiplier for mesh harmony and cohesion.
+    /// Default is 1.0.
+    pub mesh_harmony_strength: f64,
+    /// Multiplier for mesh vibrancy / chroma emphasis.
+    /// Default is 1.0.
+    pub mesh_vibrancy_strength: f64,
 }
 
 impl Default for ThemePaletteOptions {
@@ -400,8 +423,47 @@ impl Default for ThemePaletteOptions {
         Self {
             hue_cohesion: 0.0,
             mesh_muddy_penalty_multiplier: 1.0,
+            mesh_population_strength: 1.0,
+            mesh_contrast_strength: 1.0,
+            mesh_harmony_strength: 1.0,
+            mesh_vibrancy_strength: 1.0,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ThemePaletteBundle {
+    pub theme_colors: BTreeMap<String, u32>,
+    pub mesh_debug: Option<MeshSelectionDebug>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MeshSelectionDebug {
+    pub score: MeshScoreBreakdown,
+    pub colors: Vec<MeshColorDebug>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MeshScoreBreakdown {
+    pub population: f64,
+    pub distinct: f64,
+    pub harmony: f64,
+    pub vibrancy: f64,
+    pub cohesion: f64,
+    pub over_chroma: f64,
+    pub total: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MeshColorDebug {
+    pub slot: String,
+    pub color: u32,
+    pub role: String,
+    pub primary_driver: String,
+    pub hue: f64,
+    pub chroma: f64,
+    pub lightness: f64,
+    pub population: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -902,8 +964,8 @@ fn oklab_distance(c1: &OklabColor, c2: &OklabColor) -> f64 {
 
 fn select_mesh_colors(
     palette_colors: &[PaletteColor],
-    muddy_penalty_multiplier: f64,
-) -> Option<[PaletteColor; 4]> {
+    tuning: MeshScoringTuning,
+) -> Option<MeshSelectionOutcome> {
     let n = palette_colors.len();
     if n < 4 {
         if n == 0 {
@@ -918,7 +980,11 @@ fn select_mesh_colors(
         for i in 0..4 {
             combo[i] = palette_colors[i % n].clone();
         }
-        return Some(combo);
+        let debug = build_mesh_selection_debug(&combo, tuning, 0.0);
+        return Some(MeshSelectionOutcome {
+            colors: combo,
+            debug,
+        });
     }
 
     let mut best_score = f64::NEG_INFINITY;
@@ -936,7 +1002,7 @@ fn select_mesh_colors(
                         &palette_colors[k],
                         &palette_colors[m],
                     ];
-                    let score = evaluate_mesh_combo(&combo, max_pop, muddy_penalty_multiplier);
+                    let score = evaluate_mesh_combo(&combo, max_pop, tuning);
                     if score > best_score {
                         best_score = score;
                         best_combo = Some([
@@ -953,7 +1019,11 @@ fn select_mesh_colors(
 
     if let Some(mut combo) = best_combo {
         combo.sort_by(|a, b| b.oklch.l.partial_cmp(&a.oklch.l).unwrap_or(Ordering::Equal));
-        Some(combo)
+        let debug = build_mesh_selection_debug(&combo, tuning, best_score);
+        Some(MeshSelectionOutcome {
+            colors: combo,
+            debug,
+        })
     } else {
         None
     }
@@ -962,7 +1032,7 @@ fn select_mesh_colors(
 fn evaluate_mesh_combo(
     combo: &[&PaletteColor; 4],
     max_pop: f64,
-    muddy_penalty_multiplier: f64,
+    tuning: MeshScoringTuning,
 ) -> f64 {
     let pop_score = combo
         .iter()
@@ -991,7 +1061,7 @@ fn evaluate_mesh_combo(
             let h_dist = circular_hue_distance(combo[i].oklch.h, combo[j].oklch.h);
             let chroma_product = combo[i].oklch.c * combo[j].oklch.c;
             if h_dist > 45.0 && h_dist < 120.0 {
-                clash_penalty += chroma_product * 420.0 * muddy_penalty_multiplier;
+                clash_penalty += chroma_product * 420.0 * tuning.harmony_strength;
             }
         }
     }
@@ -1020,10 +1090,154 @@ fn evaluate_mesh_combo(
     };
     let cohesion_penalty = l_var * 1.0 + c_var * 1.0;
 
-    pop_score * 2.0 + distinct_score + vibrancy_reward + template_bonus
+    pop_score * 2.0 * tuning.population_strength
+        + distinct_score * tuning.contrast_strength
+        + vibrancy_reward * tuning.vibrancy_strength
+        + template_bonus * tuning.harmony_strength
         - clash_penalty
-        - cohesion_penalty
-        - over_chroma_penalty
+        - cohesion_penalty * tuning.harmony_strength
+        - over_chroma_penalty * tuning.vibrancy_strength
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MeshScoringTuning {
+    population_strength: f64,
+    contrast_strength: f64,
+    harmony_strength: f64,
+    vibrancy_strength: f64,
+}
+
+impl MeshScoringTuning {
+    fn from_options(options: ThemePaletteOptions) -> Self {
+        Self {
+            population_strength: options.mesh_population_strength.clamp(0.0, 3.0),
+            contrast_strength: options.mesh_contrast_strength.clamp(0.0, 3.0),
+            harmony_strength: options.mesh_harmony_strength.clamp(0.0, 3.0),
+            vibrancy_strength: options.mesh_vibrancy_strength.clamp(0.0, 3.0),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MeshSelectionOutcome {
+    colors: [PaletteColor; 4],
+    debug: MeshSelectionDebug,
+}
+
+fn build_mesh_selection_debug(
+    combo: &[PaletteColor; 4],
+    tuning: MeshScoringTuning,
+    total: f64,
+) -> MeshSelectionDebug {
+    let refs = [&combo[0], &combo[1], &combo[2], &combo[3]];
+
+    let population_raw = refs.iter().map(|c| c.population as f64).sum::<f64>().max(1.0);
+    let population = refs
+        .iter()
+        .map(|c| c.population as f64 / population_raw)
+        .sum::<f64>()
+        * 2.0
+        * tuning.population_strength;
+
+    let mut min_dist = f64::INFINITY;
+    for i in 0..4 {
+        for j in (i + 1)..4 {
+            min_dist = min_dist.min(oklab_distance(&refs[i].oklab, &refs[j].oklab));
+        }
+    }
+    let distinct = if min_dist < 0.04 {
+        -20.0
+    } else {
+        (min_dist.min(0.15) - 0.04) * 10.0 * tuning.contrast_strength
+    };
+
+    let harmony = mesh_template_bonus(&refs) * tuning.harmony_strength;
+    let vibrancy_mean = refs.iter().map(|c| c.oklch.c).sum::<f64>() / 4.0;
+    let vibrancy = vibrancy_mean * 5.0 * tuning.vibrancy_strength;
+
+    let mut l_mean = 0.0;
+    let mut c_mean = 0.0;
+    for c in &refs {
+        l_mean += c.oklch.l;
+        c_mean += c.oklch.c;
+    }
+    l_mean /= 4.0;
+    c_mean /= 4.0;
+
+    let mut l_var = 0.0;
+    let mut c_var = 0.0;
+    for c in &refs {
+        l_var += (c.oklch.l - l_mean).powi(2);
+        c_var += (c.oklch.c - c_mean).powi(2);
+    }
+    let cohesion = -(l_var * 1.0 + c_var * 1.0) * tuning.harmony_strength;
+    let over_chroma = if c_mean > 0.15 {
+        -((c_mean - 0.15) * 15.0) * tuning.vibrancy_strength
+    } else {
+        0.0
+    };
+
+    let score = MeshScoreBreakdown {
+        population,
+        distinct,
+        harmony,
+        vibrancy,
+        cohesion,
+        over_chroma,
+        total,
+    };
+
+    let cluster = best_hue_cluster(&refs, 45.0);
+    let anchor_index = cluster.as_ref().and_then(|cluster| {
+        refs.iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| {
+                circular_hue_distance(cluster.center_hue, a.oklch.h)
+                    .partial_cmp(&circular_hue_distance(cluster.center_hue, b.oklch.h))
+                    .unwrap_or(Ordering::Equal)
+            })
+            .map(|(index, _)| index)
+    });
+    let accent_index = cluster.as_ref().and_then(|cluster| {
+        refs.iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| {
+                circular_hue_distance(cluster.center_hue, a.oklch.h)
+                    .partial_cmp(&circular_hue_distance(cluster.center_hue, b.oklch.h))
+                    .unwrap_or(Ordering::Equal)
+            })
+            .map(|(index, _)| index)
+    });
+
+    let mut colors = Vec::with_capacity(4);
+    for (index, color) in combo.iter().enumerate() {
+        let hue_distance = cluster
+            .as_ref()
+            .map(|cluster| circular_hue_distance(cluster.center_hue, color.oklch.h))
+            .unwrap_or_default();
+        let (role, primary_driver) = if Some(index) == accent_index && hue_distance >= 80.0 {
+            ("accent".to_string(), "contrast".to_string())
+        } else if Some(index) == anchor_index {
+            ("anchor".to_string(), "population".to_string())
+        } else if color.oklch.c >= vibrancy_mean {
+            ("support".to_string(), "vibrancy".to_string())
+        } else {
+            ("support".to_string(), "harmony".to_string())
+        };
+
+        colors.push(MeshColorDebug {
+            slot: format!("mesh{}", index + 1),
+            color: color.argb(),
+            role,
+            primary_driver,
+            hue: color.oklch.h,
+            chroma: color.oklch.c,
+            lightness: color.oklch.l,
+            population: color.population,
+        });
+    }
+
+    MeshSelectionDebug { score, colors }
 }
 
 #[derive(Debug, Clone, Copy)]

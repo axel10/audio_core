@@ -13,7 +13,7 @@ use zune_image::traits::OperationsTrait;
 use zune_imageprocs::crop::Crop;
 use zune_imageprocs::resize::{Resize, ResizeMethod};
 
-use super::palette::{build_theme_colors_blob_with_options, ThemePaletteOptions};
+use super::palette::{build_theme_palette_bundle_with_options, ThemePaletteOptions};
 
 use id3::frame::{
     Comment as Id3Comment, ExtendedText as Id3ExtendedText, Lyrics as Id3Lyrics,
@@ -59,6 +59,7 @@ pub struct TrackArtworkResult {
     pub artwork_width: Option<i32>,
     pub artwork_height: Option<i32>,
     pub theme_colors_blob: Option<Vec<u8>>,
+    pub mesh_debug_blob: Option<Vec<u8>>,
 }
 
 pub fn update_track_metadata(path: String, metadata: TrackMetadataUpdate) -> anyhow::Result<()> {
@@ -84,6 +85,10 @@ pub fn generate_track_artwork(
     thumbnail_size: i32,
     hue_cohesion: f64,
     mesh_muddy_penalty_multiplier: f64,
+    mesh_population_strength: f64,
+    mesh_contrast_strength: f64,
+    mesh_harmony_strength: f64,
+    mesh_vibrancy_strength: f64,
 ) -> anyhow::Result<TrackArtworkResult> {
     let picture = extract_embedded_artwork(&path);
     let Some(picture) = picture else {
@@ -102,17 +107,27 @@ pub fn generate_track_artwork(
 
     let (thumbnail_image, artwork_width, artwork_height) =
         build_square_thumbnail(&picture.bytes, thumbnail_size.max(1) as usize)?;
-    let theme_colors_blob = build_theme_colors_blob_with_options(
-        &thumbnail_image,
-        ThemePaletteOptions {
-            hue_cohesion,
-            mesh_muddy_penalty_multiplier,
-        },
-    )
-    .unwrap_or_else(|err| {
-        log::warn!("failed to calculate artwork palette for {path}: {err}");
-        None
-    });
+    let palette_options = ThemePaletteOptions {
+        hue_cohesion,
+        mesh_muddy_penalty_multiplier,
+        mesh_population_strength,
+        mesh_contrast_strength,
+        mesh_harmony_strength,
+        mesh_vibrancy_strength,
+        ..ThemePaletteOptions::default()
+    };
+    let palette_bundle = build_theme_palette_bundle_with_options(&thumbnail_image, palette_options)
+        .unwrap_or_else(|err| {
+            log::warn!("failed to calculate artwork palette for {path}: {err}");
+            None
+        });
+    let theme_colors_blob = palette_bundle
+        .as_ref()
+        .and_then(|bundle| serde_json::to_vec(&bundle.theme_colors).ok());
+    let mesh_debug_blob = palette_bundle
+        .as_ref()
+        .and_then(|bundle| bundle.mesh_debug.as_ref())
+        .and_then(|debug| serde_json::to_vec(debug).ok());
     let thumbnail_bytes = thumbnail_image
         .write_to_vec(ImageFormat::JPEG)
         .map_err(|err| anyhow::anyhow!("failed to encode artwork thumbnail: {err}"))?;
@@ -143,6 +158,7 @@ pub fn generate_track_artwork(
         artwork_width: Some(artwork_width as i32),
         artwork_height: Some(artwork_height as i32),
         theme_colors_blob,
+        mesh_debug_blob,
     })
 }
 

@@ -30,8 +30,13 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
   late final Directory _cacheRoot;
   double _hueCohesion = 0.58;
   double _meshMuddyPenaltyMultiplier = 1.0;
+  double _meshPopulationStrength = 1.0;
+  double _meshContrastStrength = 1.0;
+  double _meshHarmonyStrength = 1.0;
+  double _meshVibrancyStrength = 1.0;
   bool _showFullUi = true;
   List<Color> _meshColors = _fallbackColors;
+  _MeshSelectionDebug? _meshDebug;
   List<_MeshThemePreset> _themePresets = const [];
   String _activeThemeSource = 'auto';
   bool _isLoading = false;
@@ -106,6 +111,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
       setState(() {
         _trackedKey = trackKey;
         _meshColors = _fallbackColors;
+        _meshDebug = null;
         _artworkPath = null;
         _themePresets = const [];
         _activeThemeSource = 'auto';
@@ -134,11 +140,16 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
           thumbnailSize: 600,
           hueCohesion: _hueCohesion,
           meshMuddyPenaltyMultiplier: _meshMuddyPenaltyMultiplier,
+          meshPopulationStrength: _meshPopulationStrength,
+          meshContrastStrength: _meshContrastStrength,
+          meshHarmonyStrength: _meshHarmonyStrength,
+          meshVibrancyStrength: _meshVibrancyStrength,
         ),
       );
       if (!mounted || requestToken != _requestToken) return;
 
       final colors = _colorsFromArtwork(artwork.themeColorsBlob);
+      final meshDebug = _meshDebugFromBlob(artwork.meshDebugBlob);
       final themePresets = await _buildThemePresets(
         artwork: artwork,
         autoColors: colors,
@@ -147,6 +158,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
       setState(() {
         _artworkPath = artwork.artworkPath ?? artwork.thumbnailPath;
         _meshColors = colors;
+        _meshDebug = meshDebug;
         _themePresets = themePresets;
         _activeThemeSource = 'auto';
         _statusText = artwork.artworkFound
@@ -160,6 +172,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
       setState(() {
         _artworkPath = null;
         _meshColors = _fallbackColors;
+        _meshDebug = null;
         _themePresets = const [];
         _activeThemeSource = 'auto';
         _statusText = 'Failed to sample artwork colors';
@@ -259,6 +272,23 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
     }
 
     return _fallbackColors;
+  }
+
+  _MeshSelectionDebug? _meshDebugFromBlob(Uint8List? blob) {
+    if (blob == null || blob.isEmpty) {
+      return null;
+    }
+
+    try {
+      final decoded = jsonDecode(utf8.decode(blob));
+      if (decoded is Map) {
+        return _MeshSelectionDebug.fromMap(decoded.cast<Object?, Object?>());
+      }
+    } catch (_) {
+      // Keep the UI resilient if the debug blob cannot be parsed.
+    }
+
+    return null;
   }
 
   Color _resolveMeshColor(
@@ -482,7 +512,9 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
                                       : title,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.titleMedium,
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.titleMedium,
                                 ),
                                 Text(
                                   subtitle,
@@ -530,8 +562,9 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
                                     Icon(
                                       Icons.color_lens_outlined,
                                       size: 20,
-                                      color:
-                                          Theme.of(context).colorScheme.primary,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.primary,
                                     ),
                                     const SizedBox(width: 8),
                                     Text(
@@ -556,12 +589,29 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
                                     );
                                   }),
                                 ),
+                                if (_meshDebug != null) ...[
+                                  const SizedBox(height: 16),
+                                  _buildMeshDebugPanel(_meshDebug!),
+                                ],
                                 if (_statusText != null) ...[
                                   const SizedBox(height: 12),
                                   Text(
                                     _statusText!,
-                                    style:
-                                        Theme.of(context).textTheme.bodySmall,
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodySmall,
+                                  ),
+                                ],
+                                if (_isLoading) ...[
+                                  const SizedBox(height: 10),
+                                  const LinearProgressIndicator(minHeight: 2),
+                                ],
+                                if (_errorText != null) ...[
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    _errorText!,
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(color: Colors.redAccent),
                                   ),
                                 ],
                               ],
@@ -631,7 +681,13 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        Text(
+                          'Palette Tuning',
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                        const SizedBox(height: 4),
                         _buildDenseSlider(
                           label: 'Hue',
                           value: _hueCohesion,
@@ -649,6 +705,52 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
                           max: 2.0,
                           onChanged: (v) {
                             setState(() => _meshMuddyPenaltyMultiplier = v);
+                            _refreshPalette(immediate: false);
+                          },
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Mesh Balance',
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                        const SizedBox(height: 4),
+                        _buildDenseSlider(
+                          label: 'Pop',
+                          value: _meshPopulationStrength,
+                          min: 0.0,
+                          max: 2.0,
+                          onChanged: (v) {
+                            setState(() => _meshPopulationStrength = v);
+                            _refreshPalette(immediate: false);
+                          },
+                        ),
+                        _buildDenseSlider(
+                          label: 'Con',
+                          value: _meshContrastStrength,
+                          min: 0.0,
+                          max: 2.0,
+                          onChanged: (v) {
+                            setState(() => _meshContrastStrength = v);
+                            _refreshPalette(immediate: false);
+                          },
+                        ),
+                        _buildDenseSlider(
+                          label: 'Har',
+                          value: _meshHarmonyStrength,
+                          min: 0.0,
+                          max: 2.0,
+                          onChanged: (v) {
+                            setState(() => _meshHarmonyStrength = v);
+                            _refreshPalette(immediate: false);
+                          },
+                        ),
+                        _buildDenseSlider(
+                          label: 'Vib',
+                          value: _meshVibrancyStrength,
+                          min: 0.0,
+                          max: 2.0,
+                          onChanged: (v) {
+                            setState(() => _meshVibrancyStrength = v);
                             _refreshPalette(immediate: false);
                           },
                         ),
@@ -710,6 +812,64 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
     );
   }
 
+  Widget _buildMeshDebugPanel(_MeshSelectionDebug debug) {
+    final score = debug.score;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.query_stats_outlined,
+                size: 18,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Why these colors won',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _MetricChip(label: 'Total', value: score.total),
+              _MetricChip(label: 'Pop', value: score.population),
+              _MetricChip(label: 'Distinct', value: score.distinct),
+              _MetricChip(label: 'Harmony', value: score.harmony),
+              _MetricChip(label: 'Vibrancy', value: score.vibrancy),
+              _MetricChip(label: 'Cohesion', value: score.cohesion),
+              _MetricChip(label: 'Over', value: score.overChroma),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Column(
+            children: debug.colors.map((colorDebug) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _MeshDebugColorRow(
+                  colorDebug: colorDebug,
+                  formatHex: _formatHex,
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildArtworkCover() {
     final image = _artworkPath != null && File(_artworkPath!).existsSync()
         ? FileImage(File(_artworkPath!))
@@ -755,6 +915,209 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _MetricChip extends StatelessWidget {
+  const _MetricChip({required this.label, required this.value});
+
+  final String label;
+  final double value;
+
+  @override
+  Widget build(BuildContext context) {
+    final positive = value >= 0.0;
+    final background = positive
+        ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.14)
+        : Colors.red.withValues(alpha: 0.14);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: positive
+              ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.28)
+              : Colors.red.withValues(alpha: 0.28),
+        ),
+      ),
+      child: Text(
+        '$label ${value.toStringAsFixed(2)}',
+        style: Theme.of(
+          context,
+        ).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+}
+
+class _MeshDebugColorRow extends StatelessWidget {
+  const _MeshDebugColorRow({required this.colorDebug, required this.formatHex});
+
+  final _MeshColorDebug colorDebug;
+  final String Function(Color color) formatHex;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Color(colorDebug.color);
+    final onColor =
+        ThemeData.estimateBrightnessForColor(color) == Brightness.dark
+        ? Colors.white
+        : Colors.black;
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${colorDebug.slot}  ${formatHex(color)}',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '${colorDebug.role} · ${colorDebug.primaryDriver}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'pop ${colorDebug.population}  hue ${colorDebug.hue.toStringAsFixed(1)}  chroma ${colorDebug.chroma.toStringAsFixed(3)}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          Text(
+            onColor == Colors.white ? 'light' : 'dark',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: onColor.withValues(alpha: 0.72),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MeshSelectionDebug {
+  const _MeshSelectionDebug({required this.score, required this.colors});
+
+  final _MeshScoreBreakdown score;
+  final List<_MeshColorDebug> colors;
+
+  factory _MeshSelectionDebug.fromMap(Map<Object?, Object?> map) {
+    return _MeshSelectionDebug(
+      score: _MeshScoreBreakdown.fromMap(
+        (map['score'] as Map?)?.cast<Object?, Object?>() ?? const {},
+      ),
+      colors: (map['colors'] as List? ?? const [])
+          .whereType<Map>()
+          .map((item) => _MeshColorDebug.fromMap(item.cast<Object?, Object?>()))
+          .toList(growable: false),
+    );
+  }
+}
+
+class _MeshScoreBreakdown {
+  const _MeshScoreBreakdown({
+    required this.population,
+    required this.distinct,
+    required this.harmony,
+    required this.vibrancy,
+    required this.cohesion,
+    required this.overChroma,
+    required this.total,
+  });
+
+  final double population;
+  final double distinct;
+  final double harmony;
+  final double vibrancy;
+  final double cohesion;
+  final double overChroma;
+  final double total;
+
+  factory _MeshScoreBreakdown.fromMap(Map<Object?, Object?> map) {
+    double readDouble(Object? value) {
+      if (value is num) return value.toDouble();
+      return 0.0;
+    }
+
+    return _MeshScoreBreakdown(
+      population: readDouble(map['population']),
+      distinct: readDouble(map['distinct']),
+      harmony: readDouble(map['harmony']),
+      vibrancy: readDouble(map['vibrancy']),
+      cohesion: readDouble(map['cohesion']),
+      overChroma: readDouble(map['over_chroma']),
+      total: readDouble(map['total']),
+    );
+  }
+}
+
+class _MeshColorDebug {
+  const _MeshColorDebug({
+    required this.slot,
+    required this.color,
+    required this.role,
+    required this.primaryDriver,
+    required this.hue,
+    required this.chroma,
+    required this.lightness,
+    required this.population,
+  });
+
+  final String slot;
+  final int color;
+  final String role;
+  final String primaryDriver;
+  final double hue;
+  final double chroma;
+  final double lightness;
+  final int population;
+
+  factory _MeshColorDebug.fromMap(Map<Object?, Object?> map) {
+    double readDouble(Object? value) {
+      if (value is num) return value.toDouble();
+      return 0.0;
+    }
+
+    int readInt(Object? value) {
+      if (value is int) return value;
+      if (value is num) return value.toInt();
+      return 0;
+    }
+
+    return _MeshColorDebug(
+      slot: map['slot'] as String? ?? 'mesh',
+      color: readInt(map['color']),
+      role: map['role'] as String? ?? 'support',
+      primaryDriver: map['primary_driver'] as String? ?? 'harmony',
+      hue: readDouble(map['hue']),
+      chroma: readDouble(map['chroma']),
+      lightness: readDouble(map['lightness']),
+      population: readInt(map['population']),
     );
   }
 }

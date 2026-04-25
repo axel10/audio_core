@@ -27,6 +27,10 @@ Future<TrackArtworkResult> generateTrackArtwork({
   required int thumbnailSize,
   required double hueCohesion,
   required double meshMuddyPenaltyMultiplier,
+  required double meshPopulationStrength,
+  required double meshContrastStrength,
+  required double meshHarmonyStrength,
+  required double meshVibrancyStrength,
 }) => RustLib.instance.api.crateApiSimpleMetadataGenerateTrackArtwork(
   path: path,
   cacheRootPath: cacheRootPath,
@@ -34,6 +38,10 @@ Future<TrackArtworkResult> generateTrackArtwork({
   thumbnailSize: thumbnailSize,
   hueCohesion: hueCohesion,
   meshMuddyPenaltyMultiplier: meshMuddyPenaltyMultiplier,
+  meshPopulationStrength: meshPopulationStrength,
+  meshContrastStrength: meshContrastStrength,
+  meshHarmonyStrength: meshHarmonyStrength,
+  meshVibrancyStrength: meshVibrancyStrength,
 );
 
 Future<void> removeAllTags({required String path}) =>
@@ -46,6 +54,7 @@ class TrackArtworkResult {
   final int? artworkWidth;
   final int? artworkHeight;
   final Uint8List? themeColorsBlob;
+  final Uint8List? meshDebugBlob;
 
   const TrackArtworkResult({
     required this.artworkFound,
@@ -54,6 +63,7 @@ class TrackArtworkResult {
     this.artworkWidth,
     this.artworkHeight,
     this.themeColorsBlob,
+    this.meshDebugBlob,
   });
 
   static Future<TrackArtworkResult> default_() =>
@@ -66,7 +76,8 @@ class TrackArtworkResult {
       thumbnailPath.hashCode ^
       artworkWidth.hashCode ^
       artworkHeight.hashCode ^
-      themeColorsBlob.hashCode;
+      themeColorsBlob.hashCode ^
+      meshDebugBlob.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -78,7 +89,8 @@ class TrackArtworkResult {
           thumbnailPath == other.thumbnailPath &&
           artworkWidth == other.artworkWidth &&
           artworkHeight == other.artworkHeight &&
-          themeColorsBlob == other.themeColorsBlob;
+          themeColorsBlob == other.themeColorsBlob &&
+          meshDebugBlob == other.meshDebugBlob;
 }
 
 class TrackMetadataUpdate {

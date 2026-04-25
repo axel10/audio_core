@@ -113,6 +113,10 @@ abstract class RustLibApi extends BaseApi {
     required int thumbnailSize,
     required double hueCohesion,
     required double meshMuddyPenaltyMultiplier,
+    required double meshPopulationStrength,
+    required double meshContrastStrength,
+    required double meshHarmonyStrength,
+    required double meshVibrancyStrength,
   });
 
   Future<PlatformInt64> crateApiSimpleControllerGetAudioDurationMs();
@@ -449,6 +453,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required int thumbnailSize,
     required double hueCohesion,
     required double meshMuddyPenaltyMultiplier,
+    required double meshPopulationStrength,
+    required double meshContrastStrength,
+    required double meshHarmonyStrength,
+    required double meshVibrancyStrength,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -460,6 +468,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_i_32(thumbnailSize, serializer);
           sse_encode_f_64(hueCohesion, serializer);
           sse_encode_f_64(meshMuddyPenaltyMultiplier, serializer);
+          sse_encode_f_64(meshPopulationStrength, serializer);
+          sse_encode_f_64(meshContrastStrength, serializer);
+          sse_encode_f_64(meshHarmonyStrength, serializer);
+          sse_encode_f_64(meshVibrancyStrength, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -479,6 +491,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           thumbnailSize,
           hueCohesion,
           meshMuddyPenaltyMultiplier,
+          meshPopulationStrength,
+          meshContrastStrength,
+          meshHarmonyStrength,
+          meshVibrancyStrength,
         ],
         apiImpl: this,
       ),
@@ -495,6 +511,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           "thumbnailSize",
           "hueCohesion",
           "meshMuddyPenaltyMultiplier",
+          "meshPopulationStrength",
+          "meshContrastStrength",
+          "meshHarmonyStrength",
+          "meshVibrancyStrength",
         ],
       );
 
@@ -1543,8 +1563,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TrackArtworkResult dco_decode_track_artwork_result(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return TrackArtworkResult(
       artworkFound: dco_decode_bool(arr[0]),
       artworkPath: dco_decode_opt_String(arr[1]),
@@ -1552,6 +1572,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       artworkWidth: dco_decode_opt_box_autoadd_i_32(arr[3]),
       artworkHeight: dco_decode_opt_box_autoadd_i_32(arr[4]),
       themeColorsBlob: dco_decode_opt_list_prim_u_8_strict(arr[5]),
+      meshDebugBlob: dco_decode_opt_list_prim_u_8_strict(arr[6]),
     );
   }
 
@@ -1919,6 +1940,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_artworkWidth = sse_decode_opt_box_autoadd_i_32(deserializer);
     var var_artworkHeight = sse_decode_opt_box_autoadd_i_32(deserializer);
     var var_themeColorsBlob = sse_decode_opt_list_prim_u_8_strict(deserializer);
+    var var_meshDebugBlob = sse_decode_opt_list_prim_u_8_strict(deserializer);
     return TrackArtworkResult(
       artworkFound: var_artworkFound,
       artworkPath: var_artworkPath,
@@ -1926,6 +1948,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       artworkWidth: var_artworkWidth,
       artworkHeight: var_artworkHeight,
       themeColorsBlob: var_themeColorsBlob,
+      meshDebugBlob: var_meshDebugBlob,
     );
   }
 
@@ -2314,6 +2337,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_i_32(self.artworkWidth, serializer);
     sse_encode_opt_box_autoadd_i_32(self.artworkHeight, serializer);
     sse_encode_opt_list_prim_u_8_strict(self.themeColorsBlob, serializer);
+    sse_encode_opt_list_prim_u_8_strict(self.meshDebugBlob, serializer);
   }
 
   @protected

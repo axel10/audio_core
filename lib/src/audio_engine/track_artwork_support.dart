@@ -17,6 +17,10 @@ mixin TrackArtworkSupport {
       thumbnailSize: options.thumbnailSize,
       hueCohesion: options.hueCohesion,
       meshMuddyPenaltyMultiplier: options.meshMuddyPenaltyMultiplier,
+      meshPopulationStrength: options.meshPopulationStrength,
+      meshContrastStrength: options.meshContrastStrength,
+      meshHarmonyStrength: options.meshHarmonyStrength,
+      meshVibrancyStrength: options.meshVibrancyStrength,
     );
     return GeneratedTrackArtwork.fromRust(result);
   }
