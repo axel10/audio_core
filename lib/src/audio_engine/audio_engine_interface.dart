@@ -10,10 +10,7 @@ class PositionSnapshot {
   final Duration position;
   final int takenAtMs;
 
-  PositionSnapshot({
-    required this.position,
-    required this.takenAtMs,
-  });
+  PositionSnapshot({required this.position, required this.takenAtMs});
 }
 
 /// Define a unified status update for all platforms.
@@ -121,9 +118,7 @@ abstract class AudioEngine {
     required String path,
     required String cacheRootPath,
     required bool saveLargeArtwork,
-    int thumbnailSize = generatedArtworkThumbnailSize,
-    double hueCohesion = 0.0,
-    double meshMuddyPenaltyMultiplier = 1.0,
+    TrackArtworkOptions options = const TrackArtworkOptions(),
   }) async {
     throw UnimplementedError(
       'generateTrackArtwork is not implemented on this platform.',

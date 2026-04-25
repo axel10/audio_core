@@ -128,8 +128,10 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
         path: path,
         cacheRootPath: _cacheRoot.path,
         saveLargeArtwork: false,
-        hueCohesion: _hueCohesion,
-        meshMuddyPenaltyMultiplier: _meshMuddyPenaltyMultiplier,
+        options: TrackArtworkOptions(
+          hueCohesion: _hueCohesion,
+          meshMuddyPenaltyMultiplier: _meshMuddyPenaltyMultiplier,
+        ),
       );
       if (!mounted || requestToken != _requestToken) return;
 
@@ -607,10 +609,13 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
                             min: 0.0,
                             max: 10.0,
                             divisions: 100,
-                            label:
-                                _meshMuddyPenaltyMultiplier.toStringAsFixed(2),
+                            label: _meshMuddyPenaltyMultiplier.toStringAsFixed(
+                              2,
+                            ),
                             onChanged: (value) {
-                              setState(() => _meshMuddyPenaltyMultiplier = value);
+                              setState(
+                                () => _meshMuddyPenaltyMultiplier = value,
+                              );
                               _refreshPalette(immediate: false);
                             },
                           ),

@@ -128,6 +128,7 @@ class AudioCoreController extends ChangeNotifier
   bool get isInitialized => _initialized;
   EqualizerConfig get equalizerConfig => equalizer.config;
   bool get _usesRustPlaybackBackend => Platform.isLinux || Platform.isWindows;
+
   /// Returns the next track in the current playlist sequence.
   AudioTrack? get nextTrack => playlist.nextTrack;
 
@@ -1073,9 +1074,7 @@ class AudioCoreController extends ChangeNotifier
     required String path,
     required String cacheRootPath,
     required bool saveLargeArtwork,
-    int thumbnailSize = generatedArtworkThumbnailSize,
-    double hueCohesion = 0.0,
-    meshMuddyPenaltyMultiplier = 1.0
+    TrackArtworkOptions options = const TrackArtworkOptions(),
   }) async {
     if (!_initialized) {
       await initialize();
@@ -1088,8 +1087,7 @@ class AudioCoreController extends ChangeNotifier
       path: path,
       cacheRootPath: cacheRootPath,
       saveLargeArtwork: saveLargeArtwork,
-      thumbnailSize: thumbnailSize,
-      hueCohesion: hueCohesion,
+      options: options,
     );
   }
 

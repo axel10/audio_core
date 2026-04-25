@@ -4,6 +4,18 @@ import 'rust/api/simple/metadata.dart' as rust;
 
 const int generatedArtworkThumbnailSize = 300;
 
+class TrackArtworkOptions {
+  const TrackArtworkOptions({
+    this.thumbnailSize = generatedArtworkThumbnailSize,
+    this.hueCohesion = 0.0,
+    this.meshMuddyPenaltyMultiplier = 0.0,
+  });
+
+  final int thumbnailSize;
+  final double hueCohesion;
+  final double meshMuddyPenaltyMultiplier;
+}
+
 class GeneratedTrackArtwork {
   const GeneratedTrackArtwork({
     required this.artworkFound,
