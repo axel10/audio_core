@@ -9,6 +9,7 @@ import 'package:mesh_gradient/mesh_gradient.dart';
 import 'package:palette_generator/palette_generator.dart' as legacy_palette;
 import 'package:palette_generator_master/palette_generator_master.dart'
     as master_palette;
+import 'package:shared_preferences/shared_preferences.dart';
 
 class MeshDemoTab extends StatefulWidget {
   const MeshDemoTab({super.key, required this.controller});
@@ -20,6 +21,21 @@ class MeshDemoTab extends StatefulWidget {
 }
 
 class _MeshDemoTabState extends State<MeshDemoTab> {
+  static const String _prefsKeyHueCohesion = 'mesh_demo.hue_cohesion';
+  static const String _prefsKeyPaletteBlurRadius =
+      'mesh_demo.palette_blur_radius';
+  static const String _prefsKeyMeshMuddyPenaltyMultiplier =
+      'mesh_demo.mesh_muddy_penalty_multiplier';
+  static const String _prefsKeyMeshPopulationStrength =
+      'mesh_demo.mesh_population_strength';
+  static const String _prefsKeyMeshContrastStrength =
+      'mesh_demo.mesh_contrast_strength';
+  static const String _prefsKeyMeshHarmonyStrength =
+      'mesh_demo.mesh_harmony_strength';
+  static const String _prefsKeyMeshVibrancyStrength =
+      'mesh_demo.mesh_vibrancy_strength';
+  static const String _prefsKeyShowFullUi = 'mesh_demo.show_full_ui';
+
   static const List<Color> _fallbackColors = <Color>[
     Color(0xFFF43F5E),
     Color(0xFF22D3EE),
@@ -28,6 +44,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
   ];
 
   late final Directory _cacheRoot;
+  SharedPreferencesAsync? _prefs;
   double _hueCohesion = 0.58;
   double _paletteBlurRadius = 5.0;
   double _meshMuddyPenaltyMultiplier = 1.0;
@@ -56,11 +73,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
       '${Directory.systemTemp.path}${Platform.pathSeparator}audio_core_mesh_demo',
     )..createSync(recursive: true);
     widget.controller.addListener(_handleControllerChanged);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _refreshPalette(immediate: true);
-      }
-    });
+    unawaited(_restorePersistedSettings());
   }
 
   @override
@@ -83,6 +96,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
     setState(() {
       _showFullUi = !_showFullUi;
     });
+    unawaited(_saveBool(_prefsKeyShowFullUi, _showFullUi));
   }
 
   String? _currentTrackKey() {
@@ -184,6 +198,79 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
         _isLoading = false;
       });
     }
+  }
+
+  Future<void> _restorePersistedSettings() async {
+    final prefs = SharedPreferencesAsync();
+    final restoredHueCohesion = await prefs.getDouble(_prefsKeyHueCohesion);
+    final restoredPaletteBlurRadius = await prefs.getDouble(
+      _prefsKeyPaletteBlurRadius,
+    );
+    final restoredMeshMuddyPenaltyMultiplier = await prefs.getDouble(
+      _prefsKeyMeshMuddyPenaltyMultiplier,
+    );
+    final restoredMeshPopulationStrength = await prefs.getDouble(
+      _prefsKeyMeshPopulationStrength,
+    );
+    final restoredMeshContrastStrength = await prefs.getDouble(
+      _prefsKeyMeshContrastStrength,
+    );
+    final restoredMeshHarmonyStrength = await prefs.getDouble(
+      _prefsKeyMeshHarmonyStrength,
+    );
+    final restoredMeshVibrancyStrength = await prefs.getDouble(
+      _prefsKeyMeshVibrancyStrength,
+    );
+    final restoredShowFullUi = await prefs.getBool(_prefsKeyShowFullUi);
+    if (!mounted) {
+      return;
+    }
+
+    _prefs = prefs;
+    setState(() {
+      _hueCohesion = restoredHueCohesion ?? _hueCohesion;
+      _paletteBlurRadius = restoredPaletteBlurRadius ?? _paletteBlurRadius;
+      _meshMuddyPenaltyMultiplier =
+          restoredMeshMuddyPenaltyMultiplier ?? _meshMuddyPenaltyMultiplier;
+      _meshPopulationStrength =
+          restoredMeshPopulationStrength ?? _meshPopulationStrength;
+      _meshContrastStrength =
+          restoredMeshContrastStrength ?? _meshContrastStrength;
+      _meshHarmonyStrength =
+          restoredMeshHarmonyStrength ?? _meshHarmonyStrength;
+      _meshVibrancyStrength =
+          restoredMeshVibrancyStrength ?? _meshVibrancyStrength;
+      _showFullUi = restoredShowFullUi ?? _showFullUi;
+    });
+
+    await _refreshPalette(immediate: true);
+  }
+
+  void _updateDoubleSetting({
+    required String prefsKey,
+    required double value,
+    required void Function(double value) assign,
+    bool refreshPalette = true,
+  }) {
+    setState(() {
+      assign(value);
+    });
+    unawaited(_saveDouble(prefsKey, value));
+    if (refreshPalette) {
+      unawaited(_refreshPalette(immediate: false));
+    }
+  }
+
+  Future<void> _saveDouble(String key, double value) async {
+    final prefs = _prefs ?? SharedPreferencesAsync();
+    _prefs ??= prefs;
+    await prefs.setDouble(key, value);
+  }
+
+  Future<void> _saveBool(String key, bool value) async {
+    final prefs = _prefs ?? SharedPreferencesAsync();
+    _prefs ??= prefs;
+    await prefs.setBool(key, value);
   }
 
   Future<List<_MeshThemePreset>> _buildThemePresets({
@@ -715,32 +802,36 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
                                       value: _hueCohesion,
                                       min: 0.0,
                                       max: 1.0,
-                                      onChanged: (v) {
-                                        setState(() => _hueCohesion = v);
-                                        _refreshPalette(immediate: false);
-                                      },
+                                      onChanged: (v) => _updateDoubleSetting(
+                                        prefsKey: _prefsKeyHueCohesion,
+                                        value: v,
+                                        assign: (value) => _hueCohesion = value,
+                                      ),
                                     ),
                                     _buildDenseSlider(
                                       label: 'Blur',
                                       value: _paletteBlurRadius,
                                       min: 0.0,
                                       max: 20.0,
-                                      onChanged: (v) {
-                                        setState(() => _paletteBlurRadius = v);
-                                        _refreshPalette(immediate: false);
-                                      },
+                                      onChanged: (v) => _updateDoubleSetting(
+                                        prefsKey: _prefsKeyPaletteBlurRadius,
+                                        value: v,
+                                        assign: (value) =>
+                                            _paletteBlurRadius = value,
+                                      ),
                                     ),
                                     _buildDenseSlider(
                                       label: 'Mud',
                                       value: _meshMuddyPenaltyMultiplier,
                                       min: 0.0,
                                       max: 2.0,
-                                      onChanged: (v) {
-                                        setState(
-                                          () => _meshMuddyPenaltyMultiplier = v,
-                                        );
-                                        _refreshPalette(immediate: false);
-                                      },
+                                      onChanged: (v) => _updateDoubleSetting(
+                                        prefsKey:
+                                            _prefsKeyMeshMuddyPenaltyMultiplier,
+                                        value: v,
+                                        assign: (value) =>
+                                            _meshMuddyPenaltyMultiplier = value,
+                                      ),
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
@@ -755,48 +846,49 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
                                       value: _meshPopulationStrength,
                                       min: 0.0,
                                       max: 2.0,
-                                      onChanged: (v) {
-                                        setState(
-                                          () => _meshPopulationStrength = v,
-                                        );
-                                        _refreshPalette(immediate: false);
-                                      },
+                                      onChanged: (v) => _updateDoubleSetting(
+                                        prefsKey:
+                                            _prefsKeyMeshPopulationStrength,
+                                        value: v,
+                                        assign: (value) =>
+                                            _meshPopulationStrength = value,
+                                      ),
                                     ),
                                     _buildDenseSlider(
                                       label: 'Con',
                                       value: _meshContrastStrength,
                                       min: 0.0,
                                       max: 2.0,
-                                      onChanged: (v) {
-                                        setState(
-                                          () => _meshContrastStrength = v,
-                                        );
-                                        _refreshPalette(immediate: false);
-                                      },
+                                      onChanged: (v) => _updateDoubleSetting(
+                                        prefsKey: _prefsKeyMeshContrastStrength,
+                                        value: v,
+                                        assign: (value) =>
+                                            _meshContrastStrength = value,
+                                      ),
                                     ),
                                     _buildDenseSlider(
                                       label: 'Har',
                                       value: _meshHarmonyStrength,
                                       min: 0.0,
                                       max: 2.0,
-                                      onChanged: (v) {
-                                        setState(
-                                          () => _meshHarmonyStrength = v,
-                                        );
-                                        _refreshPalette(immediate: false);
-                                      },
+                                      onChanged: (v) => _updateDoubleSetting(
+                                        prefsKey: _prefsKeyMeshHarmonyStrength,
+                                        value: v,
+                                        assign: (value) =>
+                                            _meshHarmonyStrength = value,
+                                      ),
                                     ),
                                     _buildDenseSlider(
                                       label: 'Vib',
                                       value: _meshVibrancyStrength,
                                       min: 0.0,
                                       max: 2.0,
-                                      onChanged: (v) {
-                                        setState(
-                                          () => _meshVibrancyStrength = v,
-                                        );
-                                        _refreshPalette(immediate: false);
-                                      },
+                                      onChanged: (v) => _updateDoubleSetting(
+                                        prefsKey: _prefsKeyMeshVibrancyStrength,
+                                        value: v,
+                                        assign: (value) =>
+                                            _meshVibrancyStrength = value,
+                                      ),
                                     ),
                                   ],
                                 ),

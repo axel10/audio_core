@@ -51,6 +51,7 @@ dependencies:
   palette_generator_master: ^1.0.1
   palette_generator: ^0.3.3+7
   audio_metadata_reader: ^1.4.2
+  shared_preferences: ^2.5.3
 
 dev_dependencies:
   flutter_test:
