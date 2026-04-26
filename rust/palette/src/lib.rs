@@ -1100,6 +1100,7 @@ fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64, tuning: MeshSco
     }
     l_mean /= 4.0;
     c_mean /= 4.0;
+    let max_lightness = combo.iter().map(|c| c.oklch.l).fold(0.0, f64::max);
 
     let mut l_var = 0.0;
     let mut c_var = 0.0;
@@ -1109,21 +1110,49 @@ fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64, tuning: MeshSco
     }
 
     let vibrancy_reward = c_mean * 5.0;
+    let vivid_light_reward = mesh_vivid_light_reward(combo);
     let over_chroma_penalty = if c_mean > 0.15 {
         (c_mean - 0.15) * 15.0
     } else {
         0.0
     };
+    let underexposed_penalty = mesh_underexposed_penalty(c_mean, max_lightness, l_mean);
     let cohesion_penalty = l_var * 1.0 + c_var * 1.0;
 
     pop_score * 2.0 * tuning.population_strength
         + distinct_score * tuning.contrast_strength
         + vibrancy_reward * tuning.vibrancy_strength
+        + vivid_light_reward * tuning.vibrancy_strength
         + template_bonus * tuning.harmony_strength
         + role_assignment.score * (0.7 * tuning.harmony_strength + 0.3 * tuning.contrast_strength)
         - clash_penalty
         - cohesion_penalty * tuning.harmony_strength
         - over_chroma_penalty * tuning.vibrancy_strength
+        - underexposed_penalty * tuning.vibrancy_strength
+}
+
+fn mesh_vivid_light_reward(combo: &[&PaletteColor; 4]) -> f64 {
+    combo.iter()
+        .map(|color| {
+            let lightness = target_closeness(color.oklch.l, 0.72, 0.26);
+            let chroma = (color.oklch.c / 0.18).clamp(0.0, 1.15);
+            lightness * (0.5 + chroma * 0.9)
+        })
+        .fold(0.0, f64::max)
+}
+
+fn mesh_underexposed_penalty(c_mean: f64, max_lightness: f64, l_mean: f64) -> f64 {
+    let vivid_pressure = ((c_mean - 0.10) / 0.08).clamp(0.0, 1.0);
+    if vivid_pressure <= f64::EPSILON {
+        return 0.0;
+    }
+
+    let highlight_floor = 0.62 + vivid_pressure * 0.10;
+    let average_floor = 0.42 + vivid_pressure * 0.08;
+    let missing_highlight = (highlight_floor - max_lightness).max(0.0);
+    let too_dark_overall = (average_floor - l_mean).max(0.0);
+
+    missing_highlight * 8.0 + too_dark_overall * 6.0
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1688,6 +1717,69 @@ mod tests {
         let strict_score = evaluate_mesh_combo(&clash_refs, 100.0, strict_tuning);
 
         assert!(strict_score < loose_score);
+    }
+
+    #[test]
+    fn mesh_scoring_prefers_bright_vibrant_combo_over_dark_variant() {
+        let bright_combo = [
+            PaletteColor::new(pack_rgb(0xc7, 0x44, 0x2e), 100),
+            PaletteColor::new(pack_rgb(0xf0, 0x78, 0x42), 96),
+            PaletteColor::new(pack_rgb(0x14, 0xa7, 0xa4), 88),
+            PaletteColor::new(pack_rgb(0xff, 0xc1, 0x78), 76),
+        ];
+        let dark_combo = [
+            PaletteColor::new(pack_rgb(0x6d, 0x24, 0x1b), 100),
+            PaletteColor::new(pack_rgb(0x8d, 0x3a, 0x20), 96),
+            PaletteColor::new(pack_rgb(0x0a, 0x74, 0x70), 88),
+            PaletteColor::new(pack_rgb(0xb4, 0x71, 0x36), 76),
+        ];
+
+        let bright_refs = [
+            &bright_combo[0],
+            &bright_combo[1],
+            &bright_combo[2],
+            &bright_combo[3],
+        ];
+        let dark_refs = [&dark_combo[0], &dark_combo[1], &dark_combo[2], &dark_combo[3]];
+
+        let tuning = MeshScoringTuning {
+            population_strength: 1.0,
+            contrast_strength: 1.0,
+            harmony_strength: 1.0,
+            vibrancy_strength: 1.0,
+            muddy_penalty_multiplier: 1.0,
+        };
+
+        let bright_score = evaluate_mesh_combo(&bright_refs, 100.0, tuning);
+        let dark_score = evaluate_mesh_combo(&dark_refs, 100.0, tuning);
+
+        assert!(bright_score > dark_score);
+    }
+
+    #[test]
+    fn mesh_selection_keeps_a_bright_highlight_for_vivid_palette() {
+        let palette_colors = vec![
+            PaletteColor::new(pack_rgb(0x62, 0x24, 0x1b), 100),
+            PaletteColor::new(pack_rgb(0x8c, 0x37, 0x22), 96),
+            PaletteColor::new(pack_rgb(0xb8, 0x4d, 0x2d), 92),
+            PaletteColor::new(pack_rgb(0x10, 0x98, 0x9e), 84),
+            PaletteColor::new(pack_rgb(0xff, 0xc1, 0x78), 54),
+        ];
+
+        let selection = select_mesh_colors(
+            &palette_colors,
+            MeshScoringTuning {
+                population_strength: 1.0,
+                contrast_strength: 1.0,
+                harmony_strength: 1.0,
+                vibrancy_strength: 1.0,
+                muddy_penalty_multiplier: 1.0,
+            },
+        )
+        .expect("mesh selection");
+
+        assert!(selection.colors.iter().any(|color| color.rgb == pack_rgb(0xff, 0xc1, 0x78)));
+        assert!(selection.colors[3].oklch.l > 0.70);
     }
 
     #[test]
