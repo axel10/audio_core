@@ -401,6 +401,9 @@ pub struct ThemePaletteOptions {
     /// `1.0` strongly pulls non-dominant colors toward one or two anchor hues
     /// derived from the artwork's main theme.
     pub hue_cohesion: f64,
+    /// Gaussian blur radius used before palette sampling.
+    /// Larger values produce softer, more averaged artwork input.
+    pub palette_blur_radius: f64,
     /// Multiplier for the penalty applied to muddy/clashing mesh color combinations.
     /// Default is 1.0.
     pub mesh_muddy_penalty_multiplier: f64,
@@ -422,6 +425,7 @@ impl Default for ThemePaletteOptions {
     fn default() -> Self {
         Self {
             hue_cohesion: 0.0,
+            palette_blur_radius: 5.0,
             mesh_muddy_penalty_multiplier: 1.0,
             mesh_population_strength: 1.0,
             mesh_contrast_strength: 1.0,
@@ -1029,11 +1033,7 @@ fn select_mesh_colors(
     }
 }
 
-fn evaluate_mesh_combo(
-    combo: &[&PaletteColor; 4],
-    max_pop: f64,
-    tuning: MeshScoringTuning,
-) -> f64 {
+fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64, tuning: MeshScoringTuning) -> f64 {
     let pop_score = combo
         .iter()
         .map(|c| c.population as f64 / max_pop)
@@ -1131,7 +1131,11 @@ fn build_mesh_selection_debug(
 ) -> MeshSelectionDebug {
     let refs = [&combo[0], &combo[1], &combo[2], &combo[3]];
 
-    let population_raw = refs.iter().map(|c| c.population as f64).sum::<f64>().max(1.0);
+    let population_raw = refs
+        .iter()
+        .map(|c| c.population as f64)
+        .sum::<f64>()
+        .max(1.0);
     let population = refs
         .iter()
         .map(|c| c.population as f64 / population_raw)

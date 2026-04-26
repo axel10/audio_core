@@ -8,6 +8,7 @@ class TrackArtworkOptions {
   const TrackArtworkOptions({
     this.thumbnailSize = generatedArtworkThumbnailSize,
     this.hueCohesion = 0.0,
+    this.paletteBlurRadius = 5.0,
     this.meshMuddyPenaltyMultiplier = 1.0,
     this.meshPopulationStrength = 1.0,
     this.meshContrastStrength = 1.0,
@@ -17,6 +18,7 @@ class TrackArtworkOptions {
 
   final int thumbnailSize;
   final double hueCohesion;
+  final double paletteBlurRadius;
   final double meshMuddyPenaltyMultiplier;
   final double meshPopulationStrength;
   final double meshContrastStrength;

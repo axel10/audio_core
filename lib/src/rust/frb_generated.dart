@@ -112,6 +112,7 @@ abstract class RustLibApi extends BaseApi {
     required bool saveLargeArtwork,
     required int thumbnailSize,
     required double hueCohesion,
+    required double paletteBlurRadius,
     required double meshMuddyPenaltyMultiplier,
     required double meshPopulationStrength,
     required double meshContrastStrength,
@@ -452,6 +453,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required bool saveLargeArtwork,
     required int thumbnailSize,
     required double hueCohesion,
+    required double paletteBlurRadius,
     required double meshMuddyPenaltyMultiplier,
     required double meshPopulationStrength,
     required double meshContrastStrength,
@@ -467,6 +469,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_bool(saveLargeArtwork, serializer);
           sse_encode_i_32(thumbnailSize, serializer);
           sse_encode_f_64(hueCohesion, serializer);
+          sse_encode_f_64(paletteBlurRadius, serializer);
           sse_encode_f_64(meshMuddyPenaltyMultiplier, serializer);
           sse_encode_f_64(meshPopulationStrength, serializer);
           sse_encode_f_64(meshContrastStrength, serializer);
@@ -510,6 +513,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           "saveLargeArtwork",
           "thumbnailSize",
           "hueCohesion",
+          "paletteBlurRadius",
           "meshMuddyPenaltyMultiplier",
           "meshPopulationStrength",
           "meshContrastStrength",

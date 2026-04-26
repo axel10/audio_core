@@ -29,6 +29,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
 
   late final Directory _cacheRoot;
   double _hueCohesion = 0.58;
+  double _paletteBlurRadius = 5.0;
   double _meshMuddyPenaltyMultiplier = 1.0;
   double _meshPopulationStrength = 1.0;
   double _meshContrastStrength = 1.0;
@@ -141,6 +142,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
         options: TrackArtworkOptions(
           thumbnailSize: 600,
           hueCohesion: _hueCohesion,
+          paletteBlurRadius: _paletteBlurRadius,
           meshMuddyPenaltyMultiplier: _meshMuddyPenaltyMultiplier,
           meshPopulationStrength: _meshPopulationStrength,
           meshContrastStrength: _meshContrastStrength,
@@ -715,6 +717,16 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
                                       max: 1.0,
                                       onChanged: (v) {
                                         setState(() => _hueCohesion = v);
+                                        _refreshPalette(immediate: false);
+                                      },
+                                    ),
+                                    _buildDenseSlider(
+                                      label: 'Blur',
+                                      value: _paletteBlurRadius,
+                                      min: 0.0,
+                                      max: 20.0,
+                                      onChanged: (v) {
+                                        setState(() => _paletteBlurRadius = v);
                                         _refreshPalette(immediate: false);
                                       },
                                     ),

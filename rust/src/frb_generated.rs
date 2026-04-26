@@ -298,6 +298,7 @@ fn wire__crate__api__simple__metadata__generate_track_artwork_impl(
             let api_save_large_artwork = <bool>::sse_decode(&mut deserializer);
             let api_thumbnail_size = <i32>::sse_decode(&mut deserializer);
             let api_hue_cohesion = <f64>::sse_decode(&mut deserializer);
+            let api_palette_blur_radius = <f64>::sse_decode(&mut deserializer);
             let api_mesh_muddy_penalty_multiplier = <f64>::sse_decode(&mut deserializer);
             let api_mesh_population_strength = <f64>::sse_decode(&mut deserializer);
             let api_mesh_contrast_strength = <f64>::sse_decode(&mut deserializer);
@@ -313,6 +314,7 @@ fn wire__crate__api__simple__metadata__generate_track_artwork_impl(
                             api_save_large_artwork,
                             api_thumbnail_size,
                             api_hue_cohesion,
+                            api_palette_blur_radius,
                             api_mesh_muddy_penalty_multiplier,
                             api_mesh_population_strength,
                             api_mesh_contrast_strength,

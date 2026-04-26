@@ -84,6 +84,7 @@ pub fn generate_track_artwork(
     save_large_artwork: bool,
     thumbnail_size: i32,
     hue_cohesion: f64,
+    palette_blur_radius: f64,
     mesh_muddy_penalty_multiplier: f64,
     mesh_population_strength: f64,
     mesh_contrast_strength: f64,
@@ -109,6 +110,7 @@ pub fn generate_track_artwork(
         build_square_thumbnail(&picture.bytes, thumbnail_size.max(1) as usize)?;
     let palette_options = ThemePaletteOptions {
         hue_cohesion,
+        palette_blur_radius,
         mesh_muddy_penalty_multiplier,
         mesh_population_strength,
         mesh_contrast_strength,

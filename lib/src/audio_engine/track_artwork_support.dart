@@ -16,6 +16,7 @@ mixin TrackArtworkSupport {
       saveLargeArtwork: saveLargeArtwork,
       thumbnailSize: options.thumbnailSize,
       hueCohesion: options.hueCohesion,
+      paletteBlurRadius: options.paletteBlurRadius,
       meshMuddyPenaltyMultiplier: options.meshMuddyPenaltyMultiplier,
       meshPopulationStrength: options.meshPopulationStrength,
       meshContrastStrength: options.meshContrastStrength,
