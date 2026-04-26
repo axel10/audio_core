@@ -984,7 +984,11 @@ fn select_mesh_colors(
         for i in 0..4 {
             combo[i] = palette_colors[i % n].clone();
         }
-        let debug = build_mesh_selection_debug(&combo, tuning, 0.0);
+        let max_pop = combo
+            .iter()
+            .map(|color| color.population as f64)
+            .fold(1.0, f64::max);
+        let debug = build_mesh_selection_debug(&combo, max_pop, tuning, 0.0);
         return Some(MeshSelectionOutcome {
             colors: combo,
             debug,
@@ -1023,7 +1027,7 @@ fn select_mesh_colors(
 
     if let Some(mut combo) = best_combo {
         combo.sort_by(|a, b| b.oklch.l.partial_cmp(&a.oklch.l).unwrap_or(Ordering::Equal));
-        let debug = build_mesh_selection_debug(&combo, tuning, best_score);
+        let debug = build_mesh_selection_debug(&combo, max_pop, tuning, best_score);
         Some(MeshSelectionOutcome {
             colors: combo,
             debug,
@@ -1061,7 +1065,10 @@ fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64, tuning: MeshSco
             let h_dist = circular_hue_distance(combo[i].oklch.h, combo[j].oklch.h);
             let chroma_product = combo[i].oklch.c * combo[j].oklch.c;
             if h_dist > 45.0 && h_dist < 120.0 {
-                clash_penalty += chroma_product * 420.0 * tuning.harmony_strength;
+                clash_penalty += chroma_product
+                    * 420.0
+                    * tuning.harmony_strength
+                    * tuning.muddy_penalty_multiplier;
             }
         }
     }
@@ -1105,6 +1112,7 @@ struct MeshScoringTuning {
     contrast_strength: f64,
     harmony_strength: f64,
     vibrancy_strength: f64,
+    muddy_penalty_multiplier: f64,
 }
 
 impl MeshScoringTuning {
@@ -1114,6 +1122,7 @@ impl MeshScoringTuning {
             contrast_strength: options.mesh_contrast_strength.clamp(0.0, 3.0),
             harmony_strength: options.mesh_harmony_strength.clamp(0.0, 3.0),
             vibrancy_strength: options.mesh_vibrancy_strength.clamp(0.0, 3.0),
+            muddy_penalty_multiplier: options.mesh_muddy_penalty_multiplier.clamp(0.0, 3.0),
         }
     }
 }
@@ -1126,19 +1135,15 @@ struct MeshSelectionOutcome {
 
 fn build_mesh_selection_debug(
     combo: &[PaletteColor; 4],
+    max_pop: f64,
     tuning: MeshScoringTuning,
     total: f64,
 ) -> MeshSelectionDebug {
     let refs = [&combo[0], &combo[1], &combo[2], &combo[3]];
 
-    let population_raw = refs
-        .iter()
-        .map(|c| c.population as f64)
-        .sum::<f64>()
-        .max(1.0);
     let population = refs
         .iter()
-        .map(|c| c.population as f64 / population_raw)
+        .map(|c| c.population as f64 / max_pop.max(1.0))
         .sum::<f64>()
         * 2.0
         * tuning.population_strength;
@@ -1442,8 +1447,8 @@ mod tests {
             },
         );
 
-        assert_eq!(loose.get("darkVibrant").map(|c| c.rgb), Some(0x008484));
-        assert_eq!(cohesive.get("darkVibrant").map(|c| c.rgb), Some(0x008484));
+        assert_eq!(loose.0.get("darkVibrant").map(|c| c.rgb), Some(0x008484));
+        assert_eq!(cohesive.0.get("darkVibrant").map(|c| c.rgb), Some(0x008484));
     }
 
     #[test]
@@ -1509,9 +1514,49 @@ mod tests {
             &clash_combo[3],
         ];
 
-        let cohesive_score = evaluate_mesh_combo(&cohesive_refs, 100.0, 1.0);
-        let clash_score = evaluate_mesh_combo(&clash_refs, 100.0, 1.0);
+        let tuning = MeshScoringTuning {
+            population_strength: 1.0,
+            contrast_strength: 1.0,
+            harmony_strength: 1.0,
+            vibrancy_strength: 1.0,
+            muddy_penalty_multiplier: 1.0,
+        };
+        let cohesive_score = evaluate_mesh_combo(&cohesive_refs, 100.0, tuning);
+        let clash_score = evaluate_mesh_combo(&clash_refs, 100.0, tuning);
 
         assert!(cohesive_score > clash_score);
+    }
+
+    #[test]
+    fn muddy_penalty_multiplier_reduces_clashing_mesh_scores() {
+        let clash_combo = [
+            PaletteColor::new(pack_rgb(0xff, 0x20, 0x20), 100),
+            PaletteColor::new(pack_rgb(0x20, 0xff, 0x20), 100),
+            PaletteColor::new(pack_rgb(0x20, 0x20, 0xff), 100),
+            PaletteColor::new(pack_rgb(0xff, 0xe0, 0x20), 100),
+        ];
+        let clash_refs = [
+            &clash_combo[0],
+            &clash_combo[1],
+            &clash_combo[2],
+            &clash_combo[3],
+        ];
+
+        let loose_tuning = MeshScoringTuning {
+            population_strength: 1.0,
+            contrast_strength: 1.0,
+            harmony_strength: 1.0,
+            vibrancy_strength: 1.0,
+            muddy_penalty_multiplier: 0.0,
+        };
+        let strict_tuning = MeshScoringTuning {
+            muddy_penalty_multiplier: 2.0,
+            ..loose_tuning
+        };
+
+        let loose_score = evaluate_mesh_combo(&clash_refs, 100.0, loose_tuning);
+        let strict_score = evaluate_mesh_combo(&clash_refs, 100.0, strict_tuning);
+
+        assert!(strict_score < loose_score);
     }
 }
