@@ -5,12 +5,12 @@ use fast_image_resize::{PixelType, Resizer};
 use libblur::{
     fast_gaussian, AnisotropicRadius, BlurImageMut, EdgeMode, FastBlurChannels, ThreadingPolicy,
 };
-pub use palette_core::ThemePaletteOptions;
 use palette_core::{
     build_theme_palette_bundle_from_pixels_with_options as build_theme_palette_bundle_from_pixels_with_options_core,
     debug_build_theme_colors_from_pixels as debug_build_theme_colors_from_pixels_core,
     debug_build_theme_colors_from_pixels_with_options as debug_build_theme_colors_from_pixels_with_options_core,
 };
+pub use palette_core::{MeshStylePreset, ThemePaletteOptions};
 use zune_core::colorspace::ColorSpace;
 use zune_image::image::Image;
 
@@ -62,6 +62,24 @@ pub(crate) fn build_theme_palette_bundle_with_options(
         target_colorspace.num_components(),
         options.palette_blur_radius,
     )?;
+
+    let palette_pixels = if options.mesh_style_preset.is_expressive() {
+        let accent_blur_radius = (options.palette_blur_radius * 0.25).max(0.0);
+        let accent_pixels = preprocess_palette_pixels(
+            pixels,
+            width,
+            height,
+            target_colorspace.num_components(),
+            accent_blur_radius,
+        )?;
+
+        let mut merged_pixels = Vec::with_capacity(palette_pixels.len() + accent_pixels.len());
+        merged_pixels.extend_from_slice(&palette_pixels);
+        merged_pixels.extend_from_slice(&accent_pixels);
+        merged_pixels
+    } else {
+        palette_pixels
+    };
 
     Ok(build_theme_palette_bundle_from_pixels_with_options_core(
         &palette_pixels,

@@ -4,9 +4,12 @@ import 'rust/api/simple/metadata.dart' as rust;
 
 const int generatedArtworkThumbnailSize = 300;
 
+enum MeshStylePreset { stable, expressive }
+
 class TrackArtworkOptions {
   const TrackArtworkOptions({
     this.thumbnailSize = generatedArtworkThumbnailSize,
+    this.meshStylePreset = MeshStylePreset.stable,
     this.hueCohesion = 0.0,
     this.paletteBlurRadius = 5.0,
     this.meshMuddyPenaltyMultiplier = 1.0,
@@ -17,6 +20,7 @@ class TrackArtworkOptions {
   });
 
   final int thumbnailSize;
+  final MeshStylePreset meshStylePreset;
   final double hueCohesion;
   final double paletteBlurRadius;
   final double meshMuddyPenaltyMultiplier;

@@ -15,6 +15,7 @@ mixin TrackArtworkSupport {
       cacheRootPath: normalizeArtworkPath(cacheRootPath),
       saveLargeArtwork: saveLargeArtwork,
       thumbnailSize: options.thumbnailSize,
+      meshStylePreset: options.meshStylePreset.index,
       hueCohesion: options.hueCohesion,
       paletteBlurRadius: options.paletteBlurRadius,
       meshMuddyPenaltyMultiplier: options.meshMuddyPenaltyMultiplier,

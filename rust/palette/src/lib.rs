@@ -47,7 +47,7 @@ pub fn build_theme_palette_bundle_from_pixels_with_options(
     options: ThemePaletteOptions,
 ) -> Option<ThemePaletteBundle> {
     let (palette_colors, mesh_colors) =
-        quantize_palette_colors(pixels, channels_per_pixel, PALETTE_MAX_COLORS);
+        quantize_palette_colors(pixels, channels_per_pixel, PALETTE_MAX_COLORS, options);
     let (theme_colors, mesh_debug) = select_theme_colors(palette_colors, mesh_colors, options);
     if theme_colors.is_empty() {
         return None;
@@ -66,6 +66,7 @@ fn quantize_palette_colors(
     pixels: &[u8],
     channels_per_pixel: usize,
     max_colors: usize,
+    options: ThemePaletteOptions,
 ) -> (Vec<PaletteColor>, Vec<PaletteColor>) {
     if channels_per_pixel < 3 {
         return (Vec::new(), Vec::new());
@@ -104,7 +105,7 @@ fn quantize_palette_colors(
             .map(|color| PaletteColor::new(color, histogram[&color]))
             .collect()
     } else {
-        quantize_histogram(histogram, colors, max_colors)
+        quantize_histogram(histogram.clone(), colors, max_colors)
     };
 
     let mut mesh_colors = theme_colors.clone();
@@ -113,9 +114,98 @@ fn quantize_palette_colors(
     for (color, pop) in ignored_counts.into_iter().take(8) {
         mesh_colors.push(PaletteColor::new(color, pop));
     }
+
+    if options.mesh_style_preset.is_expressive() {
+        let theme_color_set = theme_colors.iter().map(|color| color.rgb).collect::<HashSet<_>>();
+        let mut expressive_candidates = histogram
+            .iter()
+            .filter_map(|(&color, &pop)| {
+                if theme_color_set.contains(&color) || should_hard_ignore_color(color) {
+                    return None;
+                }
+
+                let candidate = PaletteColor::new(color, pop);
+                let vividness = candidate.hsl.saturation.max(candidate.oklch.c);
+                if vividness < 0.30 && !is_red_hue(candidate.oklch.h) && !is_blue_hue(candidate.oklch.h)
+                {
+                    return None;
+                }
+
+                let score = expressive_candidate_score(&candidate);
+                Some((candidate, score))
+            })
+            .collect::<Vec<_>>();
+        expressive_candidates.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| b.0.population.cmp(&a.0.population))
+        });
+        for (candidate, _) in expressive_candidates.into_iter().take(8) {
+            mesh_colors.push(candidate);
+        }
+
+        let max_population = histogram.values().copied().max().unwrap_or(1);
+        let boosted_population = (max_population as f64 * 0.72).round().max(1.0) as usize;
+        if let Some(red_anchor) =
+            pick_expressive_anchor(&histogram, &theme_color_set, is_red_hue, boosted_population)
+        {
+            mesh_colors.push(red_anchor);
+        }
+    }
+
     mesh_colors.sort_by(|a, b| b.population.cmp(&a.population));
 
     (theme_colors, mesh_colors)
+}
+
+fn expressive_candidate_score(color: &PaletteColor) -> f64 {
+    let hue_bonus = if is_red_hue(color.oklch.h) {
+        1.8
+    } else if is_blue_hue(color.oklch.h) {
+        1.2
+    } else {
+        0.0
+    };
+
+    color.oklch.c * 2.4
+        + color.hsl.saturation * 1.8
+        + target_closeness(color.oklch.l, 0.52, 0.42) * 0.4
+        + hue_bonus
+        + (color.population as f64).sqrt() * 0.01
+}
+
+fn pick_expressive_anchor(
+    histogram: &HashMap<u32, usize>,
+    theme_color_set: &HashSet<u32>,
+    hue_predicate: fn(f64) -> bool,
+    boosted_population: usize,
+) -> Option<PaletteColor> {
+    histogram
+        .iter()
+        .filter_map(|(&color, &pop)| {
+            if theme_color_set.contains(&color) || should_hard_ignore_color(color) {
+                return None;
+            }
+
+            let candidate = PaletteColor::new(color, pop);
+            if candidate.oklch.c < 0.12 || candidate.hsl.saturation < 0.35 {
+                return None;
+            }
+            if !hue_predicate(candidate.oklch.h) {
+                return None;
+            }
+
+            Some(candidate)
+        })
+        .max_by(|a, b| {
+            expressive_candidate_score(a)
+                .partial_cmp(&expressive_candidate_score(b))
+                .unwrap_or(Ordering::Equal)
+        })
+        .map(|mut candidate| {
+            candidate.population = boosted_population;
+            candidate
+        })
 }
 
 fn quantize_histogram(
@@ -409,11 +499,32 @@ impl PaletteColor {
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
+pub enum MeshStylePreset {
+    Stable,
+    Expressive,
+}
+
+impl MeshStylePreset {
+    pub fn from_code(code: i32) -> Self {
+        match code {
+            1 => Self::Expressive,
+            _ => Self::Stable,
+        }
+    }
+
+    pub fn is_expressive(self) -> bool {
+        matches!(self, Self::Expressive)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct ThemePaletteOptions {
     /// `0.0` keeps the current palette behavior.
     /// `1.0` strongly pulls non-dominant colors toward one or two anchor hues
     /// derived from the artwork's main theme.
     pub hue_cohesion: f64,
+    /// Selects the mesh bias profile.
+    pub mesh_style_preset: MeshStylePreset,
     /// Gaussian blur radius used before palette sampling.
     /// Larger values produce softer, more averaged artwork input.
     pub palette_blur_radius: f64,
@@ -438,6 +549,7 @@ impl Default for ThemePaletteOptions {
     fn default() -> Self {
         Self {
             hue_cohesion: 0.0,
+            mesh_style_preset: MeshStylePreset::Stable,
             palette_blur_radius: 5.0,
             mesh_muddy_penalty_multiplier: 1.0,
             mesh_population_strength: 1.0,
@@ -1091,6 +1203,12 @@ fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64, tuning: MeshSco
             }
         }
     }
+    if tuning.expressive_bias > 0.0 {
+        clash_penalty *= 0.55;
+    }
+
+    let muddy_penalty = mesh_muddy_brown_penalty(combo, tuning);
+    let expressive_contrast_bonus = mesh_expressive_contrast_bonus(combo, tuning);
 
     let mut l_mean = 0.0;
     let mut c_mean = 0.0;
@@ -1124,8 +1242,10 @@ fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64, tuning: MeshSco
         + vibrancy_reward * tuning.vibrancy_strength
         + vivid_light_reward * tuning.vibrancy_strength
         + template_bonus * tuning.harmony_strength
+        + expressive_contrast_bonus
         + role_assignment.score * (0.7 * tuning.harmony_strength + 0.3 * tuning.contrast_strength)
         - clash_penalty
+        - muddy_penalty
         - cohesion_penalty * tuning.harmony_strength
         - over_chroma_penalty * tuning.vibrancy_strength
         - underexposed_penalty * tuning.vibrancy_strength
@@ -1155,6 +1275,103 @@ fn mesh_underexposed_penalty(c_mean: f64, max_lightness: f64, l_mean: f64) -> f6
     missing_highlight * 8.0 + too_dark_overall * 6.0
 }
 
+fn mesh_muddy_brown_penalty(combo: &[&PaletteColor; 4], tuning: MeshScoringTuning) -> f64 {
+    let vivid_score = combo
+        .iter()
+        .map(|color| color.oklch.c * 1.6 + color.hsl.saturation * 0.9)
+        .fold(0.0, f64::max);
+    let expressiveness = tuning.expressive_bias + (vivid_score - 0.48).clamp(0.0, 1.0);
+    if expressiveness <= 0.0 {
+        return 0.0;
+    }
+
+    let mut penalty = 0.0;
+    for color in combo {
+        let hue = color.oklch.h;
+        let chroma = color.oklch.c;
+        let saturation = color.hsl.saturation;
+        let is_muddy_warm = (8.0..=62.0).contains(&hue) && chroma < 0.14 && saturation < 0.58;
+        let is_muddy_neutral = chroma < 0.08 && color.oklch.l < 0.72 && saturation < 0.30;
+        if is_muddy_warm || is_muddy_neutral {
+            let mud_strength = if chroma < 0.10 { 1.0 } else { 0.6 };
+            let darkness = (0.72 - color.oklch.l).clamp(0.0, 0.72);
+            penalty += (0.9 + darkness * 1.8) * mud_strength;
+        }
+    }
+
+    if penalty <= 0.0 {
+        return 0.0;
+    }
+
+    let vivid_bias = combo
+        .iter()
+        .map(|color| (color.oklch.c - 0.16).max(0.0))
+        .sum::<f64>()
+        .clamp(0.0, 0.9);
+    penalty
+        * (1.0
+            + vivid_bias * 1.8
+            + expressiveness * 0.75
+            + tuning.expressive_muddy_bias * 0.5)
+        * tuning.muddy_penalty_multiplier
+}
+
+fn mesh_expressive_contrast_bonus(combo: &[&PaletteColor; 4], tuning: MeshScoringTuning) -> f64 {
+    if tuning.expressive_contrast_bias <= f64::EPSILON {
+        return 0.0;
+    }
+
+    let vivid_colors = combo
+        .iter()
+        .copied()
+        .filter(|color| color.oklch.c >= 0.12 && color.hsl.saturation >= 0.35)
+        .collect::<Vec<_>>();
+    if vivid_colors.len() < 2 {
+        return 0.0;
+    }
+
+    let mut best_pair_bonus = 0.0;
+    for i in 0..vivid_colors.len() {
+        for j in (i + 1)..vivid_colors.len() {
+            let a = vivid_colors[i];
+            let b = vivid_colors[j];
+            let hue_distance = circular_hue_distance(a.oklch.h, b.oklch.h);
+            let chroma = (a.oklch.c + b.oklch.c) * 0.5;
+            let saturation = (a.hsl.saturation + b.hsl.saturation) * 0.5;
+
+            let general_contrast = target_closeness(hue_distance, 150.0, 75.0);
+            let red_blue_signature = if is_red_hue(a.oklch.h) && is_blue_hue(b.oklch.h)
+                || is_blue_hue(a.oklch.h) && is_red_hue(b.oklch.h)
+            {
+                target_closeness(hue_distance, 210.0, 45.0)
+            } else {
+                0.0
+            };
+            let vivid_pair = ((chroma - 0.10) / 0.14).clamp(0.0, 1.0)
+                * ((saturation - 0.35) / 0.45).clamp(0.0, 1.0);
+
+            let pair_bonus = (general_contrast * 1.4 + red_blue_signature * 2.8) * vivid_pair;
+            if pair_bonus > best_pair_bonus {
+                best_pair_bonus = pair_bonus;
+            }
+        }
+    }
+
+    let warm_count = combo.iter().filter(|color| is_red_hue(color.oklch.h)).count();
+    let cool_count = combo.iter().filter(|color| is_blue_hue(color.oklch.h)).count();
+    let archetype_bonus = if warm_count > 0 && cool_count > 0 { 0.7 } else { 0.0 };
+
+    (best_pair_bonus + archetype_bonus) * tuning.expressive_contrast_bias
+}
+
+fn is_red_hue(hue: f64) -> bool {
+    hue >= 300.0 || hue <= 35.0
+}
+
+fn is_blue_hue(hue: f64) -> bool {
+    (190.0..=275.0).contains(&hue)
+}
+
 #[derive(Debug, Clone, Copy)]
 struct MeshScoringTuning {
     population_strength: f64,
@@ -1162,16 +1379,47 @@ struct MeshScoringTuning {
     harmony_strength: f64,
     vibrancy_strength: f64,
     muddy_penalty_multiplier: f64,
+    expressive_contrast_bias: f64,
+    expressive_bias: f64,
+    expressive_muddy_bias: f64,
 }
 
 impl MeshScoringTuning {
     fn from_options(options: ThemePaletteOptions) -> Self {
+        let (population_strength, contrast_strength, harmony_strength, vibrancy_strength, muddy_penalty_multiplier, expressive_contrast_bias, expressive_bias, expressive_muddy_bias) =
+            if options.mesh_style_preset.is_expressive() {
+                (
+                    options.mesh_population_strength.clamp(0.0, 3.0) * 0.82,
+                    options.mesh_contrast_strength.clamp(0.0, 3.0) * 1.90,
+                    options.mesh_harmony_strength.clamp(0.0, 3.0) * 0.62,
+                    options.mesh_vibrancy_strength.clamp(0.0, 3.0) * 1.30,
+                    options.mesh_muddy_penalty_multiplier.clamp(0.0, 3.0) * 1.35,
+                    1.0,
+                    1.0,
+                    1.0,
+                )
+            } else {
+                (
+                    options.mesh_population_strength.clamp(0.0, 3.0),
+                    options.mesh_contrast_strength.clamp(0.0, 3.0),
+                    options.mesh_harmony_strength.clamp(0.0, 3.0),
+                    options.mesh_vibrancy_strength.clamp(0.0, 3.0),
+                    options.mesh_muddy_penalty_multiplier.clamp(0.0, 3.0),
+                    0.0,
+                    0.0,
+                    0.0,
+                )
+            };
+
         Self {
-            population_strength: options.mesh_population_strength.clamp(0.0, 3.0),
-            contrast_strength: options.mesh_contrast_strength.clamp(0.0, 3.0),
-            harmony_strength: options.mesh_harmony_strength.clamp(0.0, 3.0),
-            vibrancy_strength: options.mesh_vibrancy_strength.clamp(0.0, 3.0),
-            muddy_penalty_multiplier: options.mesh_muddy_penalty_multiplier.clamp(0.0, 3.0),
+            population_strength,
+            contrast_strength,
+            harmony_strength,
+            vibrancy_strength,
+            muddy_penalty_multiplier,
+            expressive_contrast_bias,
+            expressive_bias,
+            expressive_muddy_bias,
         }
     }
 }
@@ -1679,6 +1927,9 @@ mod tests {
             harmony_strength: 1.0,
             vibrancy_strength: 1.0,
             muddy_penalty_multiplier: 1.0,
+            expressive_contrast_bias: 0.0,
+            expressive_bias: 0.0,
+            expressive_muddy_bias: 0.0,
         };
         let cohesive_score = evaluate_mesh_combo(&cohesive_refs, 100.0, tuning);
         let clash_score = evaluate_mesh_combo(&clash_refs, 100.0, tuning);
@@ -1707,6 +1958,9 @@ mod tests {
             harmony_strength: 1.0,
             vibrancy_strength: 1.0,
             muddy_penalty_multiplier: 0.0,
+            expressive_contrast_bias: 0.0,
+            expressive_bias: 0.0,
+            expressive_muddy_bias: 0.0,
         };
         let strict_tuning = MeshScoringTuning {
             muddy_penalty_multiplier: 2.0,
@@ -1717,6 +1971,74 @@ mod tests {
         let strict_score = evaluate_mesh_combo(&clash_refs, 100.0, strict_tuning);
 
         assert!(strict_score < loose_score);
+    }
+
+    #[test]
+    fn expressive_preset_rewards_stronger_contrast_more_than_stable() {
+        let combo = [
+            PaletteColor::new(pack_rgb(0xe8, 0x18, 0x3f), 100),
+            PaletteColor::new(pack_rgb(0x16, 0x2f, 0xea), 95),
+            PaletteColor::new(pack_rgb(0x1b, 0x1b, 0x24), 88),
+            PaletteColor::new(pack_rgb(0xd8, 0xd8, 0xe2), 82),
+        ];
+        let refs = [&combo[0], &combo[1], &combo[2], &combo[3]];
+
+        let stable = evaluate_mesh_combo(
+            &refs,
+            100.0,
+            MeshScoringTuning::from_options(ThemePaletteOptions::default()),
+        );
+        let expressive = evaluate_mesh_combo(
+            &refs,
+            100.0,
+            MeshScoringTuning::from_options(ThemePaletteOptions {
+                mesh_style_preset: MeshStylePreset::Expressive,
+                ..Default::default()
+            }),
+        );
+
+        assert!(expressive > stable);
+    }
+
+    #[test]
+    fn expressive_preset_penalizes_muddy_brown_more_when_vivid_contrast_is_present() {
+        let vivid_combo = [
+            PaletteColor::new(pack_rgb(0xe8, 0x18, 0x3f), 100),
+            PaletteColor::new(pack_rgb(0x16, 0x2f, 0xea), 95),
+            PaletteColor::new(pack_rgb(0x1b, 0x1b, 0x24), 88),
+            PaletteColor::new(pack_rgb(0xd8, 0xd8, 0xe2), 82),
+        ];
+        let muddy_combo = [
+            PaletteColor::new(pack_rgb(0xe8, 0x18, 0x3f), 100),
+            PaletteColor::new(pack_rgb(0x16, 0x2f, 0xea), 95),
+            PaletteColor::new(pack_rgb(0x8b, 0x5a, 0x3c), 88),
+            PaletteColor::new(pack_rgb(0xd8, 0xd8, 0xe2), 82),
+        ];
+        let vivid_refs = [
+            &vivid_combo[0],
+            &vivid_combo[1],
+            &vivid_combo[2],
+            &vivid_combo[3],
+        ];
+        let muddy_refs = [
+            &muddy_combo[0],
+            &muddy_combo[1],
+            &muddy_combo[2],
+            &muddy_combo[3],
+        ];
+
+        let stable_tuning = MeshScoringTuning::from_options(ThemePaletteOptions::default());
+        let expressive_tuning = MeshScoringTuning::from_options(ThemePaletteOptions {
+            mesh_style_preset: MeshStylePreset::Expressive,
+            ..Default::default()
+        });
+
+        let stable_gap =
+            evaluate_mesh_combo(&vivid_refs, 100.0, stable_tuning) - evaluate_mesh_combo(&muddy_refs, 100.0, stable_tuning);
+        let expressive_gap = evaluate_mesh_combo(&vivid_refs, 100.0, expressive_tuning)
+            - evaluate_mesh_combo(&muddy_refs, 100.0, expressive_tuning);
+
+        assert!(expressive_gap > stable_gap);
     }
 
     #[test]
@@ -1748,6 +2070,9 @@ mod tests {
             harmony_strength: 1.0,
             vibrancy_strength: 1.0,
             muddy_penalty_multiplier: 1.0,
+            expressive_contrast_bias: 0.0,
+            expressive_bias: 0.0,
+            expressive_muddy_bias: 0.0,
         };
 
         let bright_score = evaluate_mesh_combo(&bright_refs, 100.0, tuning);
@@ -1774,6 +2099,9 @@ mod tests {
                 harmony_strength: 1.0,
                 vibrancy_strength: 1.0,
                 muddy_penalty_multiplier: 1.0,
+                expressive_contrast_bias: 0.0,
+                expressive_bias: 0.0,
+                expressive_muddy_bias: 0.0,
             },
         )
         .expect("mesh selection");
@@ -1813,6 +2141,9 @@ mod tests {
                 harmony_strength: 1.0,
                 vibrancy_strength: 1.0,
                 muddy_penalty_multiplier: 1.0,
+                expressive_contrast_bias: 0.0,
+                expressive_bias: 0.0,
+                expressive_muddy_bias: 0.0,
             },
         )
         .expect("mesh selection");

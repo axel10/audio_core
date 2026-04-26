@@ -24,6 +24,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
   static const String _prefsKeyHueCohesion = 'mesh_demo.hue_cohesion';
   static const String _prefsKeyPaletteBlurRadius =
       'mesh_demo.palette_blur_radius';
+  static const String _prefsKeyMeshStylePreset = 'mesh_demo.mesh_style_preset';
   static const String _prefsKeyMeshMuddyPenaltyMultiplier =
       'mesh_demo.mesh_muddy_penalty_multiplier';
   static const String _prefsKeyMeshPopulationStrength =
@@ -45,6 +46,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
 
   late final Directory _cacheRoot;
   SharedPreferencesAsync? _prefs;
+  MeshStylePreset _meshStylePreset = MeshStylePreset.stable;
   double _hueCohesion = 0.58;
   double _paletteBlurRadius = 5.0;
   double _meshMuddyPenaltyMultiplier = 1.0;
@@ -155,6 +157,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
         saveLargeArtwork: false,
         options: TrackArtworkOptions(
           thumbnailSize: 600,
+          meshStylePreset: _meshStylePreset,
           hueCohesion: _hueCohesion,
           paletteBlurRadius: _paletteBlurRadius,
           meshMuddyPenaltyMultiplier: _meshMuddyPenaltyMultiplier,
@@ -206,6 +209,9 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
     final restoredPaletteBlurRadius = await prefs.getDouble(
       _prefsKeyPaletteBlurRadius,
     );
+    final restoredMeshStylePreset = await prefs.getInt(
+      _prefsKeyMeshStylePreset,
+    );
     final restoredMeshMuddyPenaltyMultiplier = await prefs.getDouble(
       _prefsKeyMeshMuddyPenaltyMultiplier,
     );
@@ -230,6 +236,9 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
     setState(() {
       _hueCohesion = restoredHueCohesion ?? _hueCohesion;
       _paletteBlurRadius = restoredPaletteBlurRadius ?? _paletteBlurRadius;
+      _meshStylePreset = _meshStylePresetFromStoredIndex(
+        restoredMeshStylePreset,
+      );
       _meshMuddyPenaltyMultiplier =
           restoredMeshMuddyPenaltyMultiplier ?? _meshMuddyPenaltyMultiplier;
       _meshPopulationStrength =
@@ -261,10 +270,32 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
     }
   }
 
+  void _updateMeshStylePreset(MeshStylePreset value) {
+    setState(() {
+      _meshStylePreset = value;
+    });
+    unawaited(_saveInt(_prefsKeyMeshStylePreset, value.index));
+    unawaited(_refreshPalette(immediate: false));
+  }
+
+  MeshStylePreset _meshStylePresetFromStoredIndex(int? index) {
+    final fallbackIndex = _meshStylePreset.index;
+    final normalizedIndex = (index ?? fallbackIndex)
+        .clamp(0, MeshStylePreset.values.length - 1)
+        .toInt();
+    return MeshStylePreset.values[normalizedIndex];
+  }
+
   Future<void> _saveDouble(String key, double value) async {
     final prefs = _prefs ?? SharedPreferencesAsync();
     _prefs ??= prefs;
     await prefs.setDouble(key, value);
+  }
+
+  Future<void> _saveInt(String key, int value) async {
+    final prefs = _prefs ?? SharedPreferencesAsync();
+    _prefs ??= prefs;
+    await prefs.setInt(key, value);
   }
 
   Future<void> _saveBool(String key, bool value) async {
@@ -797,6 +828,46 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
                                       ).textTheme.labelSmall,
                                     ),
                                     const SizedBox(height: 4),
+                                    Text(
+                                      'Mesh Style',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.labelSmall,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    ToggleButtons(
+                                      isSelected: [
+                                        _meshStylePreset ==
+                                            MeshStylePreset.stable,
+                                        _meshStylePreset ==
+                                            MeshStylePreset.expressive,
+                                      ],
+                                      onPressed: (index) {
+                                        _updateMeshStylePreset(
+                                          MeshStylePreset.values[index],
+                                        );
+                                      },
+                                      constraints: const BoxConstraints(
+                                        minHeight: 32,
+                                        minWidth: 118,
+                                      ),
+                                      borderRadius: BorderRadius.circular(10),
+                                      children: const [
+                                        Padding(
+                                          padding: EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                          ),
+                                          child: Text('Stable'),
+                                        ),
+                                        Padding(
+                                          padding: EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                          ),
+                                          child: Text('Expressive'),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
                                     _buildDenseSlider(
                                       label: 'Hue',
                                       value: _hueCohesion,

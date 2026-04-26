@@ -111,6 +111,7 @@ abstract class RustLibApi extends BaseApi {
     required String cacheRootPath,
     required bool saveLargeArtwork,
     required int thumbnailSize,
+    required int meshStylePreset,
     required double hueCohesion,
     required double paletteBlurRadius,
     required double meshMuddyPenaltyMultiplier,
@@ -452,6 +453,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required String cacheRootPath,
     required bool saveLargeArtwork,
     required int thumbnailSize,
+    required int meshStylePreset,
     required double hueCohesion,
     required double paletteBlurRadius,
     required double meshMuddyPenaltyMultiplier,
@@ -468,6 +470,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(cacheRootPath, serializer);
           sse_encode_bool(saveLargeArtwork, serializer);
           sse_encode_i_32(thumbnailSize, serializer);
+          sse_encode_i_32(meshStylePreset, serializer);
           sse_encode_f_64(hueCohesion, serializer);
           sse_encode_f_64(paletteBlurRadius, serializer);
           sse_encode_f_64(meshMuddyPenaltyMultiplier, serializer);
@@ -492,6 +495,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           cacheRootPath,
           saveLargeArtwork,
           thumbnailSize,
+          meshStylePreset,
           hueCohesion,
           meshMuddyPenaltyMultiplier,
           meshPopulationStrength,
@@ -512,6 +516,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           "cacheRootPath",
           "saveLargeArtwork",
           "thumbnailSize",
+          "meshStylePreset",
           "hueCohesion",
           "paletteBlurRadius",
           "meshMuddyPenaltyMultiplier",

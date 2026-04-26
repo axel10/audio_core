@@ -13,7 +13,9 @@ use zune_image::traits::OperationsTrait;
 use zune_imageprocs::crop::Crop;
 use zune_imageprocs::resize::{Resize, ResizeMethod};
 
-use super::palette::{build_theme_palette_bundle_with_options, ThemePaletteOptions};
+use super::palette::{
+    build_theme_palette_bundle_with_options, MeshStylePreset, ThemePaletteOptions,
+};
 
 use id3::frame::{
     Comment as Id3Comment, ExtendedText as Id3ExtendedText, Lyrics as Id3Lyrics,
@@ -83,6 +85,7 @@ pub fn generate_track_artwork(
     cache_root_path: String,
     save_large_artwork: bool,
     thumbnail_size: i32,
+    mesh_style_preset: i32,
     hue_cohesion: f64,
     palette_blur_radius: f64,
     mesh_muddy_penalty_multiplier: f64,
@@ -110,6 +113,7 @@ pub fn generate_track_artwork(
         build_square_thumbnail(&picture.bytes, thumbnail_size.max(1) as usize)?;
     let palette_options = ThemePaletteOptions {
         hue_cohesion,
+        mesh_style_preset: MeshStylePreset::from_code(mesh_style_preset),
         palette_blur_radius,
         mesh_muddy_penalty_multiplier,
         mesh_population_strength,
