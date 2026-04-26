@@ -86,7 +86,7 @@ fn quantize_palette_colors(
         }
 
         let quantized = quantize_rgb(pixel[0], pixel[1], pixel[2]);
-        if should_ignore_color(quantized) {
+        if should_hard_ignore_color(quantized) {
             *ignored_histogram.entry(quantized).or_insert(0) += 1;
         } else {
             if !histogram.contains_key(&quantized) {
@@ -153,7 +153,7 @@ fn quantize_histogram(
     let mut palette_colors = Vec::with_capacity(priority_queue.len());
     while let Some(color_box) = priority_queue.pop().map(PriorityColorBox::into_inner) {
         let average_color = color_box.average_color(&colors, &histogram);
-        if !should_ignore_color(average_color.rgb) {
+        if !should_hard_ignore_color(average_color.rgb) {
             palette_colors.push(average_color);
         }
     }
@@ -290,6 +290,7 @@ fn generate_palette_score(
     };
 
     saturation_score + lightness_score + population_score + hue_score
+        - theme_soft_suppression_penalty(color)
 }
 
 fn palette_targets() -> [(&'static str, PaletteTarget); 6] {
@@ -303,13 +304,25 @@ fn palette_targets() -> [(&'static str, PaletteTarget); 6] {
     ]
 }
 
-fn should_ignore_color(color: u32) -> bool {
+fn should_hard_ignore_color(color: u32) -> bool {
     let hsl = rgb_to_hsl(color);
     let is_black = hsl.lightness <= 0.05;
     let is_white = hsl.lightness >= 0.95;
-    let is_near_red_i_line = hsl.hue >= 10.0 && hsl.hue <= 37.0 && hsl.saturation <= 0.82;
 
-    is_black || is_white || is_near_red_i_line
+    is_black || is_white
+}
+
+fn theme_soft_suppression_penalty(color: &PaletteColor) -> f64 {
+    let hue_distance = circular_hue_distance(color.hsl.hue, 24.0);
+    if hue_distance > 18.0 {
+        return 0.0;
+    }
+
+    let hue_weight = (1.0 - hue_distance / 18.0).clamp(0.0, 1.0);
+    let saturation_weight = ((0.86 - color.hsl.saturation) / 0.56).clamp(0.0, 1.0);
+    let lightness_weight = (1.0 - (color.hsl.lightness - 0.58).abs() / 0.34).clamp(0.0, 1.0);
+
+    0.18 * hue_weight * saturation_weight * lightness_weight
 }
 
 fn quantize_rgb(red: u8, green: u8, blue: u8) -> u32 {
@@ -988,6 +1001,9 @@ fn select_mesh_colors(
             .iter()
             .map(|color| color.population as f64)
             .fold(1.0, f64::max);
+        let refs = [&combo[0], &combo[1], &combo[2], &combo[3]];
+        let assignment = best_mesh_role_assignment(&refs, max_pop);
+        let combo = reorder_mesh_combo_by_roles(combo, assignment.ordered_indices);
         let debug = build_mesh_selection_debug(&combo, max_pop, tuning, 0.0);
         return Some(MeshSelectionOutcome {
             colors: combo,
@@ -1026,7 +1042,9 @@ fn select_mesh_colors(
     }
 
     if let Some(mut combo) = best_combo {
-        combo.sort_by(|a, b| b.oklch.l.partial_cmp(&a.oklch.l).unwrap_or(Ordering::Equal));
+        let refs = [&combo[0], &combo[1], &combo[2], &combo[3]];
+        let assignment = best_mesh_role_assignment(&refs, max_pop);
+        combo = reorder_mesh_combo_by_roles(combo, assignment.ordered_indices);
         let debug = build_mesh_selection_debug(&combo, max_pop, tuning, best_score);
         Some(MeshSelectionOutcome {
             colors: combo,
@@ -1042,6 +1060,7 @@ fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64, tuning: MeshSco
         .iter()
         .map(|c| c.population as f64 / max_pop)
         .sum::<f64>();
+    let role_assignment = best_mesh_role_assignment(combo, max_pop);
 
     let mut min_dist = f64::INFINITY;
     for i in 0..4 {
@@ -1101,6 +1120,7 @@ fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64, tuning: MeshSco
         + distinct_score * tuning.contrast_strength
         + vibrancy_reward * tuning.vibrancy_strength
         + template_bonus * tuning.harmony_strength
+        + role_assignment.score * (0.7 * tuning.harmony_strength + 0.3 * tuning.contrast_strength)
         - clash_penalty
         - cohesion_penalty * tuning.harmony_strength
         - over_chroma_penalty * tuning.vibrancy_strength
@@ -1131,6 +1151,12 @@ impl MeshScoringTuning {
 struct MeshSelectionOutcome {
     colors: [PaletteColor; 4],
     debug: MeshSelectionDebug,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MeshRoleAssignment {
+    ordered_indices: [usize; 4],
+    score: f64,
 }
 
 fn build_mesh_selection_debug(
@@ -1196,49 +1222,24 @@ fn build_mesh_selection_debug(
         total,
     };
 
-    let cluster = best_hue_cluster(&refs, 45.0);
-    let anchor_index = cluster.as_ref().and_then(|cluster| {
-        refs.iter()
-            .enumerate()
-            .min_by(|(_, a), (_, b)| {
-                circular_hue_distance(cluster.center_hue, a.oklch.h)
-                    .partial_cmp(&circular_hue_distance(cluster.center_hue, b.oklch.h))
-                    .unwrap_or(Ordering::Equal)
-            })
-            .map(|(index, _)| index)
-    });
-    let accent_index = cluster.as_ref().and_then(|cluster| {
-        refs.iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| {
-                circular_hue_distance(cluster.center_hue, a.oklch.h)
-                    .partial_cmp(&circular_hue_distance(cluster.center_hue, b.oklch.h))
-                    .unwrap_or(Ordering::Equal)
-            })
-            .map(|(index, _)| index)
-    });
-
+    let role_meta = [
+        ("base", "population"),
+        ("support", "harmony"),
+        ("accent", "contrast"),
+        ("light", "lightness"),
+    ];
     let mut colors = Vec::with_capacity(4);
     for (index, color) in combo.iter().enumerate() {
-        let hue_distance = cluster
-            .as_ref()
-            .map(|cluster| circular_hue_distance(cluster.center_hue, color.oklch.h))
-            .unwrap_or_default();
-        let (role, primary_driver) = if Some(index) == accent_index && hue_distance >= 80.0 {
-            ("accent".to_string(), "contrast".to_string())
-        } else if Some(index) == anchor_index {
-            ("anchor".to_string(), "population".to_string())
-        } else if color.oklch.c >= vibrancy_mean {
-            ("support".to_string(), "vibrancy".to_string())
-        } else {
-            ("support".to_string(), "harmony".to_string())
-        };
+        let (role, primary_driver) = role_meta
+            .get(index)
+            .copied()
+            .unwrap_or(("support", "harmony"));
 
         colors.push(MeshColorDebug {
             slot: format!("mesh{}", index + 1),
             color: color.argb(),
-            role,
-            primary_driver,
+            role: role.to_string(),
+            primary_driver: primary_driver.to_string(),
             hue: color.oklch.h,
             chroma: color.oklch.c,
             lightness: color.oklch.l,
@@ -1359,6 +1360,135 @@ fn accent_bonus(combo: &[&PaletteColor; 4], cluster: &MeshHueCluster) -> f64 {
     let saturation_excess = (accent.hsl.saturation - cluster.average_saturation * 1.15).max(0.0);
 
     distance_reward - chroma_excess * 12.0 - saturation_excess * 2.0
+}
+
+fn reorder_mesh_combo_by_roles(
+    combo: [PaletteColor; 4],
+    ordered_indices: [usize; 4],
+) -> [PaletteColor; 4] {
+    let [c0, c1, c2, c3] = combo;
+    let source = [c0, c1, c2, c3];
+    [
+        source[ordered_indices[0]].clone(),
+        source[ordered_indices[1]].clone(),
+        source[ordered_indices[2]].clone(),
+        source[ordered_indices[3]].clone(),
+    ]
+}
+
+fn best_mesh_role_assignment(combo: &[&PaletteColor; 4], max_pop: f64) -> MeshRoleAssignment {
+    let anchor_hue = best_hue_cluster(combo, 45.0)
+        .map(|cluster| cluster.center_hue)
+        .unwrap_or_else(|| combo[0].oklch.h);
+    let permutations = [
+        [0, 1, 2, 3],
+        [0, 1, 3, 2],
+        [0, 2, 1, 3],
+        [0, 2, 3, 1],
+        [0, 3, 1, 2],
+        [0, 3, 2, 1],
+        [1, 0, 2, 3],
+        [1, 0, 3, 2],
+        [1, 2, 0, 3],
+        [1, 2, 3, 0],
+        [1, 3, 0, 2],
+        [1, 3, 2, 0],
+        [2, 0, 1, 3],
+        [2, 0, 3, 1],
+        [2, 1, 0, 3],
+        [2, 1, 3, 0],
+        [2, 3, 0, 1],
+        [2, 3, 1, 0],
+        [3, 0, 1, 2],
+        [3, 0, 2, 1],
+        [3, 1, 0, 2],
+        [3, 1, 2, 0],
+        [3, 2, 0, 1],
+        [3, 2, 1, 0],
+    ];
+
+    let mut best = MeshRoleAssignment {
+        ordered_indices: [0, 1, 2, 3],
+        score: f64::NEG_INFINITY,
+    };
+
+    for ordered_indices in permutations {
+        let score = mesh_role_assignment_score(combo, ordered_indices, max_pop, anchor_hue);
+        if score > best.score {
+            best = MeshRoleAssignment {
+                ordered_indices,
+                score,
+            };
+        }
+    }
+
+    best
+}
+
+fn mesh_role_assignment_score(
+    combo: &[&PaletteColor; 4],
+    ordered_indices: [usize; 4],
+    max_pop: f64,
+    anchor_hue: f64,
+) -> f64 {
+    let base = combo[ordered_indices[0]];
+    let support = combo[ordered_indices[1]];
+    let accent = combo[ordered_indices[2]];
+    let light = combo[ordered_indices[3]];
+
+    let base_pop = (base.population as f64 / max_pop.max(1.0)).clamp(0.0, 1.2);
+    let support_pop = (support.population as f64 / max_pop.max(1.0)).clamp(0.0, 1.2);
+    let accent_pop = (accent.population as f64 / max_pop.max(1.0)).clamp(0.0, 1.2);
+    let light_pop = (light.population as f64 / max_pop.max(1.0)).clamp(0.0, 1.2);
+
+    let base_score = base_pop * 1.4
+        + target_closeness(base.oklch.c, 0.08, 0.09) * 1.0
+        + target_closeness(base.oklch.l, 0.40, 0.24) * 1.1
+        + hue_similarity(base.oklch.h, anchor_hue) * 0.8;
+    let support_score = support_pop * 0.8
+        + target_closeness(support.oklch.c, 0.11, 0.10) * 0.8
+        + target_closeness(support.oklch.l, 0.55, 0.22) * 0.9
+        + hue_similarity(support.oklch.h, anchor_hue) * 1.0;
+    let accent_distance = circular_hue_distance(accent.oklch.h, anchor_hue);
+    let accent_score = accent_pop * 0.5
+        + target_closeness(accent_distance, 108.0, 64.0) * 1.2
+        + (accent.oklch.c / 0.24).clamp(0.0, 1.2) * 1.4
+        + target_closeness(accent.oklch.l, 0.56, 0.28) * 0.4;
+    let light_score = light_pop * 0.7
+        + target_closeness(light.oklch.l, 0.78, 0.18) * 1.8
+        + target_closeness(light.oklch.c, 0.08, 0.10) * 0.7
+        + hue_similarity(light.oklch.h, anchor_hue) * 0.5;
+
+    let base_support_distance =
+        (oklab_distance(&base.oklab, &support.oklab) / 0.12).clamp(0.0, 1.0);
+    let support_light_distance =
+        (oklab_distance(&support.oklab, &light.oklab) / 0.14).clamp(0.0, 1.0);
+    let accent_base_distance = (oklab_distance(&accent.oklab, &base.oklab) / 0.18).clamp(0.0, 1.0);
+    let bridge_bonus =
+        base_support_distance * 0.4 + support_light_distance * 0.3 + accent_base_distance * 0.5;
+
+    let mut penalties = 0.0;
+    if light.oklch.l <= support.oklch.l {
+        penalties += 1.2;
+    }
+    if support.oklch.l <= base.oklch.l {
+        penalties += 0.9;
+    }
+    if accent_distance < 50.0 {
+        penalties += (50.0 - accent_distance) / 50.0 * 1.5;
+    }
+    if accent.oklch.c < support.oklch.c {
+        penalties += ((support.oklch.c - accent.oklch.c) / 0.12).clamp(0.0, 1.0) * 0.9;
+    }
+
+    base_score + support_score + accent_score + light_score + bridge_bonus - penalties
+}
+
+fn target_closeness(value: f64, target: f64, spread: f64) -> f64 {
+    if spread <= f64::EPSILON {
+        return 0.0;
+    }
+    (1.0 - (value - target).abs() / spread).clamp(0.0, 1.0)
 }
 
 fn minimal_circular_span(hues: &[f64]) -> f64 {
@@ -1558,5 +1688,47 @@ mod tests {
         let strict_score = evaluate_mesh_combo(&clash_refs, 100.0, strict_tuning);
 
         assert!(strict_score < loose_score);
+    }
+
+    #[test]
+    fn warm_browns_are_soft_suppressed_not_fully_ignored() {
+        let pixels = [
+            0xb8, 0x84, 0x62, 0xff, 0xb8, 0x84, 0x62, 0xff, 0xb8, 0x84, 0x62, 0xff,
+        ];
+
+        let theme_colors = build_theme_colors_from_pixels(&pixels, 4).expect("theme colors");
+        let dominant = theme_colors.get("dominant").copied().expect("dominant");
+        let dominant_hsl = rgb_to_hsl(dominant & 0x00ff_ffff);
+
+        assert!(dominant_hsl.hue >= 10.0 && dominant_hsl.hue <= 40.0);
+        assert!(dominant_hsl.lightness > 0.3 && dominant_hsl.lightness < 0.7);
+    }
+
+    #[test]
+    fn mesh_selection_orders_roles_as_base_support_accent_light() {
+        let palette_colors = vec![
+            PaletteColor::new(pack_rgb(0x55, 0x43, 0x37), 100),
+            PaletteColor::new(pack_rgb(0x8c, 0x67, 0x54), 82),
+            PaletteColor::new(pack_rgb(0x2d, 0x90, 0xb8), 72),
+            PaletteColor::new(pack_rgb(0xe7, 0xd8, 0xc8), 76),
+        ];
+
+        let selection = select_mesh_colors(
+            &palette_colors,
+            MeshScoringTuning {
+                population_strength: 1.0,
+                contrast_strength: 1.0,
+                harmony_strength: 1.0,
+                vibrancy_strength: 1.0,
+                muddy_penalty_multiplier: 1.0,
+            },
+        )
+        .expect("mesh selection");
+
+        assert_eq!(selection.debug.colors[0].role, "base");
+        assert_eq!(selection.debug.colors[1].role, "support");
+        assert_eq!(selection.debug.colors[2].role, "accent");
+        assert_eq!(selection.debug.colors[3].role, "light");
+        assert!(selection.colors[0].oklch.l <= selection.colors[3].oklch.l);
     }
 }
