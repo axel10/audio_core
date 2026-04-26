@@ -44,6 +44,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
   String? _errorText;
   String? _trackedKey;
   Timer? _debounceTimer;
+  final ScrollController _tuningScrollController = ScrollController();
   String? _artworkPath;
   int _requestToken = 0;
 
@@ -65,6 +66,7 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
   void dispose() {
     widget.controller.removeListener(_handleControllerChanged);
     _debounceTimer?.cancel();
+    _tuningScrollController.dispose();
     super.dispose();
   }
 
@@ -648,118 +650,154 @@ class _MeshDemoTabState extends State<MeshDemoTab> {
   Widget _buildCompactControls(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: _buildGlassCard(
-        context: context,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 500),
+          child: _buildGlassCard(
+            context: context,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  IconButton.filledTonal(
-                    iconSize: 20,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                      minWidth: 40,
-                      minHeight: 40,
-                    ),
-                    icon: const Icon(Icons.skip_previous),
-                    onPressed: () => widget.controller.playlist.playPrevious(),
-                  ),
-                  const SizedBox(width: 4),
-                  IconButton.filledTonal(
-                    iconSize: 20,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                      minWidth: 40,
-                      minHeight: 40,
-                    ),
-                    icon: const Icon(Icons.skip_next),
-                    onPressed: () => widget.controller.playlist.playNext(),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Palette Tuning',
-                          style: Theme.of(context).textTheme.labelSmall,
+                  Row(
+                    children: [
+                      IconButton.filledTonal(
+                        iconSize: 20,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 40,
+                          minHeight: 40,
                         ),
-                        const SizedBox(height: 4),
-                        _buildDenseSlider(
-                          label: 'Hue',
-                          value: _hueCohesion,
-                          min: 0.0,
-                          max: 1.0,
-                          onChanged: (v) {
-                            setState(() => _hueCohesion = v);
-                            _refreshPalette(immediate: false);
-                          },
+                        icon: const Icon(Icons.skip_previous),
+                        onPressed: () =>
+                            widget.controller.playlist.playPrevious(),
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton.filledTonal(
+                        iconSize: 20,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 40,
+                          minHeight: 40,
                         ),
-                        _buildDenseSlider(
-                          label: 'Mud',
-                          value: _meshMuddyPenaltyMultiplier,
-                          min: 0.0,
-                          max: 2.0,
-                          onChanged: (v) {
-                            setState(() => _meshMuddyPenaltyMultiplier = v);
-                            _refreshPalette(immediate: false);
-                          },
+                        icon: const Icon(Icons.skip_next),
+                        onPressed: () => widget.controller.playlist.playNext(),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(
+                              maxWidth: 500,
+                              maxHeight: 400,
+                            ),
+                            child: Scrollbar(
+                              controller: _tuningScrollController,
+                              thumbVisibility: true,
+                              child: SingleChildScrollView(
+                                controller: _tuningScrollController,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Palette Tuning',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.labelSmall,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    _buildDenseSlider(
+                                      label: 'Hue',
+                                      value: _hueCohesion,
+                                      min: 0.0,
+                                      max: 1.0,
+                                      onChanged: (v) {
+                                        setState(() => _hueCohesion = v);
+                                        _refreshPalette(immediate: false);
+                                      },
+                                    ),
+                                    _buildDenseSlider(
+                                      label: 'Mud',
+                                      value: _meshMuddyPenaltyMultiplier,
+                                      min: 0.0,
+                                      max: 2.0,
+                                      onChanged: (v) {
+                                        setState(
+                                          () => _meshMuddyPenaltyMultiplier = v,
+                                        );
+                                        _refreshPalette(immediate: false);
+                                      },
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Mesh Balance',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.labelSmall,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    _buildDenseSlider(
+                                      label: 'Pop',
+                                      value: _meshPopulationStrength,
+                                      min: 0.0,
+                                      max: 2.0,
+                                      onChanged: (v) {
+                                        setState(
+                                          () => _meshPopulationStrength = v,
+                                        );
+                                        _refreshPalette(immediate: false);
+                                      },
+                                    ),
+                                    _buildDenseSlider(
+                                      label: 'Con',
+                                      value: _meshContrastStrength,
+                                      min: 0.0,
+                                      max: 2.0,
+                                      onChanged: (v) {
+                                        setState(
+                                          () => _meshContrastStrength = v,
+                                        );
+                                        _refreshPalette(immediate: false);
+                                      },
+                                    ),
+                                    _buildDenseSlider(
+                                      label: 'Har',
+                                      value: _meshHarmonyStrength,
+                                      min: 0.0,
+                                      max: 2.0,
+                                      onChanged: (v) {
+                                        setState(
+                                          () => _meshHarmonyStrength = v,
+                                        );
+                                        _refreshPalette(immediate: false);
+                                      },
+                                    ),
+                                    _buildDenseSlider(
+                                      label: 'Vib',
+                                      value: _meshVibrancyStrength,
+                                      min: 0.0,
+                                      max: 2.0,
+                                      onChanged: (v) {
+                                        setState(
+                                          () => _meshVibrancyStrength = v,
+                                        );
+                                        _refreshPalette(immediate: false);
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Mesh Balance',
-                          style: Theme.of(context).textTheme.labelSmall,
-                        ),
-                        const SizedBox(height: 4),
-                        _buildDenseSlider(
-                          label: 'Pop',
-                          value: _meshPopulationStrength,
-                          min: 0.0,
-                          max: 2.0,
-                          onChanged: (v) {
-                            setState(() => _meshPopulationStrength = v);
-                            _refreshPalette(immediate: false);
-                          },
-                        ),
-                        _buildDenseSlider(
-                          label: 'Con',
-                          value: _meshContrastStrength,
-                          min: 0.0,
-                          max: 2.0,
-                          onChanged: (v) {
-                            setState(() => _meshContrastStrength = v);
-                            _refreshPalette(immediate: false);
-                          },
-                        ),
-                        _buildDenseSlider(
-                          label: 'Har',
-                          value: _meshHarmonyStrength,
-                          min: 0.0,
-                          max: 2.0,
-                          onChanged: (v) {
-                            setState(() => _meshHarmonyStrength = v);
-                            _refreshPalette(immediate: false);
-                          },
-                        ),
-                        _buildDenseSlider(
-                          label: 'Vib',
-                          value: _meshVibrancyStrength,
-                          min: 0.0,
-                          max: 2.0,
-                          onChanged: (v) {
-                            setState(() => _meshVibrancyStrength = v);
-                            _refreshPalette(immediate: false);
-                          },
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ],
               ),
-            ],
+            ),
           ),
         ),
       ),
