@@ -1,0 +1,46 @@
+Analyzing dependencies
+Downloading dependencies
+Installing DKImagePickerController (4.3.9)
+Installing DKPhotoGallery (0.0.19)
+Installing Flutter (1.0.0)
+Installing SDWebImage (5.21.7)
+Installing SwiftyGif (5.4.5)
+Installing audio_core (0.0.1)
+Installing audio_service (0.0.1)
+Installing audio_session (0.0.1)
+Installing dart_chromaprint (0.0.1)
+Installing file_picker (0.0.1)
+Installing integration_test (0.0.1)
+Installing shared_preferences_foundation (0.0.1)
+Installing sqflite_darwin (0.0.4)
+Generating Pods project
+[!] An error occurred while processing the post-install hook of the Podfile.
+
+/Users/axel10/flutter/bin/cache/artifacts/engine/ios/Flutter.xcframework must exist. If you're running pod install manually, make sure "flutter precache --ios" is executed first
+
+/Users/axel10/flutter/packages/flutter_tools/bin/podhelper.rb:61:in 'Object#flutter_additional_ios_build_settings'
+/Users/axel10/projects/player_project/vibe_flow/audio_core/example/ios/Podfile:41:in 'block (3 levels) in Pod::Podfile.from_ruby'
+/Users/axel10/projects/player_project/vibe_flow/audio_core/example/ios/Podfile:40:in 'Array#each'
+/Users/axel10/projects/player_project/vibe_flow/audio_core/example/ios/Podfile:40:in 'block (2 levels) in Pod::Podfile.from_ruby'
+/opt/homebrew/Cellar/cocoapods/1.16.2_2/libexec/gems/cocoapods-core-1.16.2/lib/cocoapods-core/podfile.rb:196:in 'Pod::Podfile#post_install!'
+/opt/homebrew/Cellar/cocoapods/1.16.2_2/libexec/gems/cocoapods-1.16.2/lib/cocoapods/installer.rb:1013:in 'Pod::Installer#run_podfile_post_install_hook'
+/opt/homebrew/Cellar/cocoapods/1.16.2_2/libexec/gems/cocoapods-1.16.2/lib/cocoapods/installer.rb:1001:in 'block in Pod::Installer#run_podfile_post_install_hooks'
+/opt/homebrew/Cellar/cocoapods/1.16.2_2/libexec/gems/cocoapods-1.16.2/lib/cocoapods/user_interface.rb:149:in 'Pod::UserInterface.message'
+/opt/homebrew/Cellar/cocoapods/1.16.2_2/libexec/gems/cocoapods-1.16.2/lib/cocoapods/installer.rb:1000:in 'Pod::Installer#run_podfile_post_install_hooks'
+/opt/homebrew/Cellar/cocoapods/1.16.2_2/libexec/gems/cocoapods-1.16.2/lib/cocoapods/installer.rb:337:in 'block (2 levels) in Pod::Installer#create_and_save_projects'
+/opt/homebrew/Cellar/cocoapods/1.16.2_2/libexec/gems/cocoapods-1.16.2/lib/cocoapods/installer/xcode/pods_project_generator/pods_project_writer.rb:61:in 'Pod::Installer::Xcode::PodsProjectWriter#write!'
+/opt/homebrew/Cellar/cocoapods/1.16.2_2/libexec/gems/cocoapods-1.16.2/lib/cocoapods/installer.rb:336:in 'block in Pod::Installer#create_and_save_projects'
+/opt/homebrew/Cellar/cocoapods/1.16.2_2/libexec/gems/cocoapods-1.16.2/lib/cocoapods/user_interface.rb:64:in 'Pod::UserInterface.section'
+/opt/homebrew/Cellar/cocoapods/1.16.2_2/libexec/gems/cocoapods-1.16.2/lib/cocoapods/installer.rb:315:in 'Pod::Installer#create_and_save_projects'
+/opt/homebrew/Cellar/cocoapods/1.16.2_2/libexec/gems/cocoapods-1.16.2/lib/cocoapods/installer.rb:307:in 'Pod::Installer#generate_pods_project'
+/opt/homebrew/Cellar/cocoapods/1.16.2_2/libexec/gems/cocoapods-1.16.2/lib/cocoapods/installer.rb:183:in 'Pod::Installer#integrate'
+/opt/homebrew/Cellar/cocoapods/1.16.2_2/libexec/gems/cocoapods-1.16.2/lib/cocoapods/installer.rb:170:in 'Pod::Installer#install!'
+/opt/homebrew/Cellar/cocoapods/1.16.2_2/libexec/gems/cocoapods-1.16.2/lib/cocoapods/command/install.rb:52:in 'Pod::Command::Install#run'
+/opt/homebrew/Cellar/cocoapods/1.16.2_2/libexec/gems/claide-1.1.0/lib/claide/command.rb:334:in 'CLAide::Command.run'
+/opt/homebrew/Cellar/cocoapods/1.16.2_2/libexec/gems/cocoapods-1.16.2/lib/cocoapods/command.rb:52:in 'Pod::Command.run'
+/opt/homebrew/Cellar/cocoapods/1.16.2_2/libexec/gems/cocoapods-1.16.2/bin/pod:55:in '<top (required)>'
+/opt/homebrew/Cellar/ruby/4.0.3/lib/ruby/4.0.0/rubygems.rb:305:in 'Kernel#load'
+/opt/homebrew/Cellar/ruby/4.0.3/lib/ruby/4.0.0/rubygems.rb:305:in 'Gem.activate_and_load_bin_path'
+/opt/homebrew/Cellar/cocoapods/1.16.2_2/libexec/bin/pod:25:in '<main>'
+
+[!] Automatically assigning platform `iOS` with version `13.0` on target `Runner` because no platform was specified. Please specify a platform for this target in your Podfile. See `https://guides.cocoapods.org/syntax/podfile.html#platform`.

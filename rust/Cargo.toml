@@ -19,7 +19,8 @@ zune-image = { version = "0.5.0", default-features = false, features = ["jpeg", 
 zune-imageprocs = { version = "0.5.1", default-features = false }
 palette_core = { path = "palette" }
 fast_image_resize = "6.0.0"
-libblur = { path = "libblur" }
+libblur = "0.23.3"
+
 
 
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]

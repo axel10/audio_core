@@ -417,9 +417,11 @@ packages:
   mesh_gradient:
     dependency: "direct main"
     description:
-      path: "../../mesh-gradient"
-      relative: true
-    source: path
+      path: "."
+      ref: main
+      resolved-ref: f905517482c75750403d08a6b5658c85b4b15832
+      url: "https://github.com/axel10/mesh-gradient"
+    source: git
     version: "1.3.8"
   meta:
     dependency: transitive

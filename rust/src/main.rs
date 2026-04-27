@@ -1,4 +1,4 @@
-#[cfg(not(target_os = "android"))]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn main() {
     use rodio::Decoder;
     use std::fs::File;
@@ -19,5 +19,7 @@ fn main() {
     player.sleep_until_end();
 }
 
-#[cfg(target_os = "android")]
-fn main() {}
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+fn main() {
+    println!("This binary is only supported on Windows and Linux.");
+}

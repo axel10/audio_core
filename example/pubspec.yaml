@@ -48,7 +48,9 @@ dependencies:
   audio_service: ^0.18.18
   media_scanner: ^2.2.1
   mesh_gradient: 
-   path: ../../mesh-gradient
+   git:
+    url: https://github.com/axel10/mesh-gradient
+    ref: main
   palette_generator_master: ^1.0.1
   palette_generator: ^0.3.3+7
   audio_metadata_reader: ^1.4.2
