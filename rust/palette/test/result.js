@@ -1,5 +1,4 @@
-
-var a = '#0707A0'
-var b = '#5E6CAF'
-var c = '#2836B0'
-var d = '#A4A6AB'
+var a = '#28242A'
+var b = '#625D6A'
+var c = '#DEDAD5'
+var d = '#8E8A96'
