@@ -160,7 +160,10 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       result(engine.getDurationMs())
 
     case "getCurrentPosition":
-      result(engine.getCurrentPositionMs())
+      result([
+        "position": engine.getCurrentPositionMs(),
+        "takenAt": Int(Date().timeIntervalSince1970 * 1000),
+      ])
 
     case "getLatestFft":
       do {

@@ -16,6 +16,25 @@ import 'package:audio_service/audio_service.dart';
 
 late AudioCoreHandler audioHandler;
 
+const List<String> _audioFileExtensions = <String>[
+  'aac',
+  'aif',
+  'aiff',
+  'alac',
+  'caf',
+  'flac',
+  'm4a',
+  'm4b',
+  'm4p',
+  'mid',
+  'midi',
+  'mp3',
+  'ogg',
+  'opus',
+  'wav',
+  'webm',
+];
+
 void main() {
   runZonedGuarded(
     () async {
@@ -244,7 +263,8 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
     }
 
     final result = await FilePicker.platform.pickFiles(
-      type: FileType.audio,
+      type: FileType.custom,
+      allowedExtensions: _audioFileExtensions,
       allowMultiple: true,
     );
     debugPrint(

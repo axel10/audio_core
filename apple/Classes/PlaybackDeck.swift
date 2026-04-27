@@ -9,6 +9,7 @@ final class PlaybackDeck {
   var playbackFramePosition: AVAudioFramePosition = 0
   var isPlaybackScheduled = false
   var gain: Double = 1.0
+  var playbackGeneration: UInt64 = 0
 
   var isLoaded: Bool {
     loadedFile != nil
@@ -30,9 +31,18 @@ final class PlaybackDeck {
     return max(0, min(playbackFramePosition + renderedFrames, currentFile.length))
   }
 
-  func clear(releasingFile: Bool) {
+  func invalidatePendingPlaybackCallbacks() {
+    playbackGeneration &+= 1
+  }
+
+  func stopPlaybackNode() {
+    invalidatePendingPlaybackCallbacks()
     playerNode.stop()
     isPlaybackScheduled = false
+  }
+
+  func clear(releasingFile: Bool) {
+    stopPlaybackNode()
     if releasingFile {
       loadedURL = nil
       loadedFile = nil

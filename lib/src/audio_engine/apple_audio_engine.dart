@@ -14,7 +14,9 @@ import 'pcm_waveform_support.dart';
 import 'rust_metadata_bridge.dart';
 import 'track_artwork_support.dart';
 
-class AppleAudioEngine with PcmWaveformSupport, TrackArtworkSupport implements AudioEngine {
+class AppleAudioEngine
+    with PcmWaveformSupport, TrackArtworkSupport
+    implements AudioEngine {
   static const MethodChannel _channel = MethodChannel('audio_core.player');
 
   final _statusController = StreamController<AudioStatus>.broadcast();
@@ -178,14 +180,18 @@ class AppleAudioEngine with PcmWaveformSupport, TrackArtworkSupport implements A
 
   @override
   Future<PositionSnapshot> getCurrentPosition() async {
-    final Map<dynamic, dynamic>? result = await _channel.invokeMethod(
-      'getCurrentPosition',
-      <String, Object?>{'playerId': 'main'},
-    );
+    final Map<Object?, Object?>? result = await _channel
+        .invokeMethod<Map<Object?, Object?>>(
+          'getCurrentPosition',
+          <String, Object?>{'playerId': 'main'},
+        );
     return PositionSnapshot(
-      position: Duration(milliseconds: (result?['position'] as int?) ?? 0),
+      position: Duration(
+        milliseconds: (result?['position'] as num?)?.toInt() ?? 0,
+      ),
       takenAtMs:
-          (result?['takenAt'] as int?) ?? DateTime.now().millisecondsSinceEpoch,
+          (result?['takenAt'] as num?)?.toInt() ??
+          DateTime.now().millisecondsSinceEpoch,
     );
   }
 

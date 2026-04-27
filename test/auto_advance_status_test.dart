@@ -18,27 +18,27 @@ void main() {
     );
   });
 
-  test('auto-advances when a native snapshot reaches the end', () {
-    expect(
-      shouldAutoAdvanceFromStatus(
-        AudioStatus(
-          playbackState: null,
-          position: const Duration(minutes: 3),
-          duration: const Duration(minutes: 3),
-          isPlaying: false,
-          volume: 1.0,
-        ),
-      ),
-      isTrue,
-    );
-  });
-
   test('does not auto-advance for a mid-track pause', () {
     expect(
       shouldAutoAdvanceFromStatus(
         AudioStatus(
           playbackState: null,
           position: const Duration(minutes: 1, seconds: 15),
+          duration: const Duration(minutes: 3),
+          isPlaying: false,
+          volume: 1.0,
+        ),
+      ),
+      isFalse,
+    );
+  });
+
+  test('does not auto-advance without an explicit ENDED state', () {
+    expect(
+      shouldAutoAdvanceFromStatus(
+        AudioStatus(
+          playbackState: null,
+          position: const Duration(minutes: 3),
           duration: const Duration(minutes: 3),
           isPlaying: false,
           volume: 1.0,

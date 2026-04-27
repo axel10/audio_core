@@ -115,14 +115,13 @@ final class AppleAudioEngine {
         },
         completion: { [weak self] in
           guard let self = self else { return }
-          activeDeck.playbackFramePosition = activeDeck.currentPlaybackFramePosition()
-          self.stopPlayback(releasingFile: false, preservePosition: true)
-          activeDeck.playerNode.volume = Float(self.latestVolume)
+          self.pausePlayback(preservePosition: true)
+          self.restoreDeckVolumes()
         }
       )
     } else {
-      activeDeck.playbackFramePosition = activeDeck.currentPlaybackFramePosition()
-      stopPlayback(releasingFile: false, preservePosition: true)
+      pausePlayback(preservePosition: true)
+      restoreDeckVolumes()
     }
   }
 
@@ -444,16 +443,15 @@ final class AppleAudioEngine {
       try engine.start()
     }
 
-    deck.playerNode.stop()
+    deck.stopPlaybackNode()
+    let generation = deck.playbackGeneration
     let framesRemaining = AVAudioFrameCount(currentFile.length - clampedFrame)
-    deck.playerNode.scheduleSegment(
+    schedulePlaybackSegment(
       currentFile,
+      on: deck,
       startingFrame: clampedFrame,
       frameCount: framesRemaining,
-      at: nil,
-      completionHandler: { [weak self] in
-        self?.handlePlaybackCompleted(deck: deck)
-      }
+      generation: generation
     )
     deck.playbackFramePosition = clampedFrame
     deck.isPlaybackScheduled = true
@@ -461,9 +459,91 @@ final class AppleAudioEngine {
     deck.playerNode.play()
   }
 
-  private func handlePlaybackCompleted(deck: PlaybackDeck) {
+  private func schedulePlaybackSegment(
+    _ file: AVAudioFile,
+    on deck: PlaybackDeck,
+    startingFrame: AVAudioFramePosition,
+    frameCount: AVAudioFrameCount,
+    generation: UInt64
+  ) {
+    if #available(macOS 10.13, iOS 11.0, *) {
+      deck.playerNode.scheduleSegment(
+        file,
+        startingFrame: startingFrame,
+        frameCount: frameCount,
+        at: nil,
+        completionCallbackType: .dataPlayedBack,
+        completionHandler: { [weak self] _ in
+          self?.handlePlaybackCompleted(deck: deck, generation: generation)
+        }
+      )
+      return
+    }
+
+    deck.playerNode.scheduleSegment(
+      file,
+      startingFrame: startingFrame,
+      frameCount: frameCount,
+      at: nil,
+      completionHandler: { [weak self] in
+        self?.scheduleLegacyPlaybackCompletionCheck(
+          deck: deck,
+          generation: generation,
+          attempt: 0
+        )
+      }
+    )
+  }
+
+  private func scheduleLegacyPlaybackCompletionCheck(
+    deck: PlaybackDeck,
+    generation: UInt64,
+    attempt: Int
+  ) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+      self?.verifyLegacyPlaybackCompletion(
+        deck: deck,
+        generation: generation,
+        attempt: attempt
+      )
+    }
+  }
+
+  private func verifyLegacyPlaybackCompletion(
+    deck: PlaybackDeck,
+    generation: UInt64,
+    attempt: Int
+  ) {
+    guard deck.playbackGeneration == generation, deck.isPlaybackScheduled else {
+      return
+    }
+    guard let currentFile = deck.loadedFile else {
+      return
+    }
+
+    let currentFrame = deck.currentPlaybackFramePosition()
+    let toleranceFrames = max(AVAudioFramePosition(deck.sampleRate * 0.1), 4096)
+    let nearEndFrame = max(0, currentFile.length - toleranceFrames)
+    let isNearEnd = currentFrame >= nearEndFrame
+
+    if isNearEnd || !deck.playerNode.isPlaying || attempt >= 40 {
+      handlePlaybackCompleted(deck: deck, generation: generation)
+      return
+    }
+
+    scheduleLegacyPlaybackCompletionCheck(
+      deck: deck,
+      generation: generation,
+      attempt: attempt + 1
+    )
+  }
+
+  private func handlePlaybackCompleted(deck: PlaybackDeck, generation: UInt64) {
     DispatchQueue.main.async { [weak self] in
       guard let self = self else { return }
+      guard deck.playbackGeneration == generation, deck.isPlaybackScheduled else {
+        return
+      }
       if let currentFile = deck.loadedFile {
         deck.playbackFramePosition = currentFile.length
       }
@@ -498,6 +578,37 @@ final class AppleAudioEngine {
     if releasingFile {
       currentDeck.playbackFramePosition = 0
       incomingDeck.playbackFramePosition = 0
+    }
+  }
+
+  private func pausePlayback(preservePosition: Bool) {
+    fadeTimer?.invalidate()
+    fadeTimer = nil
+    fadeGeneration &+= 1
+
+    if preservePosition {
+      if currentDeck.isLoaded {
+        currentDeck.playbackFramePosition = currentDeck.currentPlaybackFramePosition()
+      }
+      if incomingDeck.isLoaded {
+        incomingDeck.playbackFramePosition = incomingDeck.currentPlaybackFramePosition()
+      }
+    }
+
+    if currentDeck.isLoaded {
+      currentDeck.playerNode.pause()
+    }
+    if incomingDeck.isLoaded {
+      incomingDeck.playerNode.pause()
+    }
+  }
+
+  private func restoreDeckVolumes() {
+    if currentDeck.isLoaded {
+      currentDeck.playerNode.volume = Float((latestVolume * currentDeck.gain).clamped(to: 0.0...1.0))
+    }
+    if incomingDeck.isLoaded {
+      incomingDeck.playerNode.volume = Float((latestVolume * incomingDeck.gain).clamped(to: 0.0...1.0))
     }
   }
 
