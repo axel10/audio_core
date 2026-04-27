@@ -246,7 +246,7 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   Future<List<double>> getWaveform({
     required String path,
     required int expectedChunks,
-    int sampleStride = 0,  // 这个参数在安卓端没用到，rust端根据这条参数跳过packet解码
+    int sampleStride = 0, // 这个参数在安卓端没用到，rust端根据这条参数跳过packet解码
   }) async {
     try {
       // Direct native waveform extraction with downsampling
@@ -415,6 +415,12 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
 
   @override
   Future<List<String>> listPersistentAccessPaths() async => const <String>[];
+
+  @override
+  Future<bool> beginScopedAccess(String path) async => true;
+
+  @override
+  Future<void> endScopedAccess(String path) async {}
 
   @override
   Future<bool> updateTrackMetadata({

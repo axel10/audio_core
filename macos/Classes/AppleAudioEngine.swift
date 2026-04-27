@@ -303,6 +303,19 @@ final class AppleAudioEngine {
     fileAccess.listPersistentAccessPaths()
   }
 
+  func beginScopedAccess(path: String) -> Bool {
+    do {
+      _ = try fileAccess.acquireAccess(for: path)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  func endScopedAccess(path: String) {
+    fileAccess.releaseAccess(for: path)
+  }
+
   func dispose() {
     fadeTimer?.invalidate()
     fadeTimer = nil

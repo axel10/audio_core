@@ -9,7 +9,9 @@ import 'pcm_waveform_support.dart';
 import 'rust_metadata_bridge.dart';
 import 'track_artwork_support.dart';
 
-class RustAudioEngine with PcmWaveformSupport, TrackArtworkSupport implements AudioEngine {
+class RustAudioEngine
+    with PcmWaveformSupport, TrackArtworkSupport
+    implements AudioEngine {
   final _statusController = StreamController<AudioStatus>.broadcast();
   StreamSubscription? _subscription;
   double _currentVolume = 1.0;
@@ -197,6 +199,12 @@ class RustAudioEngine with PcmWaveformSupport, TrackArtworkSupport implements Au
 
   @override
   Future<List<String>> listPersistentAccessPaths() async => const <String>[];
+
+  @override
+  Future<bool> beginScopedAccess(String path) async => true;
+
+  @override
+  Future<void> endScopedAccess(String path) async {}
 
   @override
   Future<bool> updateTrackMetadata({

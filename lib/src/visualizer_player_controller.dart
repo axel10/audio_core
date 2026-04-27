@@ -810,6 +810,20 @@ class AudioCoreController extends ChangeNotifier
     return _engine.listPersistentAccessPaths();
   }
 
+  /// Begins an Apple security-scoped access session for [path].
+  Future<bool> beginScopedAccess({required String path}) async {
+    final targetPath = _resolvePersistentAccessPath(path);
+    if (targetPath == null) return false;
+    return _engine.beginScopedAccess(targetPath);
+  }
+
+  /// Ends an Apple security-scoped access session for [path].
+  Future<void> endScopedAccess({required String path}) async {
+    final targetPath = _resolvePersistentAccessPath(path);
+    if (targetPath == null) return;
+    await _engine.endScopedAccess(targetPath);
+  }
+
   /// Requests Android audio library permission through the platform bridge.
   Future<bool> ensureAndroidMediaLibraryPermission() async {
     if (!Platform.isAndroid) return false;

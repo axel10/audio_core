@@ -12,6 +12,7 @@ import 'widgets.dart';
 import 'random_lab_tab.dart';
 import 'audio_handler.dart';
 import 'android_media_library_picker.dart';
+import 'apple_directory_tab.dart';
 import 'package:audio_service/audio_service.dart';
 
 late AudioCoreHandler audioHandler;
@@ -363,7 +364,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
       animation: _controller,
       builder: (context, _) {
         return DefaultTabController(
-          length: 6,
+          length: 7,
           child: Scaffold(
             appBar: AppBar(
               title: const Text('Audio Visualizer Player Plugin Demo'),
@@ -375,6 +376,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                   Tab(icon: Icon(Icons.tune), text: 'Fade Demo'),
                   Tab(icon: Icon(Icons.blur_on), text: 'Mesh'),
                   Tab(icon: Icon(Icons.shuffle), text: 'Random Lab'),
+                  Tab(icon: Icon(Icons.folder_open), text: 'Apple Dir'),
                   Tab(icon: Icon(Icons.equalizer), text: 'Equalizer'),
                 ],
               ),
@@ -431,7 +433,9 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                 MeshDemoTab(controller: _controller),
                 // 第五页: 随机播放实验台
                 RandomLabTab(key: _randomLabKey, controller: _controller),
-                // 第六页: 均衡器界面
+                // 第六页: 苹果目录扫描页
+                const AppleDirectoryTab(),
+                // 第七页: 均衡器界面
                 SingleChildScrollView(
                   padding: const EdgeInsets.all(16),
                   child: EqualizerPanel(controller: _controller),

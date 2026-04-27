@@ -98,6 +98,8 @@ abstract class AudioEngine {
   Future<void> forgetPersistentAccess(String path);
   Future<bool> hasPersistentAccess(String path);
   Future<List<String>> listPersistentAccessPaths();
+  Future<bool> beginScopedAccess(String path);
+  Future<void> endScopedAccess(String path);
 
   // Native metadata updates
   Future<bool> updateTrackMetadata({

@@ -261,6 +261,21 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
     case "listPersistentAccessPaths":
       result(engine.listPersistentAccessPaths())
 
+    case "beginScopedAccess":
+      guard let path = Self.readString(call.arguments, key: "path") else {
+        result(false)
+        return
+      }
+      result(engine.beginScopedAccess(path: path))
+
+    case "endScopedAccess":
+      guard let path = Self.readString(call.arguments, key: "path") else {
+        result(nil)
+        return
+      }
+      engine.endScopedAccess(path: path)
+      result(nil)
+
     case "dispose":
       engine.dispose()
 #if os(iOS)

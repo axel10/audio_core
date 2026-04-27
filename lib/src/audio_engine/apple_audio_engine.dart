@@ -13,9 +13,7 @@ import 'audio_engine_interface.dart';
 import 'rust_metadata_bridge.dart';
 import 'track_artwork_support.dart';
 
-class AppleAudioEngine
-    with TrackArtworkSupport
-    implements AudioEngine {
+class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   static const MethodChannel _channel = MethodChannel('audio_core.player');
 
   final _statusController = StreamController<AudioStatus>.broadcast();
@@ -254,17 +252,12 @@ class AppleAudioEngine
     try {
       final List<dynamic>? result = await _channel.invokeMethod(
         'getWaveform',
-        <String, Object?>{
-          'path': targetPath,
-          'expectedChunks': expectedChunks,
-        },
+        <String, Object?>{'path': targetPath, 'expectedChunks': expectedChunks},
       );
       if (result == null) {
         return const <double>[];
       }
-      return result
-          .map((e) => (e as num).toDouble())
-          .toList(growable: false);
+      return result.map((e) => (e as num).toDouble()).toList(growable: false);
     } catch (e) {
       debugPrint('[AppleAudioEngine] getWaveform failed: $e');
       return const <double>[];
@@ -396,6 +389,24 @@ class AppleAudioEngine
         .map((entry) => entry.toString())
         .where((entry) => entry.trim().isNotEmpty)
         .toList(growable: false);
+  }
+
+  @override
+  Future<bool> beginScopedAccess(String path) async {
+    final normalizedPath = _normalizePath(path);
+    final bool? result = await _channel.invokeMethod<bool>(
+      'beginScopedAccess',
+      <String, Object?>{'path': normalizedPath},
+    );
+    return result ?? false;
+  }
+
+  @override
+  Future<void> endScopedAccess(String path) async {
+    final normalizedPath = _normalizePath(path);
+    await _channel.invokeMethod('endScopedAccess', <String, Object?>{
+      'path': normalizedPath,
+    });
   }
 
   @override
