@@ -38,9 +38,14 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
   }
 
   public static func register(with registrar: FlutterPluginRegistrar) {
+#if os(macOS)
+    let messenger = registrar.messenger
+#else
+    let messenger = registrar.messenger()
+#endif
     let channel = FlutterMethodChannel(
-      name: "my_exoplayer",
-      binaryMessenger: registrar.messenger()
+      name: "audio_core.player",
+      binaryMessenger: messenger
     )
     let instance = AudioCorePlugin()
     instance.channel = channel
@@ -159,7 +164,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
 
     case "getLatestFft":
       do {
-        result(engine.getLatestFft())
+        result(try engine.getLatestFft())
       } catch {
         sendPlayerState(error: error.localizedDescription)
         result(FlutterError(code: "FFT_FAILED", message: error.localizedDescription, details: nil))

@@ -52,7 +52,7 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral/.symlinks/plugins/sqflite_darwin/darwin
 
 SPEC CHECKSUMS:
-  audio_core: 51421d893295098c7ab4585f754c589ba0fe41a4
+  audio_core: ae97c2db63691525f4123f847942bc32306b4d4c
   audio_service: aa99a6ba2ae7565996015322b0bb024e1d25c6fd
   audio_session: eaca2512cf2b39212d724f35d11f46180ad3a33e
   dart_chromaprint: 7c2501dbb5a6319a0d4b38d447bf4bf483f6b610

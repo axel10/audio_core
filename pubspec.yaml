@@ -49,10 +49,12 @@ flutter:
         package: com.flutter_rust_bridge.audio_core
         pluginClass: MyExoplayerPlugin
       ios:
+        pluginClass: AudioCorePlugin
         ffiPlugin: true
       linux:
         ffiPlugin: true
       macos:
+        pluginClass: AudioCorePlugin
         ffiPlugin: true
       windows:
         ffiPlugin: true

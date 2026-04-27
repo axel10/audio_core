@@ -15,7 +15,7 @@ import 'rust_metadata_bridge.dart';
 import 'track_artwork_support.dart';
 
 class AppleAudioEngine with PcmWaveformSupport, TrackArtworkSupport implements AudioEngine {
-  static const MethodChannel _channel = MethodChannel('my_exoplayer');
+  static const MethodChannel _channel = MethodChannel('audio_core.player');
 
   final _statusController = StreamController<AudioStatus>.broadcast();
   String? _currentPath;

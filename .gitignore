@@ -32,3 +32,5 @@ target
 .flutter-plugins-dependencies
 /build/
 /coverage/
+
+example/macos/build

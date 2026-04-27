@@ -667,17 +667,11 @@ final class AppleAudioEngine {
     let channels = Int(format.channelCount)
     let stride = max(sampleStride, 1)
     let bufferCapacity: AVAudioFrameCount = 4096
-    let maxFrames = maxDurationMs > 0
-      ? AVAudioFrameCount(
-        min(
-          file.length,
-          AVAudioFramePosition(
-            (format.sampleRate * Double(maxDurationMs) / 1000.0).rounded(.down)
-          )
-        )
-      )
-      : file.length
-    let endFrame = min(file.length, maxFrames)
+    let requestedMaxFrames = AVAudioFramePosition(
+      (format.sampleRate * Double(maxDurationMs) / 1000.0).rounded(.down)
+    )
+    let maxFrameLimit = maxDurationMs > 0 ? requestedMaxFrames : file.length
+    let endFrame = min(file.length, maxFrameLimit)
     guard file.framePosition < endFrame else {
       return []
     }

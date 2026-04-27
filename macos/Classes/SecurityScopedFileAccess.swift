@@ -1,0 +1,1 @@
+../../apple/Classes/SecurityScopedFileAccess.swift
