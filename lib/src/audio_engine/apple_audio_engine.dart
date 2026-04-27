@@ -10,12 +10,11 @@ import '../rust/api/simple/equalizer.dart';
 import '../rust/api/simple_api.dart' as rust;
 import '../track_metadata.dart';
 import 'audio_engine_interface.dart';
-import 'pcm_waveform_support.dart';
 import 'rust_metadata_bridge.dart';
 import 'track_artwork_support.dart';
 
 class AppleAudioEngine
-    with PcmWaveformSupport, TrackArtworkSupport
+    with TrackArtworkSupport
     implements AudioEngine {
   static const MethodChannel _channel = MethodChannel('audio_core.player');
 
@@ -247,12 +246,29 @@ class AppleAudioEngine
     required String path,
     required int expectedChunks,
     int sampleStride = 0,
-  }) {
-    return waveformFromPcm(
-      path: path,
-      expectedChunks: expectedChunks,
-      sampleStride: sampleStride,
+  }) async {
+    final targetPath = _resolvePath(path);
+    debugPrint(
+      '[AppleAudioEngine] getWaveform path=$targetPath expectedChunks=$expectedChunks',
     );
+    try {
+      final List<dynamic>? result = await _channel.invokeMethod(
+        'getWaveform',
+        <String, Object?>{
+          'path': targetPath,
+          'expectedChunks': expectedChunks,
+        },
+      );
+      if (result == null) {
+        return const <double>[];
+      }
+      return result
+          .map((e) => (e as num).toDouble())
+          .toList(growable: false);
+    } catch (e) {
+      debugPrint('[AppleAudioEngine] getWaveform failed: $e');
+      return const <double>[];
+    }
   }
 
   @override

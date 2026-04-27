@@ -11,6 +11,8 @@ final class AppleAudioEngine {
 
   private let fftSize = 1024
   private let fftBinCount = 512
+  private let waveformRmsWindowsPerChunk = 8
+  private let waveformPrecisionScale = 100.0
   private let fileAccess: SecurityScopedFileAccessCoordinator
   private let engine = AVAudioEngine()
   private let deckMixerNode = AVAudioMixerNode()
@@ -185,6 +187,21 @@ final class AppleAudioEngine {
       frameCount: fftSize
     )
     return computeMagnitudes(from: monoSamples)
+  }
+
+  func getWaveform(path: String, expectedChunks: Int) throws -> [Double] {
+    guard expectedChunks > 0 else { return [] }
+    return try fileAccess.withTemporaryAccess(for: path) { url in
+      let file = try AVAudioFile(forReading: url)
+      let format = file.processingFormat
+      let pcm = try readInterleavedPCM(file: file, sampleStride: 1)
+      if pcm.isEmpty {
+        return Array(repeating: 0.0, count: expectedChunks)
+      }
+
+      let monoSamples = mixToMonoSamples(pcm, channels: Int(format.channelCount))
+      return processWaveform(samples: monoSamples, expectedChunks: expectedChunks)
+    }
   }
 
   func getAudioPcm(path: String, sampleStride: Int) throws -> [Float] {
@@ -769,11 +786,10 @@ final class AppleAudioEngine {
   }
 
   private func readInterleavedPCM(
-    url: URL,
+    file: AVAudioFile,
     sampleStride: Int,
     maxDurationMs: Int = 0
   ) throws -> [Float] {
-    let file = try AVAudioFile(forReading: url)
     let format = file.processingFormat
     let channels = Int(format.channelCount)
     let stride = max(sampleStride, 1)
@@ -816,6 +832,86 @@ final class AppleAudioEngine {
       }
     }
     return samples
+  }
+
+  private func readInterleavedPCM(
+    url: URL,
+    sampleStride: Int,
+    maxDurationMs: Int = 0
+  ) throws -> [Float] {
+    let file = try AVAudioFile(forReading: url)
+    return try readInterleavedPCM(file: file, sampleStride: sampleStride, maxDurationMs: maxDurationMs)
+  }
+
+  private func mixToMonoSamples(_ pcm: [Float], channels: Int) -> [Double] {
+    let safeChannels = max(channels, 1)
+    if safeChannels == 1 {
+      return pcm.map(Double.init)
+    }
+
+    let frameCount = pcm.count / safeChannels
+    guard frameCount > 0 else { return [] }
+
+    var mono = Array(repeating: 0.0, count: frameCount)
+    for frame in 0..<frameCount {
+      let base = frame * safeChannels
+      var sum = 0.0
+      for channel in 0..<safeChannels {
+        sum += Double(pcm[base + channel])
+      }
+      mono[frame] = sum / Double(safeChannels)
+    }
+    return mono
+  }
+
+  private func processWaveform(samples: [Double], expectedChunks: Int) -> [Double] {
+    guard expectedChunks > 0 else { return [] }
+    guard !samples.isEmpty else {
+      return Array(repeating: 0.0, count: expectedChunks)
+    }
+
+    let windowCount = max(
+      expectedChunks,
+      min(samples.count, expectedChunks * waveformRmsWindowsPerChunk)
+    )
+    var envelope = Array(repeating: 0.0, count: windowCount)
+
+    for window in 0..<windowCount {
+      let start = (window * samples.count) / windowCount
+      let end = ((window + 1) * samples.count) / windowCount
+      guard end > start else { continue }
+      envelope[window] = computeRms(samples: samples, start: start, end: end)
+    }
+
+    var output = Array(repeating: 0.0, count: expectedChunks)
+    for chunk in 0..<expectedChunks {
+      let start = (chunk * windowCount) / expectedChunks
+      let end = ((chunk + 1) * windowCount) / expectedChunks
+      var maxValue = 0.0
+      if end > start {
+        for index in start..<end {
+          if envelope[index] > maxValue {
+            maxValue = envelope[index]
+          }
+        }
+      }
+      output[chunk] = roundWaveformPrecision(max(0.0, min(maxValue, 1.0)))
+    }
+    return output
+  }
+
+  private func computeRms(samples: [Double], start: Int, end: Int) -> Double {
+    guard end > start else { return 0.0 }
+    var sum = 0.0
+    for index in start..<end {
+      let sample = samples[index]
+      sum += sample * sample
+    }
+    return sqrt(sum / Double(end - start))
+  }
+
+  private func roundWaveformPrecision(_ value: Double) -> Double {
+    return (value * waveformPrecisionScale).rounded() / waveformPrecisionScale
   }
 
   private func readMonoWindow(

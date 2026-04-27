@@ -137,6 +137,27 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
         result(FlutterError(code: "FFT_FAILED", message: error.localizedDescription, details: nil))
       }
 
+    case "getWaveform":
+      guard let args = call.arguments as? [String: Any],
+            let path = args["path"] as? String else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
+        return
+      }
+      let expectedChunks = Self.readInt(call.arguments, key: "expectedChunks") ?? 0
+      DispatchQueue.global(qos: .userInitiated).async {
+        do {
+          let waveform = try self.engine.getWaveform(path: path, expectedChunks: expectedChunks)
+          DispatchQueue.main.async {
+            result(waveform)
+          }
+        } catch {
+          self.sendPlayerState(error: error.localizedDescription)
+          DispatchQueue.main.async {
+            result(FlutterError(code: "WAVEFORM_FAILED", message: error.localizedDescription, details: nil))
+          }
+        }
+      }
+
     case "getAudioPcm":
       guard let args = call.arguments as? [String: Any],
             let path = args["path"] as? String else {

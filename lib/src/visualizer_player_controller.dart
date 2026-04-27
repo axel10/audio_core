@@ -720,6 +720,9 @@ class AudioCoreController extends ChangeNotifier
   }) async {
     final targetPath = filePath ?? player.currentPath;
     if (targetPath == null) return const [];
+    debugPrint(
+      '[AudioCore][Waveform] request path=$targetPath expectedChunks=$expectedChunks sampleStride=$sampleStride normalize=$normalize',
+    );
     try {
       final finalData = await _engine.getWaveform(
         path: targetPath,
@@ -729,6 +732,7 @@ class AudioCoreController extends ChangeNotifier
 
       return normalize ? _normalizeWaveform(finalData) : finalData;
     } catch (e) {
+      debugPrint('[AudioCore][Waveform] failed: $e');
       player.setError('Waveform failed: $e');
       return const [];
     }
