@@ -434,7 +434,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                 // 第五页: 随机播放实验台
                 RandomLabTab(key: _randomLabKey, controller: _controller),
                 // 第六页: 苹果目录扫描页
-                const AppleDirectoryTab(),
+                AppleDirectoryTab(controller: _controller),
                 // 第七页: 均衡器界面
                 SingleChildScrollView(
                   padding: const EdgeInsets.all(16),

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:audio_core/audio_core.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
@@ -10,6 +11,7 @@ class AppleMusicFileEntry {
   final String relativePath;
 
   String get fileName => Uri.file(path).pathSegments.last;
+
   String get extension {
     final name = fileName;
     final index = name.lastIndexOf('.');
@@ -20,8 +22,62 @@ class AppleMusicFileEntry {
   }
 }
 
+class AppleMusicDirectoryNode {
+  AppleMusicDirectoryNode({
+    required this.name,
+    required this.path,
+    this.isRoot = false,
+  });
+
+  final String name;
+  final String path;
+  final bool isRoot;
+
+  final Map<String, AppleMusicDirectoryNode> _childrenByName =
+      <String, AppleMusicDirectoryNode>{};
+  final List<AppleMusicFileEntry> _files = <AppleMusicFileEntry>[];
+
+  String get displayName => name;
+
+  List<AppleMusicDirectoryNode> get children {
+    final children = _childrenByName.values.toList(growable: false);
+    children.sort(
+      (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+    );
+    return children;
+  }
+
+  List<AppleMusicFileEntry> get files {
+    final files = _files.toList(growable: false);
+    files.sort(
+      (a, b) => a.fileName.toLowerCase().compareTo(b.fileName.toLowerCase()),
+    );
+    return files;
+  }
+
+  int get trackCount =>
+      _files.length +
+      _childrenByName.values.fold<int>(
+        0,
+        (sum, child) => sum + child.trackCount,
+      );
+
+  AppleMusicDirectoryNode childForName(String childName, String childPath) {
+    return _childrenByName.putIfAbsent(
+      childName,
+      () => AppleMusicDirectoryNode(name: childName, path: childPath),
+    );
+  }
+
+  void addFile(AppleMusicFileEntry entry) {
+    _files.add(entry);
+  }
+}
+
 class AppleDirectoryTab extends StatefulWidget {
-  const AppleDirectoryTab({super.key});
+  const AppleDirectoryTab({super.key, required this.controller});
+
+  final AudioCoreController controller;
 
   @override
   State<AppleDirectoryTab> createState() => _AppleDirectoryTabState();
@@ -51,7 +107,8 @@ class _AppleDirectoryTabState extends State<AppleDirectoryTab> {
   String? _selectedDirectory;
   String? _errorMessage;
   DateTime? _lastScannedAt;
-  List<AppleMusicFileEntry> _files = <AppleMusicFileEntry>[];
+  AppleMusicDirectoryNode? _directoryTree;
+  String? _currentPlayingPath;
 
   bool get _isApplePlatform => Platform.isIOS || Platform.isMacOS;
 
@@ -83,15 +140,15 @@ class _AppleDirectoryTabState extends State<AppleDirectoryTab> {
       _selectedDirectory = selected;
       _isScanning = true;
       _errorMessage = null;
-      _files = <AppleMusicFileEntry>[];
+      _directoryTree = null;
       _lastScannedAt = null;
     });
 
     try {
-      final files = await _scanMusicFiles(selected);
+      final tree = await _scanMusicFiles(selected);
       if (!mounted) return;
       setState(() {
-        _files = files;
+        _directoryTree = tree;
         _isScanning = false;
         _lastScannedAt = DateTime.now();
       });
@@ -104,22 +161,20 @@ class _AppleDirectoryTabState extends State<AppleDirectoryTab> {
     }
   }
 
-  Future<List<AppleMusicFileEntry>> _scanMusicFiles(
-    String directoryPath,
-  ) async {
+  Future<AppleMusicDirectoryNode> _scanMusicFiles(String directoryPath) async {
     final root = Directory(directoryPath);
     if (!await root.exists()) {
       throw StateError('Directory does not exist: $directoryPath');
     }
 
     final normalizedRoot = _normalizeDirectoryPath(directoryPath);
-    final results = <AppleMusicFileEntry>[];
+    final entries = <AppleMusicFileEntry>[];
 
     await for (final entity in root.list(recursive: true, followLinks: false)) {
       if (entity is! File) continue;
       final extension = _extensionForPath(entity.path);
       if (!_audioFileExtensions.contains(extension)) continue;
-      results.add(
+      entries.add(
         AppleMusicFileEntry(
           path: entity.path,
           relativePath: _relativePath(normalizedRoot, entity.path),
@@ -127,11 +182,41 @@ class _AppleDirectoryTabState extends State<AppleDirectoryTab> {
       );
     }
 
-    results.sort(
-      (a, b) =>
-          a.relativePath.toLowerCase().compareTo(b.relativePath.toLowerCase()),
+    return _buildDirectoryTree(directoryPath, entries);
+  }
+
+  AppleMusicDirectoryNode _buildDirectoryTree(
+    String rootPath,
+    List<AppleMusicFileEntry> entries,
+  ) {
+    final rootName = _folderName(rootPath);
+    final root = AppleMusicDirectoryNode(
+      name: rootName.isEmpty ? 'Selected Folder' : rootName,
+      path: rootPath,
+      isRoot: true,
     );
-    return results;
+
+    for (final entry in entries) {
+      final segments = entry.relativePath
+          .split('/')
+          .where((segment) => segment.isNotEmpty)
+          .toList(growable: false);
+      if (segments.isEmpty) {
+        root.addFile(entry);
+        continue;
+      }
+
+      var current = root;
+      var currentPath = '';
+      for (var i = 0; i < segments.length - 1; i++) {
+        final segment = segments[i];
+        currentPath = currentPath.isEmpty ? segment : '$currentPath/$segment';
+        current = current.childForName(segment, currentPath);
+      }
+      current.addFile(entry);
+    }
+
+    return root;
   }
 
   String _relativePath(String rootPath, String filePath) {
@@ -145,6 +230,13 @@ class _AppleDirectoryTabState extends State<AppleDirectoryTab> {
       return normalizedFile.substring(prefix.length);
     }
     return filePath;
+  }
+
+  String _folderName(String path) {
+    final normalized = _normalizeDirectoryPath(path);
+    if (normalized.isEmpty) return '';
+    final parts = normalized.split('/').where((segment) => segment.isNotEmpty);
+    return parts.isEmpty ? normalized : parts.last;
   }
 
   String _normalizeDirectoryPath(String path) {
@@ -164,9 +256,27 @@ class _AppleDirectoryTabState extends State<AppleDirectoryTab> {
     return name.substring(index + 1).toLowerCase();
   }
 
+  Future<void> _playEntry(AppleMusicFileEntry entry) async {
+    try {
+      await widget.controller.playPaths([entry.path], autoPlayFirst: true);
+      if (!mounted) return;
+      setState(() {
+        _currentPlayingPath = entry.path;
+        _errorMessage = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'Playback failed: $e';
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final tree = _directoryTree;
+    final hasTracks = tree != null && tree.trackCount > 0;
 
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -187,7 +297,7 @@ class _AppleDirectoryTabState extends State<AppleDirectoryTab> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Pick a folder and scan audio files recursively.',
+                      'Pick a folder and browse music in a tree view.',
                       style: theme.textTheme.bodyMedium,
                     ),
                   ],
@@ -212,7 +322,7 @@ class _AppleDirectoryTabState extends State<AppleDirectoryTab> {
           ],
           if (_lastScannedAt != null)
             Text(
-              'Found ${_files.length} music files. Last scanned at ${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(_lastScannedAt!))}.',
+              'Found ${tree?.trackCount ?? 0} music files. Last scanned at ${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(_lastScannedAt!))}.',
               style: theme.textTheme.bodySmall,
             ),
           if (_errorMessage != null) ...[
@@ -234,7 +344,7 @@ class _AppleDirectoryTabState extends State<AppleDirectoryTab> {
               ),
               child: _isScanning
                   ? const Center(child: CircularProgressIndicator())
-                  : _files.isEmpty
+                  : tree == null
                   ? Center(
                       child: Text(
                         _selectedDirectory == null
@@ -242,43 +352,160 @@ class _AppleDirectoryTabState extends State<AppleDirectoryTab> {
                             : 'No music files found in this folder.',
                       ),
                     )
-                  : ListView.separated(
+                  : hasTracks
+                  ? ListView(
                       padding: const EdgeInsets.all(12),
-                      itemCount: _files.length,
-                      separatorBuilder: (context, index) =>
-                          const SizedBox(height: 8),
-                      itemBuilder: (context, index) {
-                        final entry = _files[index];
-                        return Card(
-                          elevation: 0,
-                          child: ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor:
-                                  theme.colorScheme.primaryContainer,
-                              child: const Icon(Icons.audiotrack),
-                            ),
-                            title: Text(
-                              entry.fileName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            subtitle: Text(
-                              entry.relativePath,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            trailing: entry.extension.isEmpty
-                                ? null
-                                : Chip(
-                                    label: Text(entry.extension.toUpperCase()),
-                                  ),
-                          ),
-                        );
-                      },
+                      children: [
+                        _buildFolderNode(context, tree, theme: theme, depth: 0),
+                      ],
+                    )
+                  : Center(
+                      child: Text(
+                        'No music files found in this folder.',
+                        style: theme.textTheme.bodyMedium,
+                      ),
                     ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildFolderNode(
+    BuildContext context,
+    AppleMusicDirectoryNode node, {
+    required ThemeData theme,
+    required int depth,
+  }) {
+    final indent = 12.0 * depth;
+    final folderChildren = node.children;
+    final files = node.files;
+
+    if (node.isRoot) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Card(
+            elevation: 0,
+            child: ListTile(
+              leading: CircleAvatar(
+                backgroundColor: theme.colorScheme.primaryContainer,
+                child: const Icon(Icons.folder_copy),
+              ),
+              title: Text(
+                node.displayName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Text('${node.trackCount} tracks'),
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (files.isNotEmpty)
+            ...files.map(
+              (file) => _buildTrackTile(
+                context,
+                file,
+                theme: theme,
+                depth: depth + 1,
+              ),
+            ),
+          if (folderChildren.isNotEmpty)
+            ...folderChildren.map(
+              (child) => _buildFolderNode(
+                context,
+                child,
+                theme: theme,
+                depth: depth + 1,
+              ),
+            ),
+        ],
+      );
+    }
+
+    return Padding(
+      padding: EdgeInsets.only(left: indent),
+      child: Card(
+        elevation: 0,
+        child: ExpansionTile(
+          key: PageStorageKey<String>('folder:${node.path}'),
+          leading: const Icon(Icons.folder),
+          title: Text(
+            node.displayName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: Text('${node.trackCount} tracks'),
+          childrenPadding: const EdgeInsets.only(bottom: 8),
+          children: [
+            if (files.isNotEmpty)
+              ...files.map(
+                (file) => _buildTrackTile(
+                  context,
+                  file,
+                  theme: theme,
+                  depth: depth + 1,
+                ),
+              ),
+            if (folderChildren.isNotEmpty)
+              ...folderChildren.map(
+                (child) => _buildFolderNode(
+                  context,
+                  child,
+                  theme: theme,
+                  depth: depth + 1,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTrackTile(
+    BuildContext context,
+    AppleMusicFileEntry entry, {
+    required ThemeData theme,
+    required int depth,
+  }) {
+    final isPlaying = _currentPlayingPath == entry.path;
+    return Padding(
+      padding: EdgeInsets.only(left: 12.0 * depth, bottom: 8),
+      child: Card(
+        elevation: 0,
+        child: ListTile(
+          leading: CircleAvatar(
+            backgroundColor: isPlaying
+                ? theme.colorScheme.primary
+                : theme.colorScheme.primaryContainer,
+            foregroundColor: isPlaying
+                ? theme.colorScheme.onPrimary
+                : theme.colorScheme.onPrimaryContainer,
+            child: const Icon(Icons.audiotrack),
+          ),
+          title: Text(
+            entry.fileName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: Text(
+            entry.relativePath,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          trailing: entry.extension.isEmpty
+              ? const Icon(Icons.play_arrow)
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Chip(label: Text(entry.extension.toUpperCase())),
+                    const SizedBox(width: 8),
+                    const Icon(Icons.play_arrow),
+                  ],
+                ),
+          onTap: () => _playEntry(entry),
+        ),
       ),
     );
   }
