@@ -246,7 +246,7 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   Future<List<double>> getWaveform({
     required String path,
     required int expectedChunks,
-    int sampleStride = 0,
+    int sampleStride = 0,  // 这个参数在安卓端没用到，rust端根据这条参数跳过packet解码
   }) async {
     try {
       // Direct native waveform extraction with downsampling
