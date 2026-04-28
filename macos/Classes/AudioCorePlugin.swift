@@ -80,7 +80,6 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       let fadeDurationMs = Self.readInt(call.arguments, key: "fadeDurationMs") ?? 0
       do {
         try engine.pause(fadeDurationMs: fadeDurationMs)
-        sendPlayerState()
         result(nil)
       } catch {
         sendPlayerState(error: error.localizedDescription)

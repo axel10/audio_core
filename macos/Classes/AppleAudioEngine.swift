@@ -634,6 +634,10 @@ final class AppleAudioEngine {
     if incomingDeck.isLoaded {
       incomingDeck.playerNode.pause()
     }
+
+    // Emit the settled paused state only after the node has actually paused,
+    // so the Dart layer does not keep animating against a stale playing state.
+    emitPlayerState(playbackState: "PAUSED")
   }
 
   private func restoreDeckVolumes() {
