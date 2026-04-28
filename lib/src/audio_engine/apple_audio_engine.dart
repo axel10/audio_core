@@ -15,12 +15,15 @@ import 'track_artwork_support.dart';
 
 class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   static const MethodChannel _channel = MethodChannel('audio_core.player');
+  static const EventChannel _fftChannel = EventChannel('audio_core.player/fft');
 
   final _statusController = StreamController<AudioStatus>.broadcast();
+  StreamSubscription? _fftSubscription;
   String? _currentPath;
   double _currentVolume = 1.0;
   EqualizerConfig? _lastConfig;
   final Set<String> _preparedWritePaths = <String>{};
+  List<double> _latestFftCache = const <double>[];
 
   @override
   Stream<AudioStatus> get statusStream => _statusController.stream;
@@ -60,11 +63,19 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
       );
     });
 
+    _fftSubscription ??= _fftChannel.receiveBroadcastStream().listen(
+      _handleFftEvent,
+      onError: (_) {},
+    );
+
     await _channel.invokeMethod('sayHello');
   }
 
   @override
   Future<void> stop() async {
+    await _fftSubscription?.cancel();
+    _fftSubscription = null;
+    _latestFftCache = const <double>[];
     await _channel.invokeMethod('dispose');
     _currentPath = null;
     _preparedWritePaths.clear();
@@ -72,6 +83,9 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
 
   @override
   Future<void> dispose() async {
+    await _fftSubscription?.cancel();
+    _fftSubscription = null;
+    _latestFftCache = const <double>[];
     await _statusController.close();
     await _channel.invokeMethod('dispose');
     _preparedWritePaths.clear();
@@ -81,6 +95,7 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   Future<void> load(String path) async {
     _currentPath = path;
     _preparedWritePaths.clear();
+    _latestFftCache = const <double>[];
     await _channel.invokeMethod('load', <String, Object?>{
       'url': path,
       'playerId': 'main',
@@ -94,6 +109,7 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     Duration? position,
   }) async {
     _currentPath = path;
+    _latestFftCache = const <double>[];
     await _channel.invokeMethod('crossfade', <String, Object?>{
       'path': path,
       'durationMs': duration.inMilliseconds,
@@ -119,6 +135,7 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     }
 
     _currentVolume = resolvedTargetVolume;
+    _latestFftCache = const <double>[];
     await setVolume(resolvedTargetVolume);
     await load(path);
 
@@ -194,25 +211,22 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
 
   @override
   Future<List<double>> getLatestFft() async {
-    try {
-      final List<dynamic>? result = await _channel.invokeMethod(
-        'getLatestFft',
-        <String, Object?>{'playerId': 'main'},
-      );
-      if (result == null) return const <double>[];
-      return result.map((e) => (e as num).toDouble()).toList(growable: false);
-    } catch (_) {
-      return const <double>[];
-    }
+    return List<double>.from(_latestFftCache, growable: false);
   }
 
   @override
   Future<void> updateVisualizerFftOptions(
     VisualizerOptimizationOptions options,
-  ) async {}
+  ) async {
+    await _channel.invokeMethod('configureFftProcessing', <String, Object?>{
+      'frequencyGroups': options.frequencyGroups,
+      'skipHighFrequencyGroups': options.skipHighFrequencyGroups,
+      'aggregationMode': options.aggregationMode.name,
+    });
+  }
 
   @override
-  bool get fftDataIsPreGrouped => false;
+  bool get fftDataIsPreGrouped => true;
 
   @override
   Future<Float32List> getAudioPcm({String? path, int sampleStride = 0}) async {
@@ -473,6 +487,25 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     final targetPath = path?.trim();
     if (targetPath == null || targetPath.isEmpty) return null;
     return _normalizePath(targetPath);
+  }
+
+  void _handleFftEvent(dynamic event) {
+    if (event is Map) {
+      final values = event['values'];
+      if (values is List) {
+        _latestFftCache = values
+            .map((e) => (e as num).toDouble())
+            .toList(growable: false);
+        return;
+      }
+    } else if (event is List) {
+      _latestFftCache = event.map((e) => (e as num).toDouble()).toList(
+        growable: false,
+      );
+      return;
+    }
+
+    _latestFftCache = const <double>[];
   }
 
   Future<T> _withAppleFileWriteAccess<T>(

@@ -2,10 +2,14 @@ import AVFoundation
 import Foundation
 import FlutterMacOS
 
-public final class AudioCorePlugin: NSObject, FlutterPlugin {
+public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
   private let fileAccess = SecurityScopedFileAccessCoordinator()
   private let engine: AppleAudioEngine
   private var channel: FlutterMethodChannel?
+  private var fftEventChannel: FlutterEventChannel?
+  private var fftEventSink: FlutterEventSink?
+  private var fftTimer: Timer?
+  private var fftEmissionInFlight = false
 
   public override init() {
     self.engine = AppleAudioEngine(fileAccess: fileAccess)
@@ -20,9 +24,15 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       name: "audio_core.player",
       binaryMessenger: registrar.messenger
     )
+    let fftChannel = FlutterEventChannel(
+      name: "audio_core.player/fft",
+      binaryMessenger: registrar.messenger
+    )
     let instance = AudioCorePlugin()
     instance.channel = channel
+    instance.fftEventChannel = fftChannel
     registrar.addMethodCallDelegate(instance, channel: channel)
+    fftChannel.setStreamHandler(instance)
   }
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -30,6 +40,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
     case "sayHello":
       engine.ensureReady()
       sendPlayerState()
+      emitLatestFftSnapshot()
       result(nil)
 
     case "load":
@@ -42,6 +53,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       do {
         try engine.load(path: path)
         sendPlayerState()
+        emitLatestFftSnapshot()
         result(nil)
       } catch {
         sendPlayerState(error: error.localizedDescription)
@@ -63,6 +75,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       do {
         try engine.crossfade(path: path, durationMs: durationMs, positionMs: positionMs)
         sendPlayerState()
+        emitLatestFftSnapshot()
         result(nil)
       } catch {
         sendPlayerState(error: error.localizedDescription)
@@ -79,6 +92,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       do {
         try engine.play(fadeDurationMs: fadeDurationMs, targetVolume: targetVolume)
         sendPlayerState()
+        emitLatestFftSnapshot()
         result(nil)
       } catch {
         sendPlayerState(error: error.localizedDescription)
@@ -90,6 +104,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       debugPrint("[AudioCorePlugin] method=pause fadeDurationMs=\(fadeDurationMs)")
       do {
         try engine.pause(fadeDurationMs: fadeDurationMs)
+        emitLatestFftSnapshot()
         result(nil)
       } catch {
         sendPlayerState(error: error.localizedDescription)
@@ -102,6 +117,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       do {
         try engine.seek(positionMs: positionMs)
         sendPlayerState()
+        emitLatestFftSnapshot()
         result(nil)
       } catch {
         sendPlayerState(error: error.localizedDescription)
@@ -113,6 +129,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       do {
         try engine.setVolume(volume)
         sendPlayerState()
+        emitLatestFftSnapshot()
         result(nil)
       } catch {
         sendPlayerState(error: error.localizedDescription)
@@ -146,6 +163,20 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
         sendPlayerState(error: error.localizedDescription)
         result(FlutterError(code: "FFT_FAILED", message: error.localizedDescription, details: nil))
       }
+
+    case "configureFftProcessing":
+      let frequencyGroups = Self.readInt(call.arguments, key: "frequencyGroups") ?? 32
+      let skipHighFrequencyGroups =
+        Self.readInt(call.arguments, key: "skipHighFrequencyGroups") ?? 0
+      let aggregationMode =
+        Self.readString(call.arguments, key: "aggregationMode") ?? "peak"
+      engine.updateFftGroupingOptions(
+        frequencyGroups: frequencyGroups,
+        skipHighFrequencyGroups: skipHighFrequencyGroups,
+        aggregationMode: aggregationMode
+      )
+      emitLatestFftSnapshot()
+      result(nil)
 
     case "getWaveform":
       guard let args = call.arguments as? [String: Any],
@@ -214,6 +245,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       do {
         try engine.prepareForFileWrite(path: path)
         sendPlayerState()
+        emitLatestFftSnapshot()
         result(nil)
       } catch {
         sendPlayerState(error: error.localizedDescription)
@@ -225,6 +257,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       do {
         try engine.finishFileWrite(path: path)
         sendPlayerState()
+        emitLatestFftSnapshot()
         result(nil)
       } catch {
         sendPlayerState(error: error.localizedDescription)
@@ -274,12 +307,30 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
     case "dispose":
       debugPrint("[AudioCorePlugin] method=dispose")
       engine.dispose()
+      stopFftStreaming()
+      fftEventSink = nil
       sendPlayerState()
       result(nil)
 
     default:
       result(FlutterMethodNotImplemented)
     }
+  }
+
+  public func onListen(
+    withArguments arguments: Any?,
+    eventSink events: @escaping FlutterEventSink
+  ) -> FlutterError? {
+    fftEventSink = events
+    startFftStreaming()
+    emitLatestFftSnapshot()
+    return nil
+  }
+
+  public func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    stopFftStreaming()
+    fftEventSink = nil
+    return nil
   }
 
   private func sendPlayerState(playbackState: String? = nil, error: String? = nil) {
@@ -302,6 +353,52 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
         "onPlayerStateChanged",
         arguments: payload
       )
+    }
+  }
+
+  private func startFftStreaming() {
+    guard fftTimer == nil else { return }
+    fftTimer = Timer.scheduledTimer(
+      withTimeInterval: 1.0 / 30.0,
+      repeats: true
+    ) { [weak self] _ in
+      self?.emitLatestFftSnapshot()
+    }
+    if let fftTimer {
+      RunLoop.main.add(fftTimer, forMode: .common)
+    }
+  }
+
+  private func stopFftStreaming() {
+    fftTimer?.invalidate()
+    fftTimer = nil
+    fftEmissionInFlight = false
+  }
+
+  private func emitLatestFftSnapshot() {
+    guard let sink = fftEventSink, !fftEmissionInFlight else { return }
+    fftEmissionInFlight = true
+    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+      guard let self else { return }
+      let values: [Double]
+      do {
+        values = try self.engine.getLatestFft()
+      } catch {
+        values = []
+        DispatchQueue.main.async {
+          self.sendPlayerState(error: error.localizedDescription)
+        }
+      }
+
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        defer { self.fftEmissionInFlight = false }
+        guard let sink = self.fftEventSink else { return }
+        sink([
+          "playerId": "main",
+          "values": values,
+        ])
+      }
     }
   }
 

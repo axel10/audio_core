@@ -1,6 +1,18 @@
 import AVFoundation
 import Foundation
 
+private enum AppleFftAggregationMode: String {
+  case peak
+  case mean
+  case rms
+}
+
+private struct AppleFftGroupingConfig {
+  var frequencyGroups: Int = 32
+  var skipHighFrequencyGroups: Int = 0
+  var aggregationMode: AppleFftAggregationMode = .peak
+}
+
 final class AppleAudioEngine {
   private struct PendingEdit {
     let path: String
@@ -26,6 +38,7 @@ final class AppleAudioEngine {
   private var fadeGeneration: UInt64 = 0
   private var preparedAccessPaths = Set<String>()
   private var isEngineConfigured = false
+  private var fftGroupingConfig = AppleFftGroupingConfig()
 
   var onPlayerStateChanged: ((String?, String?) -> Void)?
 
@@ -37,6 +50,18 @@ final class AppleAudioEngine {
 
   func ensureReady() {
     // The native engine is lazy; no-op here keeps the channel contract simple.
+  }
+
+  func updateFftGroupingOptions(
+    frequencyGroups: Int,
+    skipHighFrequencyGroups: Int,
+    aggregationMode: String
+  ) {
+    fftGroupingConfig = AppleFftGroupingConfig(
+      frequencyGroups: max(1, min(frequencyGroups, fftBinCount)),
+      skipHighFrequencyGroups: max(0, skipHighFrequencyGroups),
+      aggregationMode: AppleFftAggregationMode(rawValue: aggregationMode) ?? .peak
+    )
   }
 
   var isPlaying: Bool {
@@ -204,7 +229,7 @@ final class AppleAudioEngine {
 
   func getLatestFft() throws -> [Double] {
     guard let url = publicURL() else {
-      return Array(repeating: 0.0, count: fftBinCount)
+      return groupedZeroFrame()
     }
 
     let positionMs = getCurrentPositionMs()
@@ -215,7 +240,7 @@ final class AppleAudioEngine {
       startFrame: startFrame,
       frameCount: fftSize
     )
-    return computeMagnitudes(from: monoSamples)
+    return groupMagnitudes(computeMagnitudes(from: monoSamples))
   }
 
   func getWaveform(path: String, expectedChunks: Int) throws -> [Double] {
@@ -1120,6 +1145,81 @@ final class AppleAudioEngine {
     }
 
     return magnitudes
+  }
+
+  private func groupMagnitudes(_ magnitudes: [Double]) -> [Double] {
+    let groups = max(1, fftGroupingConfig.frequencyGroups)
+    guard !magnitudes.isEmpty else {
+      return groupedZeroFrame()
+    }
+    guard magnitudes.count > 1 else {
+      return Array(repeating: magnitudes.first ?? 0.0, count: groups)
+    }
+    if groups == magnitudes.count && fftGroupingConfig.skipHighFrequencyGroups == 0 {
+      return magnitudes
+    }
+
+    let totalGroups = min(max(groups + fftGroupingConfig.skipHighFrequencyGroups, groups), 512)
+    let binCount = magnitudes.count
+    var output = Array(repeating: 0.0, count: groups)
+
+    var boundaries = Array(repeating: 1, count: totalGroups + 1)
+    boundaries[0] = 1
+    boundaries[totalGroups] = binCount
+    if totalGroups > 1 {
+      for index in 1..<totalGroups {
+        let t = Double(index) / Double(totalGroups)
+        let position = pow(Double(binCount), t) - 1.0
+        boundaries[index] = Int(position.rounded())
+          .clamped(to: 1...(binCount - 1))
+      }
+    }
+
+    if totalGroups > 1 {
+      for index in 1...totalGroups {
+        if boundaries[index] <= boundaries[index - 1] {
+          boundaries[index] = min(boundaries[index - 1] + 1, binCount)
+        }
+      }
+    }
+    boundaries[totalGroups] = binCount
+
+    for group in 0..<groups {
+      let start = boundaries[group]
+      let end = boundaries[group + 1]
+      guard end > start else {
+        output[group] = 0.0
+        continue
+      }
+
+      var acc = 0.0
+      var peak = 0.0
+      var square = 0.0
+      for index in start..<end {
+        let value = magnitudes[index]
+        if value > peak {
+          peak = value
+        }
+        acc += value
+        square += value * value
+      }
+
+      let count = Double(end - start)
+      switch fftGroupingConfig.aggregationMode {
+      case .peak:
+        output[group] = peak
+      case .mean:
+        output[group] = acc / count
+      case .rms:
+        output[group] = sqrt(square / count)
+      }
+    }
+
+    return output
+  }
+
+  private func groupedZeroFrame() -> [Double] {
+    Array(repeating: 0.0, count: max(1, fftGroupingConfig.frequencyGroups))
   }
 
   private func fadeVolume(
