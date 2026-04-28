@@ -27,8 +27,16 @@ final class PlaybackDeck {
       return max(0, min(playbackFramePosition, currentFile.length))
     }
 
-    let renderedFrames = max(0, playerTime.sampleTime)
-    return max(0, min(playbackFramePosition + renderedFrames, currentFile.length))
+    let renderedFrames = max(0, Double(playerTime.sampleTime))
+    let playbackSampleRate = playerTime.sampleRate > 0 ? playerTime.sampleRate : sampleRate
+    guard playbackSampleRate > 0, sampleRate > 0 else {
+      return max(0, min(playbackFramePosition, currentFile.length))
+    }
+
+    let sourceSampleRate = sampleRate
+    let renderedSourceFrames = renderedFrames * (sourceSampleRate / playbackSampleRate)
+    let currentFrame = Double(playbackFramePosition) + renderedSourceFrames
+    return max(0, min(AVAudioFramePosition(currentFrame.rounded()), currentFile.length))
   }
 
   func invalidatePendingPlaybackCallbacks() {
