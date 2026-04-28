@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -344,20 +345,7 @@ fn update_track_metadata_with_id3(
         tag.set_genre(v.clone());
     }
 
-    for pic in metadata.pictures {
-        let pic_type = match pic.picture_type.to_lowercase().as_str() {
-            "front" | "cover front" | "front cover" => Id3PictureType::CoverFront,
-            "back" | "cover back" | "back cover" => Id3PictureType::CoverBack,
-            _ => Id3PictureType::Other,
-        };
-
-        tag.add_frame(Id3Picture {
-            mime_type: pic.mime_type,
-            picture_type: pic_type,
-            description: pic.description.unwrap_or_default(),
-            data: pic.bytes,
-        });
-    }
+    replace_id3_pictures(&mut tag, &metadata.pictures);
 
     tag.write_to_path(&path, Id3Version::Id3v24)?;
     Ok(())
@@ -444,24 +432,7 @@ fn update_track_metadata_with_lofty(
         tag.insert_text(ItemKey::Remixer, v);
     }
 
-    // 图片处理
-    if !metadata.pictures.is_empty() {
-        use lofty::picture::{MimeType, Picture, PictureType};
-        for pic in metadata.pictures {
-            let pic_type = match pic.picture_type.to_lowercase().as_str() {
-                "front" | "cover front" | "front cover" => PictureType::CoverFront,
-                "back" | "cover back" | "back cover" => PictureType::CoverBack,
-                _ => PictureType::Other,
-            };
-            tag.remove_picture_type(pic_type);
-            tag.push_picture(
-                Picture::unchecked(pic.bytes)
-                    .mime_type(MimeType::from_str(&pic.mime_type))
-                    .pic_type(pic_type)
-                    .build(),
-            );
-        }
-    }
+    replace_lofty_pictures(tag, &metadata.pictures);
 
     // 4. 保存标签 (默认根据文件类型选择最佳方案)
     tag.save_to_path(&path, WriteOptions::default())?;
@@ -678,6 +649,59 @@ fn lofty_picture_type_to_label(picture_type: lofty::picture::PictureType) -> Str
     }
 }
 
+fn replace_id3_pictures(tag: &mut Id3Tag, pictures: &[TrackPicture]) {
+    if pictures.is_empty() {
+        return;
+    }
+
+    tag.remove_all_pictures();
+    for pic in pictures {
+        let pic_type = match pic.picture_type.to_lowercase().as_str() {
+            "front" | "cover front" | "front cover" => Id3PictureType::CoverFront,
+            "back" | "cover back" | "back cover" => Id3PictureType::CoverBack,
+            _ => Id3PictureType::Other,
+        };
+
+        tag.add_frame(Id3Picture {
+            mime_type: pic.mime_type.clone(),
+            picture_type: pic_type,
+            description: pic.description.clone().unwrap_or_default(),
+            data: pic.bytes.clone(),
+        });
+    }
+}
+
+fn replace_lofty_pictures(tag: &mut Tag, pictures: &[TrackPicture]) {
+    if pictures.is_empty() {
+        return;
+    }
+
+    use lofty::picture::{MimeType, Picture, PictureType};
+
+    let existing_picture_types = tag
+        .pictures()
+        .iter()
+        .map(|picture| picture.pic_type())
+        .collect::<HashSet<_>>();
+    for picture_type in existing_picture_types {
+        tag.remove_picture_type(picture_type);
+    }
+
+    for pic in pictures {
+        let pic_type = match pic.picture_type.to_lowercase().as_str() {
+            "front" | "cover front" | "front cover" => PictureType::CoverFront,
+            "back" | "cover back" | "back cover" => PictureType::CoverBack,
+            _ => PictureType::Other,
+        };
+        tag.push_picture(
+            Picture::unchecked(pic.bytes.clone())
+                .mime_type(MimeType::from_str(&pic.mime_type))
+                .pic_type(pic_type)
+                .build(),
+        );
+    }
+}
+
 pub fn remove_all_tags(path: String) -> anyhow::Result<()> {
     if should_use_id3(&path) {
         id3::v1v2::remove_from_path(&path)?;
@@ -689,4 +713,78 @@ pub fn remove_all_tags(path: String) -> anyhow::Result<()> {
         tag.tag_type().remove_from_path(&path)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn id3_picture_updates_replace_existing_artwork() {
+        let mut tag = Id3Tag::new();
+        tag.add_frame(Id3Picture {
+            mime_type: "image/jpeg".to_string(),
+            picture_type: Id3PictureType::CoverFront,
+            description: "old".to_string(),
+            data: vec![1, 2, 3],
+        });
+        tag.add_frame(Id3Picture {
+            mime_type: "image/png".to_string(),
+            picture_type: Id3PictureType::Other,
+            description: "other".to_string(),
+            data: vec![4, 5, 6],
+        });
+
+        replace_id3_pictures(
+            &mut tag,
+            &[TrackPicture {
+                bytes: vec![9, 9, 9],
+                mime_type: "image/png".to_string(),
+                picture_type: "Front Cover".to_string(),
+                description: Some("new".to_string()),
+            }],
+        );
+
+        let pictures = tag.pictures().collect::<Vec<_>>();
+        assert_eq!(pictures.len(), 1);
+        assert_eq!(pictures[0].data, vec![9, 9, 9]);
+        assert_eq!(pictures[0].picture_type, Id3PictureType::CoverFront);
+    }
+
+    #[test]
+    fn lofty_picture_updates_replace_existing_artwork() {
+        use lofty::tag::{Tag, TagType};
+
+        let mut tag = Tag::new(TagType::Id3v2);
+        tag.push_picture(
+            lofty::picture::Picture::unchecked(vec![1, 2, 3])
+                .mime_type(lofty::picture::MimeType::Jpeg)
+                .pic_type(lofty::picture::PictureType::CoverFront)
+                .build(),
+        );
+        tag.push_picture(
+            lofty::picture::Picture::unchecked(vec![4, 5, 6])
+                .mime_type(lofty::picture::MimeType::Png)
+                .pic_type(lofty::picture::PictureType::Other)
+                .build(),
+        );
+
+        replace_lofty_pictures(
+            &mut tag,
+            &[TrackPicture {
+                bytes: vec![9, 9, 9],
+                mime_type: "image/png".to_string(),
+                picture_type: "Front Cover".to_string(),
+                description: Some("new".to_string()),
+            }],
+        );
+
+        let pictures = tag.pictures();
+        assert_eq!(pictures.len(), 1);
+        assert_eq!(pictures[0].data(), &[9, 9, 9]);
+        assert_eq!(
+            pictures[0].pic_type(),
+            lofty::picture::PictureType::CoverFront
+        );
+    }
 }
