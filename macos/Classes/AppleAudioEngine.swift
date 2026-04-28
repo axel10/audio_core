@@ -577,6 +577,9 @@ final class AppleAudioEngine {
       if let currentFile = deck.loadedFile {
         deck.playbackFramePosition = currentFile.length
       }
+      // Ensure the native node reports a stopped state so the Dart layer can
+      // reliably treat this as a completed track and advance the queue.
+      deck.stopPlaybackNode()
       deck.isPlaybackScheduled = false
       self.emitPlayerState(playbackState: "ENDED")
     }
