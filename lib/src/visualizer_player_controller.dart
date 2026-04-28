@@ -216,6 +216,28 @@ class AudioCoreController extends ChangeNotifier
       await _engine.initialize();
       await _engine.updateVisualizerFftOptions(visualizer.options);
       _playbackStateSubscription = _engine.statusStream.listen((status) {
+        debugPrint(
+          '[AudioCoreController] status '
+          'state=${status.playbackState ?? "nil"} '
+          'path=${status.path ?? "nil"} '
+          'posMs=${status.position.inMilliseconds} '
+          'durMs=${status.duration.inMilliseconds} '
+          'playing=${status.isPlaying} '
+          'currentPath=${player.currentPath ?? "nil"} '
+          'playerState=${player.currentState}',
+        );
+        final currentPath = player.currentPath;
+        if (status.playbackState == 'ENDED' &&
+            status.path != null &&
+            currentPath != null &&
+            status.path != currentPath) {
+          debugPrint(
+            '[AudioCoreController] ignoring stale ENDED from ${status.path} '
+            'while current path is $currentPath',
+          );
+          return;
+        }
+
         var adjustedPosition = status.position;
         final updateTimeMs = status.updateTimeSinceEpochMs;
         if (updateTimeMs != null && status.isPlaying) {
@@ -682,12 +704,18 @@ class AudioCoreController extends ChangeNotifier
 
   Future<void> _handleAutoTransition() async {
     if (_isTransitioning || player.currentState != PlayerState.completed) {
+      debugPrint(
+        '[AudioCoreController] autoTransition skipped '
+        'isTransitioning=$_isTransitioning playerState=${player.currentState} '
+        'currentPath=${player.currentPath ?? "nil"}',
+      );
       return;
     }
 
     debugPrint(
       '[AudioCoreController] autoTransition mode=${playlist.mode} '
-      'current=${playlist.currentTrack?.id} next=${playlist.nextTrack?.id}',
+      'current=${playlist.currentTrack?.id} next=${playlist.nextTrack?.id} '
+      'lastEnded=$_lastEndedAutoAdvancePath',
     );
 
     if (playlist.mode == PlaylistMode.singleLoop) {

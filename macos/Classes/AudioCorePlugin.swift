@@ -38,6 +38,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
         result(FlutterError(code: "INVALID_ARGUMENT", message: "URL is null", details: nil))
         return
       }
+      debugPrint("[AudioCorePlugin] method=load path=\(path)")
       do {
         try engine.load(path: path)
         sendPlayerState()
@@ -55,6 +56,10 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       }
       let durationMs = Self.readInt(call.arguments, key: "durationMs") ?? 0
       let positionMs = Self.readInt(call.arguments, key: "positionMs")
+      debugPrint(
+        "[AudioCorePlugin] method=crossfade path=\(path) durationMs=\(durationMs) " +
+        "positionMs=\(positionMs.map(String.init) ?? "nil")"
+      )
       do {
         try engine.crossfade(path: path, durationMs: durationMs, positionMs: positionMs)
         sendPlayerState()
@@ -67,6 +72,10 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
     case "play":
       let fadeDurationMs = Self.readInt(call.arguments, key: "fadeDurationMs") ?? 0
       let targetVolume = Self.readDouble(call.arguments, key: "targetVolume")
+      debugPrint(
+        "[AudioCorePlugin] method=play fadeDurationMs=\(fadeDurationMs) " +
+        "targetVolume=\(targetVolume.map { String(format: "%.3f", $0) } ?? "nil")"
+      )
       do {
         try engine.play(fadeDurationMs: fadeDurationMs, targetVolume: targetVolume)
         sendPlayerState()
@@ -78,6 +87,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
 
     case "pause":
       let fadeDurationMs = Self.readInt(call.arguments, key: "fadeDurationMs") ?? 0
+      debugPrint("[AudioCorePlugin] method=pause fadeDurationMs=\(fadeDurationMs)")
       do {
         try engine.pause(fadeDurationMs: fadeDurationMs)
         result(nil)
@@ -88,6 +98,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
 
     case "seek":
       let positionMs = Self.readInt(call.arguments, key: "position") ?? 0
+      debugPrint("[AudioCorePlugin] method=seek positionMs=\(positionMs)")
       do {
         try engine.seek(positionMs: positionMs)
         sendPlayerState()
@@ -261,6 +272,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
       result(nil)
 
     case "dispose":
+      debugPrint("[AudioCorePlugin] method=dispose")
       engine.dispose()
       sendPlayerState()
       result(nil)
@@ -272,10 +284,23 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin {
 
   private func sendPlayerState(playbackState: String? = nil, error: String? = nil) {
     guard let channel else { return }
+    let payload = engine.statusPayload(playbackState: playbackState, error: error)
+    let stateText = String(describing: payload["state"] ?? "nil")
+    let pathText = String(describing: payload["path"] ?? "nil")
+    let positionText = String(describing: payload["position"] ?? "nil")
+    let durationText = String(describing: payload["duration"] ?? "nil")
+    let playingText = String(describing: payload["isPlaying"] ?? "nil")
+    let errorText = String(describing: payload["error"] ?? "nil")
+    debugPrint(
+      "[AudioCorePlugin] emit state=\(stateText) " +
+      "path=\(pathText) pos=\(positionText) " +
+      "dur=\(durationText) playing=\(playingText) " +
+      "error=\(errorText)"
+    )
     DispatchQueue.main.async {
       channel.invokeMethod(
         "onPlayerStateChanged",
-        arguments: self.engine.statusPayload(playbackState: playbackState, error: error)
+        arguments: payload
       )
     }
   }

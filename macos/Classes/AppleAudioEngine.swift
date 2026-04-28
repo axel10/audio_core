@@ -44,6 +44,9 @@ final class AppleAudioEngine {
   }
 
   func load(path: String) throws {
+    debugPrint(
+      "[AppleAudioEngine] load start path=\(path) public=\(publicURL()?.path ?? "nil")"
+    )
     stopPlayback(releasingFile: true, preservePosition: false)
     releaseCurrentAccessIfNeeded()
 
@@ -56,9 +59,18 @@ final class AppleAudioEngine {
     currentDeck.isPlaybackScheduled = false
     currentDeck.gain = 1.0
     preparedAccessPaths.remove(url.path)
+    debugPrint(
+      "[AppleAudioEngine] load done path=\(path) sampleRate=\(currentDeck.sampleRate) " +
+      "length=\(file.length) public=\(publicURL()?.path ?? "nil")"
+    )
   }
 
   func crossfade(path: String, durationMs: Int, positionMs: Int? = nil) throws {
+    debugPrint(
+      "[AppleAudioEngine] crossfade request path=\(path) durationMs=\(durationMs) " +
+      "positionMs=\(positionMs.map(String.init) ?? "nil") current=\(publicURL()?.path ?? "nil") " +
+      "isPlaying=\(publicDeck()?.isPlaying ?? false)"
+    )
     let duration = max(0, durationMs)
     guard currentDeck.isLoaded, currentDeck.isPlaying, duration > 0 else {
       try load(path: path)
@@ -73,6 +85,11 @@ final class AppleAudioEngine {
   }
 
   func play(fadeDurationMs: Int, targetVolume: Double?) throws {
+    debugPrint(
+      "[AppleAudioEngine] play request fadeDurationMs=\(fadeDurationMs) " +
+      "targetVolume=\(targetVolume.map { String(format: "%.3f", $0) } ?? "nil") " +
+      "public=\(publicURL()?.path ?? "nil")"
+    )
     guard let activeDeck = publicDeck() else {
       throw NSError(
         domain: "AudioCore",
@@ -104,6 +121,10 @@ final class AppleAudioEngine {
   }
 
   func pause(fadeDurationMs: Int) throws {
+    debugPrint(
+      "[AppleAudioEngine] pause request fadeDurationMs=\(fadeDurationMs) " +
+      "public=\(publicURL()?.path ?? "nil") isPlaying=\(publicDeck()?.isPlaying ?? false)"
+    )
     guard let activeDeck = publicDeck(), activeDeck.isPlaying else { return }
 
     if fadeDurationMs > 0 {
@@ -128,6 +149,10 @@ final class AppleAudioEngine {
   }
 
   func seek(positionMs: Int) throws {
+    debugPrint(
+      "[AppleAudioEngine] seek request positionMs=\(positionMs) " +
+      "public=\(publicURL()?.path ?? "nil")"
+    )
     guard let currentFile = publicFile() else {
       throw NSError(
         domain: "AudioCore",
@@ -150,6 +175,10 @@ final class AppleAudioEngine {
         try startPlaybackIfNeeded(on: deck, from: clampedFrame, volume: latestVolume)
       }
     }
+    debugPrint(
+      "[AppleAudioEngine] seek applied positionMs=\(positionMs) frame=\(clampedFrame) " +
+      "wasPlaying=\(wasPlaying)"
+    )
   }
 
   func setVolume(_ volume: Double) throws {
@@ -267,6 +296,10 @@ final class AppleAudioEngine {
   }
 
   func finishFileWrite(path: String? = nil) throws {
+    debugPrint(
+      "[AppleAudioEngine] finishFileWrite request path=\(path ?? "nil") " +
+      "current=\(currentDeck.loadedURL?.path ?? "nil") pending=\(pendingEdit?.path ?? "nil")"
+    )
     if let path {
       let normalizedPath = normalizedFilePath(path)
       if currentDeck.loadedURL?.path != normalizedPath {
@@ -317,6 +350,10 @@ final class AppleAudioEngine {
   }
 
   func dispose() {
+    debugPrint(
+      "[AppleAudioEngine] dispose current=\(currentDeck.loadedURL?.path ?? "nil") " +
+      "incoming=\(incomingDeck.loadedURL?.path ?? "nil")"
+    )
     fadeTimer?.invalidate()
     fadeTimer = nil
     pendingEdit = nil
@@ -476,12 +513,14 @@ final class AppleAudioEngine {
     deck.stopPlaybackNode()
     let generation = deck.playbackGeneration
     let framesRemaining = AVAudioFrameCount(currentFile.length - clampedFrame)
+    let scheduledPath = deck.loadedURL?.path
     schedulePlaybackSegment(
       currentFile,
       on: deck,
       startingFrame: clampedFrame,
       frameCount: framesRemaining,
-      generation: generation
+      generation: generation,
+      expectedPath: scheduledPath
     )
     deck.playbackFramePosition = clampedFrame
     deck.isPlaybackScheduled = true
@@ -494,7 +533,8 @@ final class AppleAudioEngine {
     on deck: PlaybackDeck,
     startingFrame: AVAudioFramePosition,
     frameCount: AVAudioFrameCount,
-    generation: UInt64
+    generation: UInt64,
+    expectedPath: String?
   ) {
     if #available(macOS 10.13, iOS 11.0, *) {
       deck.playerNode.scheduleSegment(
@@ -504,7 +544,11 @@ final class AppleAudioEngine {
         at: nil,
         completionCallbackType: .dataPlayedBack,
         completionHandler: { [weak self] _ in
-          self?.handlePlaybackCompleted(deck: deck, generation: generation)
+          self?.handlePlaybackCompleted(
+            deck: deck,
+            generation: generation,
+            expectedPath: expectedPath
+          )
         }
       )
       return
@@ -519,6 +563,7 @@ final class AppleAudioEngine {
         self?.scheduleLegacyPlaybackCompletionCheck(
           deck: deck,
           generation: generation,
+          expectedPath: expectedPath,
           attempt: 0
         )
       }
@@ -528,12 +573,14 @@ final class AppleAudioEngine {
   private func scheduleLegacyPlaybackCompletionCheck(
     deck: PlaybackDeck,
     generation: UInt64,
+    expectedPath: String?,
     attempt: Int
   ) {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
       self?.verifyLegacyPlaybackCompletion(
         deck: deck,
         generation: generation,
+        expectedPath: expectedPath,
         attempt: attempt
       )
     }
@@ -542,9 +589,13 @@ final class AppleAudioEngine {
   private func verifyLegacyPlaybackCompletion(
     deck: PlaybackDeck,
     generation: UInt64,
+    expectedPath: String?,
     attempt: Int
   ) {
     guard deck.playbackGeneration == generation, deck.isPlaybackScheduled else {
+      return
+    }
+    guard deck.loadedURL?.path == expectedPath else {
       return
     }
     guard let currentFile = deck.loadedFile else {
@@ -557,21 +608,50 @@ final class AppleAudioEngine {
     let isNearEnd = currentFrame >= nearEndFrame
 
     if isNearEnd || !deck.playerNode.isPlaying || attempt >= 40 {
-      handlePlaybackCompleted(deck: deck, generation: generation)
+      handlePlaybackCompleted(deck: deck, generation: generation, expectedPath: expectedPath)
       return
     }
 
     scheduleLegacyPlaybackCompletionCheck(
       deck: deck,
       generation: generation,
+      expectedPath: expectedPath,
       attempt: attempt + 1
     )
   }
 
-  private func handlePlaybackCompleted(deck: PlaybackDeck, generation: UInt64) {
+  private func handlePlaybackCompleted(
+    deck: PlaybackDeck,
+    generation: UInt64,
+    expectedPath: String?
+  ) {
+    let completedPath = deck.loadedURL?.path
+    debugPrint(
+      "[AppleAudioEngine] handlePlaybackCompleted fired path=\(completedPath ?? "nil") " +
+      "expected=\(expectedPath ?? "nil") generation=\(generation) deckGen=\(deck.playbackGeneration) scheduled=\(deck.isPlaybackScheduled) " +
+      "public=\(publicURL()?.path ?? "nil")"
+    )
     DispatchQueue.main.async { [weak self] in
       guard let self = self else { return }
       guard deck.playbackGeneration == generation, deck.isPlaybackScheduled else {
+        debugPrint(
+          "[AppleAudioEngine] handlePlaybackCompleted ignored stale callback path=\(completedPath ?? "nil") " +
+          "generation=\(generation) deckGen=\(deck.playbackGeneration) scheduled=\(deck.isPlaybackScheduled)"
+        )
+        return
+      }
+      if let expectedPath, deck.loadedURL?.path != expectedPath {
+        debugPrint(
+          "[AppleAudioEngine] handlePlaybackCompleted ignored expectedMismatch expected=\(expectedPath) " +
+          "current=\(deck.loadedURL?.path ?? "nil") public=\(self.publicURL()?.path ?? "nil")"
+        )
+        return
+      }
+      if let completedPath, self.publicURL()?.path != completedPath {
+        debugPrint(
+          "[AppleAudioEngine] handlePlaybackCompleted ignored publicChanged completed=\(completedPath) " +
+          "public=\(self.publicURL()?.path ?? "nil")"
+        )
         return
       }
       if let currentFile = deck.loadedFile {
@@ -586,6 +666,10 @@ final class AppleAudioEngine {
   }
 
   private func stopPlayback(releasingFile: Bool, preservePosition: Bool) {
+    debugPrint(
+      "[AppleAudioEngine] stopPlayback releasingFile=\(releasingFile) preservePosition=\(preservePosition) " +
+      "current=\(currentDeck.loadedURL?.path ?? "nil") incoming=\(incomingDeck.loadedURL?.path ?? "nil")"
+    )
     fadeTimer?.invalidate()
     fadeTimer = nil
     fadeGeneration &+= 1
@@ -615,6 +699,10 @@ final class AppleAudioEngine {
   }
 
   private func pausePlayback(preservePosition: Bool) {
+    debugPrint(
+      "[AppleAudioEngine] pausePlayback preservePosition=\(preservePosition) " +
+      "current=\(currentDeck.loadedURL?.path ?? "nil") incoming=\(incomingDeck.loadedURL?.path ?? "nil")"
+    )
     fadeTimer?.invalidate()
     fadeTimer = nil
     fadeGeneration &+= 1
@@ -656,6 +744,11 @@ final class AppleAudioEngine {
   }
 
   private func startCrossfade(path: String, durationMs: Int, positionMs: Int?) throws {
+    debugPrint(
+      "[AppleAudioEngine] startCrossfade path=\(path) durationMs=\(durationMs) " +
+      "positionMs=\(positionMs.map(String.init) ?? "nil") current=\(currentDeck.loadedURL?.path ?? "nil") " +
+      "incoming=\(incomingDeck.loadedURL?.path ?? "nil")"
+    )
     guard currentDeck.loadedFile != nil else {
       try load(path: path)
       try play(fadeDurationMs: durationMs, targetVolume: latestVolume)
@@ -736,6 +829,10 @@ final class AppleAudioEngine {
   }
 
   private func settleCrossfade() {
+    debugPrint(
+      "[AppleAudioEngine] settleCrossfade start current=\(currentDeck.loadedURL?.path ?? "nil") " +
+      "incoming=\(incomingDeck.loadedURL?.path ?? "nil")"
+    )
     guard incomingDeck.loadedFile != nil else { return }
 
     if let oldURL = currentDeck.loadedURL {
@@ -758,6 +855,10 @@ final class AppleAudioEngine {
     if let currentURL = currentDeck.loadedURL {
       preparedAccessPaths.remove(currentURL.path)
     }
+    debugPrint(
+      "[AppleAudioEngine] settleCrossfade done current=\(currentDeck.loadedURL?.path ?? "nil") " +
+      "incoming=\(incomingDeck.loadedURL?.path ?? "nil")"
+    )
   }
 
   private func framePosition(forMilliseconds ms: Int, sampleRate: Double) -> AVAudioFramePosition {

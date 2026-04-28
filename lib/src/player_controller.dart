@@ -307,6 +307,15 @@ class PlayerController extends ChangeNotifier {
     double nativeVolume, {
     String? error,
   }) {
+    debugPrint(
+      '[PlayerController] applySnapshot '
+      'path=${path ?? "nil"} state=${playbackState ?? "nil"} '
+      'posMs=${position.inMilliseconds} durMs=${duration.inMilliseconds} '
+      'playing=$isPlaying volume=$nativeVolume '
+      'current=$_selectedPath playerState=$_playerState '
+      'lastCmdMs=${_lastCommandTime.millisecondsSinceEpoch} '
+      'lastPlayMs=${_lastPlayCommandTime.millisecondsSinceEpoch}',
+    );
     if (error != null) {
       setError(error);
       return;
@@ -330,21 +339,26 @@ class PlayerController extends ChangeNotifier {
     _volume = nativeVolume;
 
     // Guard position and playing state to avoid "jumping" back to old state during command processing
-      if (recentlyCommanded) {
-        _selectedPath = path;
-        _isPlaying = isPlaying;
-        if (suppressTransientPause) {
-          _isPlaying = true;
-          _position = position > _position ? position : _position;
-          _playerState = PlayerState.playing;
-        } else if (!isPlaying) {
-          _position = position;
-          if (_selectedPath != null && playbackState == 'ENDED') {
-            _playerState = PlayerState.completed;
-          } else if (_selectedPath != null) {
-            _playerState = PlayerState.paused;
-          } else {
-            _playerState = PlayerState.idle;
+    if (recentlyCommanded) {
+      debugPrint(
+        '[PlayerController] applySnapshot recentlyCommanded '
+        'path=${path ?? "nil"} playbackState=${playbackState ?? "nil"} '
+        'suppressTransientPause=$suppressTransientPause',
+      );
+      _selectedPath = path;
+      _isPlaying = isPlaying;
+      if (suppressTransientPause) {
+        _isPlaying = true;
+        _position = position > _position ? position : _position;
+        _playerState = PlayerState.playing;
+      } else if (!isPlaying) {
+        _position = position;
+        if (_selectedPath != null && playbackState == 'ENDED') {
+          _playerState = PlayerState.completed;
+        } else if (_selectedPath != null) {
+          _playerState = PlayerState.paused;
+        } else {
+          _playerState = PlayerState.idle;
         }
       } else {
         _playerState = PlayerState.playing;
@@ -355,6 +369,10 @@ class PlayerController extends ChangeNotifier {
 
     _selectedPath = path;
     if (suppressTransientPause) {
+      debugPrint(
+        '[PlayerController] applySnapshot suppressTransientPause '
+        'path=${path ?? "nil"} playbackState=${playbackState ?? "nil"}',
+      );
       _position = position > _position ? position : _position;
       _isPlaying = true;
       _playerState = PlayerState.playing;
