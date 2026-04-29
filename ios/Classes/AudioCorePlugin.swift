@@ -1,6 +1,6 @@
 import AVFoundation
-import Foundation
-import FlutterMacOS
+import Flutter
+import UIKit
 
 public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
   private let fileAccess = SecurityScopedFileAccessCoordinator()
@@ -14,6 +14,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
   public override init() {
     self.engine = AppleAudioEngine(fileAccess: fileAccess)
     super.init()
+    configureAudioSessionIfNeeded()
     self.engine.onPlayerStateChanged = { [weak self] playbackState, error in
       self?.sendPlayerState(playbackState: playbackState, error: error)
     }
@@ -22,11 +23,11 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
   public static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(
       name: "audio_core.player",
-      binaryMessenger: registrar.messenger
+      binaryMessenger: registrar.messenger()
     )
     let fftChannel = FlutterEventChannel(
       name: "audio_core.player/fft",
-      binaryMessenger: registrar.messenger
+      binaryMessenger: registrar.messenger()
     )
     let instance = AudioCorePlugin()
     instance.channel = channel
@@ -333,6 +334,16 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     return nil
   }
 
+  private func configureAudioSessionIfNeeded() {
+    let session = AVAudioSession.sharedInstance()
+    do {
+      try session.setCategory(.playback, mode: .default, options: [])
+      try session.setActive(true)
+    } catch {
+      debugPrint("[AudioCorePlugin] failed to configure AVAudioSession: \(error.localizedDescription)")
+    }
+  }
+
   private func sendPlayerState(playbackState: String? = nil, error: String? = nil) {
     guard let channel else { return }
     let payload = engine.statusPayload(playbackState: playbackState, error: error)
@@ -378,52 +389,39 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
   private func emitLatestFftSnapshot() {
     guard fftEventSink != nil, !fftEmissionInFlight else { return }
     fftEmissionInFlight = true
-    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-      guard let self else { return }
-      let values: [Double]
-      do {
-        values = try self.engine.getLatestFft()
-      } catch {
-        values = []
-        DispatchQueue.main.async {
-          self.sendPlayerState(error: error.localizedDescription)
-        }
-      }
-
-      DispatchQueue.main.async { [weak self] in
-        guard let self else { return }
-        defer { self.fftEmissionInFlight = false }
-        guard let sink = self.fftEventSink else { return }
-        sink([
-          "playerId": "main",
-          "values": values,
-        ])
+    DispatchQueue.global(qos: .userInitiated).async {
+      let snapshot = (try? self.engine.getLatestFft()) ?? []
+      DispatchQueue.main.async {
+        self.fftEventSink?(snapshot)
+        self.fftEmissionInFlight = false
       }
     }
   }
 
   private static func readInt(_ arguments: Any?, key: String) -> Int? {
-    guard let map = arguments as? [String: Any] else { return nil }
-    if let value = map[key] as? Int { return value }
-    if let value = map[key] as? Int64 { return Int(value) }
-    if let value = map[key] as? Double { return Int(value) }
-    if let value = map[key] as? NSNumber { return value.intValue }
+    guard let dict = arguments as? [String: Any] else { return nil }
+    if let value = dict[key] as? Int { return value }
+    if let value = dict[key] as? Int64 { return Int(value) }
+    if let value = dict[key] as? Double { return Int(value) }
+    if let value = dict[key] as? NSNumber { return value.intValue }
     return nil
   }
 
   private static func readDouble(_ arguments: Any?, key: String) -> Double? {
-    guard let map = arguments as? [String: Any] else { return nil }
-    if let value = map[key] as? Double { return value }
-    if let value = map[key] as? Int { return Double(value) }
-    if let value = map[key] as? Int64 { return Double(value) }
-    if let value = map[key] as? NSNumber { return value.doubleValue }
+    guard let dict = arguments as? [String: Any] else { return nil }
+    if let value = dict[key] as? Double { return value }
+    if let value = dict[key] as? Int { return Double(value) }
+    if let value = dict[key] as? Int64 { return Double(value) }
+    if let value = dict[key] as? NSNumber { return value.doubleValue }
     return nil
   }
 
   private static func readString(_ arguments: Any?, key: String) -> String? {
-    guard let map = arguments as? [String: Any] else { return nil }
-    guard let value = map[key] as? String else { return nil }
-    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? nil : trimmed
+    guard let dict = arguments as? [String: Any] else { return nil }
+    if let value = dict[key] as? String {
+      let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+      return trimmed.isEmpty ? nil : trimmed
+    }
+    return nil
   }
 }
