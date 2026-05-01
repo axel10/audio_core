@@ -307,7 +307,7 @@ class PlayerController extends ChangeNotifier {
     double nativeVolume, {
     String? error,
   }) {
-    debugPrint(
+/*    debugPrint(
       '[PlayerController] applySnapshot '
       'path=${path ?? "nil"} state=${playbackState ?? "nil"} '
       'posMs=${position.inMilliseconds} durMs=${duration.inMilliseconds} '
@@ -315,7 +315,7 @@ class PlayerController extends ChangeNotifier {
       'current=$_selectedPath playerState=$_playerState '
       'lastCmdMs=${_lastCommandTime.millisecondsSinceEpoch} '
       'lastPlayMs=${_lastPlayCommandTime.millisecondsSinceEpoch}',
-    );
+    );*/
     if (error != null) {
       setError(error);
       return;

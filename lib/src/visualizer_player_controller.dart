@@ -216,16 +216,16 @@ class AudioCoreController extends ChangeNotifier
       await _engine.initialize();
       await _engine.updateVisualizerFftOptions(visualizer.options);
       _playbackStateSubscription = _engine.statusStream.listen((status) {
-        debugPrint(
-          '[AudioCoreController] status '
-          'state=${status.playbackState ?? "nil"} '
-          'path=${status.path ?? "nil"} '
-          'posMs=${status.position.inMilliseconds} '
-          'durMs=${status.duration.inMilliseconds} '
-          'playing=${status.isPlaying} '
-          'currentPath=${player.currentPath ?? "nil"} '
-          'playerState=${player.currentState}',
-        );
+        // debugPrint(
+        //   '[AudioCoreController] status '
+        //   'state=${status.playbackState ?? "nil"} '
+        //   'path=${status.path ?? "nil"} '
+        //   'posMs=${status.position.inMilliseconds} '
+        //   'durMs=${status.duration.inMilliseconds} '
+        //   'playing=${status.isPlaying} '
+        //   'currentPath=${player.currentPath ?? "nil"} '
+        //   'playerState=${player.currentState}',
+        // );
         final currentPath = player.currentPath;
         if (status.playbackState == 'ENDED' &&
             status.path != null &&
