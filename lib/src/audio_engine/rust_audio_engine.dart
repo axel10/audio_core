@@ -78,32 +78,32 @@ class RustAudioEngine
         .toDouble();
 
     if (duration > Duration.zero) {
-      await rust.pauseAudio(fadeMs: duration.inMilliseconds);
+      await rust.pauseAudio(fadeDurationMs: duration.inMilliseconds);
     }
 
     await rust.setAudioVolume(volume: resolvedTargetVolume);
     await rust.loadAudioFile(path: path);
     if (position != null) {
-      await rust.seekAudioMs(ms: position.inMilliseconds);
+      await rust.seekAudioMs(positionMs: position.inMilliseconds);
     }
 
     if (autoPlay) {
-      await rust.playAudio(fadeMs: duration.inMilliseconds);
+      await rust.playAudio(fadeDurationMs: duration.inMilliseconds);
     }
     _currentVolume = resolvedTargetVolume;
   }
 
   @override
   Future<void> play({Duration? fadeDuration}) =>
-      rust.playAudio(fadeMs: fadeDuration?.inMilliseconds ?? 0);
+      rust.playAudio(fadeDurationMs: fadeDuration?.inMilliseconds ?? 0);
 
   @override
   Future<void> pause({Duration? fadeDuration}) =>
-      rust.pauseAudio(fadeMs: fadeDuration?.inMilliseconds ?? 0);
+      rust.pauseAudio(fadeDurationMs: fadeDuration?.inMilliseconds ?? 0);
 
   @override
   Future<void> seek(Duration position) =>
-      rust.seekAudioMs(ms: position.inMilliseconds);
+      rust.seekAudioMs(positionMs: position.inMilliseconds);
 
   @override
   Future<void> setVolume(double volume) =>
@@ -153,7 +153,7 @@ class RustAudioEngine
 
   @override
   Future<Float32List> getAudioPcm({String? path, int sampleStride = 0}) =>
-      rust.getAudioPcm(path: path, stride: BigInt.from(sampleStride));
+      rust.getAudioPcm(path: path, sampleStride: BigInt.from(sampleStride));
 
   @override
   Future<int> getAudioPcmChannelCount({String? path}) =>

@@ -74,25 +74,25 @@ pub mod controller {
     }
 
     pub fn init_app() {}
-    pub fn load_audio_file(_path: String) -> Result<(), String> {
+    pub fn load_audio_file(path: String) -> Result<(), String> {
         Ok(())
     }
-    pub fn crossfade_to_audio_file(_path: String, _duration_ms: i64) -> Result<(), String> {
+    pub fn crossfade_to_audio_file(path: String, duration_ms: i64) -> Result<(), String> {
         Ok(())
     }
-    pub fn play_audio(_fade_ms: i64) -> Result<(), String> {
+    pub fn play_audio(fade_duration_ms: i64) -> Result<(), String> {
         Ok(())
     }
-    pub fn pause_audio(_fade_ms: i64) -> Result<(), String> {
+    pub fn pause_audio(fade_duration_ms: i64) -> Result<(), String> {
         Ok(())
     }
     pub fn toggle_audio() -> Result<bool, String> {
         Ok(false)
     }
-    pub fn seek_audio_ms(_ms: i64) -> Result<(), String> {
+    pub fn seek_audio_ms(position_ms: i64) -> Result<(), String> {
         Ok(())
     }
-    pub fn set_audio_volume(_volume: f32) -> Result<(), String> {
+    pub fn set_audio_volume(volume: f32) -> Result<(), String> {
         Ok(())
     }
     pub fn get_audio_position_ms() -> i64 {
@@ -101,7 +101,7 @@ pub mod controller {
     pub fn get_audio_duration_ms() -> i64 {
         0
     }
-    pub fn get_audio_pcm_channel_count(_path: Option<String>) -> Result<i32, String> {
+    pub fn get_audio_pcm_channel_count(path: Option<String>) -> Result<i32, String> {
         Ok(2)
     }
     pub fn is_audio_playing() -> bool {
@@ -113,10 +113,10 @@ pub mod controller {
     pub fn get_latest_fft() -> Vec<f32> {
         vec![]
     }
-    pub fn get_audio_pcm(_path: Option<String>, _stride: usize) -> Result<Vec<f32>, String> {
+    pub fn get_audio_pcm(path: Option<String>, sample_stride: usize) -> Result<Vec<f32>, String> {
         Err("Not supported".to_string())
     }
-    pub fn set_audio_equalizer_config(_config: EqualizerConfig) -> Result<(), String> {
+    pub fn set_audio_equalizer_config(config: EqualizerConfig) -> Result<(), String> {
         Ok(())
     }
     pub fn get_audio_equalizer_config() -> EqualizerConfig {
