@@ -1146,30 +1146,6 @@ class AudioCoreController extends ChangeNotifier
     );
   }
 
-  Future<bool> copyMetadata(AudioTrack source, AudioTrack target) async {
-    final results = await copyMetadataToMany(source, <AudioTrack>[target]);
-    return results.isNotEmpty && results.first;
-  }
-
-  Future<List<bool>> copyMetadataToMany(
-    AudioTrack source,
-    List<AudioTrack> targets,
-  ) async {
-    if (targets.isEmpty) return const <bool>[];
-
-    final sourcePath = _resolveTrackPath(source);
-    final requests = targets
-        .map(
-          (target) => TrackMetadataCopyRequest(
-            sourcePath: sourcePath,
-            targetPath: _resolveTrackPath(target),
-          ),
-        )
-        .toList(growable: false);
-
-    return _copyMetadataBatch(requests);
-  }
-
   Future<List<bool>> copyMetadataPairs(
     List<AudioTrack> sources,
     List<AudioTrack> targets,
