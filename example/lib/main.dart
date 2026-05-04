@@ -518,13 +518,22 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
   Widget _buildFileAndWaveform() {
     return Column(
       children: [
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            _controller.player.currentPath ?? 'No file selected',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                _controller.player.currentPath ?? 'No file selected',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (_controller.player.currentPath != null)
+              TextButton.icon(
+                onPressed: _showCurrentPathDetails,
+                icon: const Icon(Icons.info_outline, size: 18),
+                label: const Text('Path Details'),
+              ),
+          ],
         ),
         if (_controller.player.lastFingerprint != null)
           Align(
@@ -651,6 +660,61 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
         ),
       ],
     );
+  }
+
+  void _showCurrentPathDetails() {
+    final currentTrack = _controller.playlist.currentTrack;
+    final currentPath = _controller.player.currentPath;
+    final metadata = currentTrack?.metadata ?? const <String, Object?>{};
+
+    final details = <String>[
+      'Platform: ${Platform.isAndroid ? 'Android' : Platform.operatingSystem}',
+      'player.currentPath: ${currentPath ?? '(null)'}',
+      'playlist.currentTrack.id: ${currentTrack?.id ?? '(null)'}',
+      'playlist.currentTrack.uri: ${currentTrack?.uri ?? '(null)'}',
+      'playlist.currentTrack.title: ${currentTrack?.title ?? '(null)'}',
+      'playlist.currentTrack.artist: ${currentTrack?.artist ?? '(null)'}',
+      'playlist.currentTrack.album: ${currentTrack?.album ?? '(null)'}',
+      'metadata.filePath: ${_stringMetadata(metadata, 'filePath')}',
+      'metadata.mediaUri: ${_stringMetadata(metadata, 'mediaUri')}',
+      'metadata.selectedUri: ${_stringMetadata(metadata, 'selectedUri')}',
+      'metadata.mediaUriLookup: ${_stringMetadata(metadata, 'mediaUriLookup')}',
+      'metadata.displayName: ${_stringMetadata(metadata, 'displayName')}',
+      'metadata.bucketDisplayName: ${_stringMetadata(metadata, 'bucketDisplayName')}',
+      'metadata.mimeType: ${_stringMetadata(metadata, 'mimeType')}',
+      'metadata.folderPath: ${_stringMetadata(metadata, 'folderPath')}',
+    ].join('\n');
+
+    showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Current Path Details'),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: SingleChildScrollView(
+              child: SelectableText(
+                details,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  String _stringMetadata(Map<String, Object?> metadata, String key) {
+    final value = metadata[key];
+    if (value == null) return '(null)';
+    final text = value.toString().trim();
+    return text.isEmpty ? '(empty)' : text;
   }
 
   Widget _buildSpectrumVisualizers() {
