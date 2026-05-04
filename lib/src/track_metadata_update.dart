@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'android_metadata_models.dart';
+import 'track_metadata.dart';
 
 T? _firstOrNull<T>(Iterable<T> values) {
   final iterator = values.iterator;
@@ -8,8 +9,8 @@ T? _firstOrNull<T>(Iterable<T> values) {
   return iterator.current;
 }
 
-class AndroidTrackPicture {
-  const AndroidTrackPicture({
+class TrackMetadataPicture {
+  const TrackMetadataPicture({
     required this.bytes,
     required this.mimeType,
     this.pictureType = 'Front Cover',
@@ -31,8 +32,8 @@ class AndroidTrackPicture {
   }
 }
 
-class AndroidTrackMetadataUpdate {
-  const AndroidTrackMetadataUpdate({
+class TrackMetadataUpdate {
+  const TrackMetadataUpdate({
     this.title,
     this.artist,
     this.album,
@@ -50,7 +51,7 @@ class AndroidTrackMetadataUpdate {
     this.conductor,
     this.remixer,
     this.genres = const <String>[],
-    this.pictures = const <AndroidTrackPicture>[],
+    this.pictures = const <TrackMetadataPicture>[],
   });
 
   final String? title;
@@ -70,9 +71,9 @@ class AndroidTrackMetadataUpdate {
   final String? conductor;
   final String? remixer;
   final List<String> genres;
-  final List<AndroidTrackPicture> pictures;
+  final List<TrackMetadataPicture> pictures;
 
-  Map<String, Object?> toMap() {
+  Map<String, Object?> toMap({bool includeEmptyCollections = false}) {
     return <String, Object?>{
       if (title != null) 'title': title,
       if (artist != null) 'artist': artist,
@@ -90,8 +91,8 @@ class AndroidTrackMetadataUpdate {
       if (performer != null) 'performer': performer,
       if (conductor != null) 'conductor': conductor,
       if (remixer != null) 'remixer': remixer,
-      if (genres.isNotEmpty) 'genres': genres,
-      if (pictures.isNotEmpty)
+      if (includeEmptyCollections || genres.isNotEmpty) 'genres': genres,
+      if (includeEmptyCollections || pictures.isNotEmpty)
         'pictures': pictures.map((picture) => picture.toMap()).toList(),
     };
   }
@@ -169,10 +170,10 @@ class AndroidTrackMetadataUpdate {
     return null;
   }
 
-  factory AndroidTrackMetadataUpdate.fromParserTag(ParserTag metadata) {
+  factory TrackMetadataUpdate.fromParserTag(ParserTag metadata) {
     switch (metadata) {
       case Mp3Metadata m:
-        return AndroidTrackMetadataUpdate(
+        return TrackMetadataUpdate(
           title: m.songName,
           artist: m.leadPerformer,
           album: m.album,
@@ -185,7 +186,7 @@ class AndroidTrackMetadataUpdate {
           genres: List<String>.from(m.genres),
           pictures: m.pictures
               .map(
-                (picture) => AndroidTrackPicture(
+                (picture) => TrackMetadataPicture(
                   bytes: picture.bytes,
                   mimeType: picture.mimetype,
                   pictureType: _pictureTypeToAndroidLabel(picture.pictureType),
@@ -194,7 +195,7 @@ class AndroidTrackMetadataUpdate {
               .toList(),
         );
       case Mp4Metadata m:
-        return AndroidTrackMetadataUpdate(
+        return TrackMetadataUpdate(
           title: m.title,
           artist: m.artist,
           album: m.album,
@@ -206,9 +207,9 @@ class AndroidTrackMetadataUpdate {
           lyrics: m.lyrics,
           genres: m.genre == null ? const <String>[] : <String>[m.genre!],
           pictures: m.picture == null
-              ? const <AndroidTrackPicture>[]
-              : <AndroidTrackPicture>[
-                  AndroidTrackPicture(
+              ? const <TrackMetadataPicture>[]
+              : <TrackMetadataPicture>[
+                  TrackMetadataPicture(
                     bytes: m.picture!.bytes,
                     mimeType: m.picture!.mimetype,
                     pictureType: _pictureTypeToAndroidLabel(
@@ -218,7 +219,7 @@ class AndroidTrackMetadataUpdate {
                 ],
         );
       case VorbisMetadata m:
-        return AndroidTrackMetadataUpdate(
+        return TrackMetadataUpdate(
           title: _firstOrNull(m.title),
           artist: _firstOrNull(m.artist),
           album: _firstOrNull(m.album),
@@ -235,7 +236,7 @@ class AndroidTrackMetadataUpdate {
           genres: List<String>.from(m.genres),
           pictures: m.pictures
               .map(
-                (picture) => AndroidTrackPicture(
+                (picture) => TrackMetadataPicture(
                   bytes: picture.bytes,
                   mimeType: picture.mimetype,
                   pictureType: _pictureTypeToAndroidLabel(picture.pictureType),
@@ -244,7 +245,7 @@ class AndroidTrackMetadataUpdate {
               .toList(),
         );
       case RiffMetadata m:
-        return AndroidTrackMetadataUpdate(
+        return TrackMetadataUpdate(
           title: m.title,
           artist: m.artist,
           album: m.album,
@@ -255,7 +256,7 @@ class AndroidTrackMetadataUpdate {
           genres: m.genre == null ? const <String>[] : <String>[m.genre!],
           pictures: m.pictures
               .map(
-                (picture) => AndroidTrackPicture(
+                (picture) => TrackMetadataPicture(
                   bytes: picture.bytes,
                   mimeType: picture.mimetype,
                   pictureType: _pictureTypeToAndroidLabel(picture.pictureType),
@@ -264,6 +265,38 @@ class AndroidTrackMetadataUpdate {
               .toList(),
         );
     }
+  }
+
+  factory TrackMetadataUpdate.fromTrackMetadata(TrackMetadata metadata) {
+    return TrackMetadataUpdate(
+      title: metadata.title,
+      artist: metadata.artist,
+      album: metadata.album,
+      albumArtist: metadata.albumArtist,
+      trackNumber: metadata.trackNumber,
+      trackTotal: metadata.trackTotal,
+      discNumber: metadata.discNumber,
+      date: metadata.date,
+      year: metadata.year,
+      comment: metadata.comment,
+      lyrics: metadata.lyrics,
+      composer: metadata.composer,
+      lyricist: metadata.lyricist,
+      performer: metadata.performer,
+      conductor: metadata.conductor,
+      remixer: metadata.remixer,
+      genres: List<String>.from(metadata.genres),
+      pictures: metadata.pictures
+          .map(
+            (picture) => TrackMetadataPicture(
+              bytes: picture.bytes,
+              mimeType: picture.mimeType,
+              pictureType: picture.pictureType,
+              description: picture.description,
+            ),
+          )
+          .toList(growable: false),
+    );
   }
 
   static String _pictureTypeToAndroidLabel(PictureType type) {
@@ -305,20 +338,23 @@ class AndroidTrackMetadataUpdate {
   }
 }
 
-/// A batch item for updating one track's Android metadata.
-class AndroidTrackMetadataUpdateRequest {
-  const AndroidTrackMetadataUpdateRequest({
-    required this.path,
-    required this.metadata,
-    this.fallbackMediaUri,
+/// A batch item for copying one track's embedded metadata to another track.
+class TrackMetadataCopyRequest {
+  const TrackMetadataCopyRequest({
+    required this.sourcePath,
+    required this.targetPath,
   });
 
-  /// File path or content URI for the track to update.
-  final String path;
+  /// File path or content URI for the source track.
+  final String sourcePath;
 
-  /// The metadata payload to write.
-  final AndroidTrackMetadataUpdate metadata;
+  /// File path or content URI for the target track.
+  final String targetPath;
 
-  /// Optional fallback media URI used by Android-native metadata writers.
-  final String? fallbackMediaUri;
+  Map<String, Object?> toMap() {
+    return <String, Object?>{
+      'sourcePath': sourcePath,
+      'targetPath': targetPath,
+    };
+  }
 }

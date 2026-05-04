@@ -1,8 +1,10 @@
 package com.flutter_rust_bridge.audio_core
 
 import android.content.Context
+import android.content.ContentUris
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.provider.MediaStore
 import com.kyant.taglib.Metadata
 import com.kyant.taglib.Picture
 import com.kyant.taglib.PropertyMap
@@ -11,6 +13,43 @@ import java.io.File
 import java.util.Locale
 
 internal object AndroidMetadataWriter {
+    fun resolveMediaStoreUri(context: Context, path: String): String? {
+        val normalizedPath = path.trim()
+        if (normalizedPath.startsWith("content://")) {
+            return normalizedPath
+        }
+        if (normalizedPath.isEmpty()) {
+            return null
+        }
+
+        val projection = arrayOf(MediaStore.Audio.Media._ID)
+        val selection = "${MediaStore.Audio.Media.DATA} = ?"
+        val selectionArgs = arrayOf(normalizedPath)
+
+        return try {
+            context.contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                selectionArgs,
+                null,
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) {
+                    null
+                } else {
+                    val idIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                    val id = cursor.getLong(idIndex)
+                    ContentUris.withAppendedId(
+                        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                        id,
+                    ).toString()
+                }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun readMetadata(
         context: Context,
         path: String,
@@ -48,6 +87,8 @@ internal object AndroidMetadataWriter {
         metadata: Map<String, Any?>,
     ): Boolean {
         try {
+            val clearBeforeWrite = metadata["clearBeforeWrite"] as? Boolean ?: false
+
             // Step 1:
             // Build the final tag map that will be written back to the file.
             // We do not write only the changed fields blindly. Instead, we first
@@ -58,7 +99,9 @@ internal object AndroidMetadataWriter {
             // Step 2:
             // Pictures are handled separately because TagLib exposes a dedicated
             // savePictures() API. That mirrors the Metadator app's approach.
-            val pictures = parsePictures(metadata["pictures"])
+            val rawPictures = metadata["pictures"]
+            val pictures = parsePictures(rawPictures)
+            val shouldWritePictures = clearBeforeWrite || rawPictures != null
 
             // Step 3:
             // Open the audio file as a writable ParcelFileDescriptor.
@@ -81,12 +124,23 @@ internal object AndroidMetadataWriter {
                 // Step 5:
                 // Write the text metadata (title, artist, album, lyrics, etc.).
                 // The property keys are the TagLib keys, such as TITLE or ARTIST.
-                TagLib.savePropertyMap(fd, propertyMap = mergedPropertyMap)
+                val propertySaved = TagLib.savePropertyMap(fd, propertyMap = mergedPropertyMap)
+                if (!propertySaved) {
+                    throw MetadataWriteException(
+                        code = "WRITE_FAILED",
+                        message = "TagLib failed to save metadata properties.",
+                        details = mapOf(
+                            "path" to path,
+                            "fallbackMediaUri" to metadata["fallbackMediaUri"]?.toString(),
+                            "propertyKeys" to mergedPropertyMap.keys.sorted(),
+                        ),
+                    )
+                }
 
-                if (!pictures.isNullOrEmpty()) {
+                if (shouldWritePictures) {
                     // Step 6:
                     // Artwork is written in a second pass. If no artwork was selected,
-                    // we simply leave the existing embedded pictures untouched.
+                    // we either replace the artwork or clear it during a full copy.
                     val pictureFd = openWritableFileDescriptor(context, path, metadata)
                         ?: throw MetadataWriteException(
                             code = "OPEN_FAILED",
@@ -99,10 +153,21 @@ internal object AndroidMetadataWriter {
                         // Step 7:
                         // Each picture is converted into TagLib's Picture model and then
                         // saved to the file as embedded artwork.
-                        TagLib.savePictures(
+                        val picturesSaved = TagLib.savePictures(
                             picturesFd,
-                            pictures = pictures.toTypedArray(),
+                            pictures = (pictures ?: emptyList()).toTypedArray(),
                         )
+                        if (!picturesSaved) {
+                            throw MetadataWriteException(
+                                code = "WRITE_FAILED",
+                                message = "TagLib failed to save metadata pictures.",
+                                details = mapOf(
+                                    "path" to path,
+                                    "fallbackMediaUri" to metadata["fallbackMediaUri"]?.toString(),
+                                    "pictureCount" to (pictures?.size ?: 0),
+                                ),
+                            )
+                        }
                     }
                 }
             }
@@ -132,12 +197,15 @@ internal object AndroidMetadataWriter {
         path: String,
         metadata: Map<String, Any?>,
     ): PropertyMap {
+        val clearBeforeWrite = metadata["clearBeforeWrite"] as? Boolean ?: false
         // Start with the existing tags from the file so we preserve fields that
         // are not part of the current edit session.
         val merged = HashMap<String, Array<String>>()
-        val currentPropertyMap = readCurrentPropertyMap(context, path, metadata)
-        if (currentPropertyMap != null) {
-            merged.putAll(currentPropertyMap)
+        if (!clearBeforeWrite) {
+            val currentPropertyMap = readCurrentPropertyMap(context, path, metadata)
+            if (currentPropertyMap != null) {
+                merged.putAll(currentPropertyMap)
+            }
         }
 
         // These helpers map our Flutter-side keys to TagLib keys.
@@ -320,21 +388,55 @@ internal object AndroidMetadataWriter {
             }
         }
 
+        val fallbackMediaUri = metadata["fallbackMediaUri"]
+            ?.toString()
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() && it.startsWith("content://") }
+        val resolvedMediaUri = resolveMediaStoreUri(context, path)
+            ?.takeIf { it != path }
+        val preferredContentUri = fallbackMediaUri ?: resolvedMediaUri
+        val preferContentUriForWrite = mode.contains("w") && preferredContentUri != null
+
         val candidates = buildList {
-            add(path)
-            // When the active playback path is a temporary/local alias, the media
-            // library URI is a fallback that can still be approved for writing.
-            metadata["fallbackMediaUri"]
-                ?.toString()
-                ?.trim()
-                ?.takeIf { it.isNotEmpty() }
-                ?.let { add(it) }
-        }
+            // Android 10 may deny direct /storage path access even when the
+            // same file is available through MediaStore, so include the native
+            // DATA -> content:// lookup as an implicit fallback.
+            if (preferContentUriForWrite) {
+                add(preferredContentUri!!)
+                if (path != preferredContentUri) {
+                    add(path)
+                }
+            } else {
+                add(path)
+                if (preferredContentUri != null && path != preferredContentUri) {
+                    add(preferredContentUri)
+                }
+            }
+        }.distinct()
 
         var lastError: Exception? = null
         for (candidate in candidates) {
             try {
                 return openTarget(candidate)
+            } catch (e: android.app.RecoverableSecurityException) {
+                if (mode.contains("w")) {
+                    throw e
+                }
+                lastError = e
+            } catch (e: SecurityException) {
+                if (mode.contains("w") && candidate.startsWith("content://")) {
+                    throw e
+                }
+                lastError = e
+            } catch (e: java.io.FileNotFoundException) {
+                if (
+                    mode.contains("w") &&
+                    candidate.startsWith("content://") &&
+                    e.message?.contains("Permission denied", ignoreCase = true) == true
+                ) {
+                    throw SecurityException("Write permission required for $candidate", e)
+                }
+                lastError = e
             } catch (e: Exception) {
                 lastError = e
             }
@@ -349,6 +451,7 @@ internal object AndroidMetadataWriter {
                     "mode" to mode,
                     "exception" to lastError.javaClass.name,
                     "fallbackMediaUri" to metadata["fallbackMediaUri"]?.toString(),
+                    "resolvedMediaUri" to resolvedMediaUri,
                 ),
                 cause = lastError,
             )

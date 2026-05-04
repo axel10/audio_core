@@ -9,6 +9,7 @@ import '../fft_processor.dart';
 import '../rust/api/simple/equalizer.dart';
 import '../rust/api/simple_api.dart' as rust;
 import '../track_metadata.dart';
+import '../track_metadata_update.dart';
 import 'audio_engine_interface.dart';
 import 'rust_metadata_bridge.dart';
 import 'track_artwork_support.dart';
@@ -439,6 +440,26 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
+  Future<List<bool>> copyTrackMetadataBatch({
+    required List<TrackMetadataCopyRequest> requests,
+  }) async {
+    final results = <bool>[];
+    for (final request in requests) {
+      final sourcePath = _normalizePath(request.sourcePath);
+      final targetPath = _normalizePath(request.targetPath);
+      results.add(
+        await _withAppleFileWriteAccess(targetPath, () async {
+          final metadata = await rust.getTrackMetadata(path: sourcePath);
+          await rust.removeAllTags(path: targetPath);
+          await rust.updateTrackMetadata(path: targetPath, metadata: metadata);
+          return true;
+        }).catchError((_) => false),
+      );
+    }
+    return results;
+  }
+
+  @override
   Future<TrackMetadata> getTrackMetadata({
     required String path,
     String? fallbackMediaUri,
@@ -499,9 +520,9 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
         return;
       }
     } else if (event is List) {
-      _latestFftCache = event.map((e) => (e as num).toDouble()).toList(
-        growable: false,
-      );
+      _latestFftCache = event
+          .map((e) => (e as num).toDouble())
+          .toList(growable: false);
       return;
     }
 

@@ -9,7 +9,8 @@ import 'playlist_models.dart';
 import 'player_controller.dart';
 import 'playlist_controller.dart';
 import 'visualizer_controller.dart';
-import 'rust/api/simple_api.dart' hide FadeSettings, FadeMode;
+import 'rust/api/simple_api.dart'
+    hide FadeSettings, FadeMode, TrackMetadataUpdate;
 import 'rust/frb_generated.dart';
 import 'fft_processor.dart';
 import 'player_state_snapshot.dart';
@@ -18,10 +19,10 @@ import 'audio_engine/audio_engine_interface.dart';
 import 'audio_engine/apple_audio_engine.dart';
 import 'audio_engine/android_audio_engine.dart';
 import 'audio_engine/rust_audio_engine.dart';
-import 'android_track_metadata.dart';
 import 'android_media_library.dart';
 import 'track_artwork.dart';
 import 'track_metadata.dart';
+import 'track_metadata_update.dart';
 
 export 'player_controller.dart';
 export 'playlist_controller.dart';
@@ -1022,7 +1023,8 @@ class AudioCoreController extends ChangeNotifier
   Future<bool> _updateMetadataAtPath({
     required String path,
     String? fallbackMediaUri,
-    required AndroidTrackMetadataUpdate metadata,
+    required TrackMetadataUpdate metadata,
+    bool clearBeforeWrite = false,
     bool managePlaybackSync = true,
   }) async {
     final file = path.startsWith('content://') ? null : File(path);
@@ -1044,11 +1046,16 @@ class AudioCoreController extends ChangeNotifier
         await Future.delayed(const Duration(milliseconds: 200));
       }
 
+      if (clearBeforeWrite && !Platform.isAndroid) {
+        await _engine.removeAllTags(path: path);
+      }
+
       final success = await _engine.updateTrackMetadata(
         path: path,
         metadata: <String, Object?>{
-          ...metadata.toMap(),
+          ...metadata.toMap(includeEmptyCollections: clearBeforeWrite),
           'fallbackMediaUri': fallbackMediaUri,
+          if (clearBeforeWrite) 'clearBeforeWrite': true,
         },
       );
       if (!success) {
@@ -1092,7 +1099,8 @@ class AudioCoreController extends ChangeNotifier
   /// methods to release file handles before writing.
   Future<bool> updateMetadata(
     AudioTrack track, {
-    required AndroidTrackMetadataUpdate metadata,
+    required TrackMetadataUpdate metadata,
+    bool clearBeforeWrite = false,
   }) async {
     final path = _resolveTrackPath(track);
     final fallbackMediaUri = track.metadataValue<String>('mediaUri');
@@ -1100,6 +1108,7 @@ class AudioCoreController extends ChangeNotifier
       path: path,
       fallbackMediaUri: fallbackMediaUri,
       metadata: metadata,
+      clearBeforeWrite: clearBeforeWrite,
     );
   }
 
@@ -1137,19 +1146,64 @@ class AudioCoreController extends ChangeNotifier
     );
   }
 
-  /// Updates metadata for multiple Android tracks in sequence.
-  Future<List<bool>> updateMetadataBatch(
-    List<AndroidTrackMetadataUpdateRequest> updates,
+  Future<bool> copyMetadata(AudioTrack source, AudioTrack target) async {
+    final results = await copyMetadataToMany(source, <AudioTrack>[target]);
+    return results.isNotEmpty && results.first;
+  }
+
+  Future<List<bool>> copyMetadataToMany(
+    AudioTrack source,
+    List<AudioTrack> targets,
   ) async {
-    final results = <bool>[];
-    final needsSync = updates.any((update) {
-      if (player.currentPath != update.path) {
+    if (targets.isEmpty) return const <bool>[];
+
+    final sourcePath = _resolveTrackPath(source);
+    final requests = targets
+        .map(
+          (target) => TrackMetadataCopyRequest(
+            sourcePath: sourcePath,
+            targetPath: _resolveTrackPath(target),
+          ),
+        )
+        .toList(growable: false);
+
+    return _copyMetadataBatch(requests);
+  }
+
+  Future<List<bool>> copyMetadataPairs(
+    List<AudioTrack> sources,
+    List<AudioTrack> targets,
+  ) async {
+    if (sources.length != targets.length) {
+      throw ArgumentError(
+        'Source and target counts must match. '
+        'Got ${sources.length} source(s) and ${targets.length} target(s).',
+      );
+    }
+    if (sources.isEmpty) return const <bool>[];
+
+    final requests = <TrackMetadataCopyRequest>[
+      for (var i = 0; i < sources.length; i++)
+        TrackMetadataCopyRequest(
+          sourcePath: _resolveTrackPath(sources[i]),
+          targetPath: _resolveTrackPath(targets[i]),
+        ),
+    ];
+
+    return _copyMetadataBatch(requests);
+  }
+
+  Future<List<bool>> _copyMetadataBatch(
+    List<TrackMetadataCopyRequest> requests,
+  ) async {
+    final needsSync = requests.any((request) {
+      if (player.currentPath != request.targetPath) {
         return false;
       }
       if (Platform.isAndroid) {
         return true;
       }
-      final file = File(update.path);
+      final file = File(request.targetPath);
       return file.existsSync() && file.lengthSync() >= 60 * 1024 * 1024;
     });
 
@@ -1161,18 +1215,20 @@ class AudioCoreController extends ChangeNotifier
         preparedForWrite = true;
       }
 
-      for (final update in updates) {
-        results.add(
-          await _updateMetadataAtPath(
-            path: update.path,
-            fallbackMediaUri: update.fallbackMediaUri,
-            metadata: update.metadata,
-            managePlaybackSync: false,
-          ),
-        );
-      }
-
+      final results = await _engine.copyTrackMetadataBatch(requests: requests);
+      notifyListeners();
       return results;
+    } catch (e) {
+      final errorText = e is PlatformException
+          ? [
+              if (e.code.isNotEmpty) e.code,
+              if (e.message != null && e.message!.isNotEmpty) e.message!,
+              if (e.details != null) 'details: ${e.details}',
+            ].join(' | ')
+          : e.toString();
+      debugPrint('[AudioCore][Metadata] copyMetadataBatch failed: $errorText');
+      player.setError('Metadata batch copy failed: $errorText');
+      return List<bool>.filled(requests.length, false, growable: false);
     } finally {
       if (preparedForWrite) {
         await _engine.finishFileWrite().catchError((_) {});

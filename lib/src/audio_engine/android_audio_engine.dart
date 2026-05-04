@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import '../fft_processor.dart';
 import '../rust/api/simple/equalizer.dart';
 import '../track_metadata.dart';
+import '../track_metadata_update.dart';
 import 'audio_engine_interface.dart';
 import 'track_artwork_support.dart';
 
@@ -432,6 +433,25 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
       'metadata': metadata,
     });
     return success ?? false;
+  }
+
+  @override
+  Future<List<bool>> copyTrackMetadataBatch({
+    required List<TrackMetadataCopyRequest> requests,
+  }) async {
+    final List<dynamic>? rawResults = await _channel
+        .invokeMethod<List<dynamic>>(
+          'copyTrackMetadataBatch',
+          <String, Object?>{
+            'requests': requests
+                .map((request) => request.toMap())
+                .toList(growable: false),
+          },
+        );
+    if (rawResults == null) {
+      return List<bool>.filled(requests.length, false, growable: false);
+    }
+    return rawResults.map((entry) => entry == true).toList(growable: false);
   }
 
   @override

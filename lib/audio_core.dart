@@ -1,6 +1,7 @@
 library;
 
-export 'src/rust/api/simple_api.dart' hide FadeSettings, FadeMode;
+export 'src/rust/api/simple_api.dart'
+    hide FadeSettings, FadeMode, TrackMetadataUpdate;
 export 'src/rust/frb_generated.dart' show RustLib;
 
 export 'src/visualizer_player_controller.dart';
@@ -13,7 +14,7 @@ export 'src/random_playback_models.dart';
 export 'src/visualizer_output_config.dart';
 export 'src/visualizer_output_stream.dart';
 export 'src/visualizer_output_manager.dart';
-export 'src/android_track_metadata.dart';
+export 'src/track_metadata_update.dart';
 export 'src/track_metadata.dart';
 export 'src/track_artwork.dart';
 export 'src/android_media_library.dart';

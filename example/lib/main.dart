@@ -330,6 +330,14 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
     if (tracks.isEmpty) return;
 
     _randomLabKey.currentState?.addTracksToLibrary(tracks);
+
+    // Keep the original AudioTrack objects when we already have them so
+    // platform-specific metadata such as Android's mediaUri survives.
+    if (tracks.length == 1) {
+      await _controller.playTrack(tracks.first, fadeSetting: fadeSetting);
+      return;
+    }
+
     await _controller.playPaths(
       tracks.map((track) => track.uri).toList(),
       autoPlayFirst: true,

@@ -172,10 +172,24 @@ class MyExoplayerPlugin :
     )
 
     private data class PendingMetadataWrite(
-        val path: String,
-        val metadata: Map<String, Any?>,
+        val updates: List<PendingMetadataWriteItem>,
         val result: Result,
+        val returnBatchResults: Boolean,
     )
+
+    private data class PendingMetadataWriteItem(
+        val path: String,
+        val metadata: Map<String, Any?>? = null,
+        val sourcePath: String? = null,
+    )
+
+    private sealed class MetadataBatchWriteResult {
+        data class Completed(val results: List<Boolean>) : MetadataBatchWriteResult()
+
+        data class PermissionRequired(
+            val exception: Exception,
+        ) : MetadataBatchWriteResult()
+    }
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         instance = this
@@ -461,6 +475,18 @@ class MyExoplayerPlugin :
                 // platform bridge, then delegates the real file rewrite work to
                 // AndroidMetadataWriter, which uses TagLib under the hood.
                 handleUpdateTrackMetadata(path, metadata, result)
+                return
+            }
+            "updateTrackMetadataBatch" -> {
+                val rawUpdates = call.argument<List<Map<String, Any?>>>("updates")
+                    ?: return result.error("INVALID_ARGUMENT", "Updates are null", null)
+                handleUpdateTrackMetadataBatch(rawUpdates, result)
+                return
+            }
+            "copyTrackMetadataBatch" -> {
+                val rawRequests = call.argument<List<Map<String, Any?>>>("requests")
+                    ?: return result.error("INVALID_ARGUMENT", "Requests are null", null)
+                handleCopyTrackMetadataBatch(rawRequests, result)
                 return
             }
             "getTrackMetadata" -> {
@@ -1360,40 +1386,86 @@ class MyExoplayerPlugin :
         metadata: Map<String, Any?>,
         result: Result,
     ) {
+        handleUpdateTrackMetadataBatch(
+            updates = listOf(
+                mapOf(
+                    "path" to path,
+                    "metadata" to metadata,
+                ),
+            ),
+            result = result,
+            returnBatchResults = false,
+        )
+    }
+
+    private fun handleUpdateTrackMetadataBatch(
+        updates: List<Map<String, Any?>>,
+        result: Result,
+        returnBatchResults: Boolean = true,
+    ) {
         val safeContext = context ?: run {
             result.error("INTERNAL_ERROR", "Context is null", null)
             return
         }
 
-        try {
-            // This is the actual metadata rewrite step.
-            // AndroidMetadataWriter will:
-            // 1) open the file as a descriptor,
-            // 2) read current tags,
-            // 3) merge Flutter's updates,
-            // 4) call TagLib.savePropertyMap/savePictures,
-            // 5) throw recoverable security errors if Android needs user approval.
-            val success = AndroidMetadataWriter.updateMetadata(safeContext, path, metadata)
-            if (success) {
-                result.success(true)
+        val normalizedUpdates = updates.mapNotNull { rawUpdate ->
+            val path = rawUpdate["path"]?.toString()?.trim()
+            val metadata = (rawUpdate["metadata"] as? Map<*, *>)
+                ?.entries
+                ?.associate { (key, value) -> key.toString() to value }
+            if (path.isNullOrEmpty() || metadata == null) {
+                null
             } else {
-                result.error(
-                    "WRITE_FAILED",
-                    "Failed to update audio metadata.",
-                    mapOf(
-                        "path" to path,
-                        "metadataKeys" to metadata.keys.sorted(),
-                    ),
-                )
+                PendingMetadataWriteItem(path, metadata)
+            }
+        }
+
+        if (normalizedUpdates.isEmpty()) {
+            result.error("INVALID_ARGUMENT", "Updates are empty.", null)
+            return
+        }
+
+        try {
+            when (val batchResult = performMetadataBatchWrite(
+                safeContext,
+                normalizedUpdates,
+                failOnItemError = !returnBatchResults,
+            )) {
+                is MetadataBatchWriteResult.Completed -> {
+                    if (returnBatchResults) {
+                        result.success(batchResult.results)
+                    } else {
+                        result.success(batchResult.results.firstOrNull() == true)
+                    }
+                }
+
+                is MetadataBatchWriteResult.PermissionRequired -> {
+                    requestWritePermission(
+                        updates = normalizedUpdates,
+                        result = result,
+                        exception = batchResult.exception,
+                        returnBatchResults = returnBatchResults,
+                    )
+                }
             }
         } catch (e: MetadataWriteException) {
             val cause = e.cause
             if (cause is android.app.RecoverableSecurityException) {
-                requestWritePermission(path, metadata, result, cause)
+                requestWritePermission(
+                    updates = normalizedUpdates,
+                    result = result,
+                    exception = cause,
+                    returnBatchResults = returnBatchResults,
+                )
                 return
             }
             if (cause is SecurityException) {
-                requestWritePermission(path, metadata, result, cause)
+                requestWritePermission(
+                    updates = normalizedUpdates,
+                    result = result,
+                    exception = cause,
+                    returnBatchResults = returnBatchResults,
+                )
                 return
             }
 
@@ -1403,27 +1475,178 @@ class MyExoplayerPlugin :
                 e.details + mapOf("exception" to (cause?.javaClass?.name ?: e.javaClass.name)),
             )
         } catch (e: android.app.RecoverableSecurityException) {
-            requestWritePermission(path, metadata, result, e)
+            requestWritePermission(
+                updates = normalizedUpdates,
+                result = result,
+                exception = e,
+                returnBatchResults = returnBatchResults,
+            )
         } catch (e: SecurityException) {
-            requestWritePermission(path, metadata, result, e)
+            requestWritePermission(
+                updates = normalizedUpdates,
+                result = result,
+                exception = e,
+                returnBatchResults = returnBatchResults,
+            )
         } catch (e: Exception) {
             e.printStackTrace()
             result.error(
                 "WRITE_FAILED",
                 e.message,
                 mapOf(
-                    "path" to path,
+                    "paths" to normalizedUpdates.map { it.path },
                     "exception" to e::class.java.name,
                 ),
             )
         }
     }
 
+    private fun handleCopyTrackMetadataBatch(
+        requests: List<Map<String, Any?>>,
+        result: Result,
+    ) {
+        val safeContext = context ?: run {
+            result.error("INTERNAL_ERROR", "Context is null", null)
+            return
+        }
+
+        val normalizedRequests = requests.mapNotNull { rawRequest ->
+            val sourcePath = rawRequest["sourcePath"]?.toString()?.trim()
+            val targetPath = rawRequest["targetPath"]?.toString()?.trim()
+            if (sourcePath.isNullOrEmpty() || targetPath.isNullOrEmpty()) {
+                null
+            } else {
+                PendingMetadataWriteItem(
+                    path = targetPath,
+                    sourcePath = sourcePath,
+                )
+            }
+        }
+
+        if (normalizedRequests.isEmpty()) {
+            result.error("INVALID_ARGUMENT", "Requests are empty.", null)
+            return
+        }
+
+        try {
+            when (val batchResult = performMetadataBatchWrite(
+                safeContext,
+                normalizedRequests,
+            )) {
+                is MetadataBatchWriteResult.Completed -> {
+                    result.success(batchResult.results)
+                }
+
+                is MetadataBatchWriteResult.PermissionRequired -> {
+                    requestWritePermission(
+                        updates = normalizedRequests,
+                        result = result,
+                        exception = batchResult.exception,
+                        returnBatchResults = true,
+                    )
+                }
+            }
+        } catch (e: android.app.RecoverableSecurityException) {
+            requestWritePermission(
+                updates = normalizedRequests,
+                result = result,
+                exception = e,
+                returnBatchResults = true,
+            )
+        } catch (e: SecurityException) {
+            requestWritePermission(
+                updates = normalizedRequests,
+                result = result,
+                exception = e,
+                returnBatchResults = true,
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            result.error(
+                "COPY_FAILED",
+                e.message,
+                mapOf(
+                    "paths" to normalizedRequests.map { it.path },
+                    "exception" to e::class.java.name,
+                ),
+            )
+        }
+    }
+
+    private fun performMetadataBatchWrite(
+        safeContext: Context,
+        updates: List<PendingMetadataWriteItem>,
+        failOnItemError: Boolean = false,
+    ): MetadataBatchWriteResult {
+        val results = ArrayList<Boolean>(updates.size)
+        for (update in updates) {
+            try {
+                val metadata = if (update.sourcePath != null) {
+                    AndroidMetadataWriter.readMetadata(
+                        safeContext,
+                        update.sourcePath,
+                    ) + mapOf("clearBeforeWrite" to true)
+                } else {
+                    update.metadata ?: emptyMap()
+                }
+                NativeLog.d(
+                    "AudioCore",
+                    "metadata batch write start path=${update.path} " +
+                        "sourcePath=${update.sourcePath} " +
+                        "fallbackMediaUri=${metadata["fallbackMediaUri"]}",
+                )
+                val success = AndroidMetadataWriter.updateMetadata(
+                    safeContext,
+                    update.path,
+                    metadata,
+                )
+                NativeLog.d(
+                    "AudioCore",
+                    "metadata batch write result path=${update.path} success=$success",
+                )
+                results.add(success)
+            } catch (e: MetadataWriteException) {
+                val cause = e.cause
+                if (cause is android.app.RecoverableSecurityException) {
+                    return MetadataBatchWriteResult.PermissionRequired(cause)
+                }
+                if (cause is SecurityException) {
+                    return MetadataBatchWriteResult.PermissionRequired(cause)
+                }
+                NativeLog.e(
+                    "AudioCore",
+                    "metadata write failed path=${update.path} code=${e.code} " +
+                        "message=${e.message} details=${e.details}",
+                    e,
+                )
+                if (failOnItemError) {
+                    throw e
+                }
+                results.add(false)
+            } catch (e: android.app.RecoverableSecurityException) {
+                return MetadataBatchWriteResult.PermissionRequired(e)
+            } catch (e: SecurityException) {
+                return MetadataBatchWriteResult.PermissionRequired(e)
+            } catch (e: Exception) {
+                NativeLog.e(
+                    "AudioCore",
+                    "metadata write failed path=${update.path} message=${e.message}",
+                    e,
+                )
+                if (failOnItemError) {
+                    throw e
+                }
+                results.add(false)
+            }
+        }
+        return MetadataBatchWriteResult.Completed(results)
+    }
+
     private fun requestWritePermission(
-        path: String,
-        metadata: Map<String, Any?>,
+        updates: List<PendingMetadataWriteItem>,
         result: Result,
         exception: Exception,
+        returnBatchResults: Boolean,
     ) {
         if (pendingMetadataWrite != null) {
             result.error(
@@ -1447,32 +1670,23 @@ class MyExoplayerPlugin :
             return
         }
 
-        val fallbackMediaUri = metadata["fallbackMediaUri"]
-            ?.toString()
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() }
-        val requestUri = when {
-            path.startsWith("content://") -> path
-            // If the player track uses a file path, we try to fall back to the
-            // MediaStore content URI. Android's permission dialog can approve
-            // rewrites against that URI on newer versions.
-            fallbackMediaUri?.startsWith("content://") == true -> fallbackMediaUri
-            else -> null
-        }
+        val requestUris = updates.mapNotNull { update ->
+            resolveRequestUri(update.path, update.metadata ?: emptyMap())
+        }.distinct()
 
-        if (requestUri == null) {
+        if (requestUris.isEmpty()) {
             result.error(
                 "WRITE_PERMISSION_REQUIRED",
                 "This media item cannot be approved for direct rewrite because no MediaStore URI is available.",
-                mapOf("path" to path),
+                mapOf("paths" to updates.map { it.path }),
             )
             return
         }
 
-        val uri = Uri.parse(requestUri)
         val intentSender = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             // Android 11+ can request write access directly through MediaStore.
-            MediaStore.createWriteRequest(safeContext.contentResolver, listOf(uri)).intentSender
+            val uris = requestUris.map(Uri::parse)
+            MediaStore.createWriteRequest(safeContext.contentResolver, uris).intentSender
         } else if (exception is android.app.RecoverableSecurityException) {
             // Older versions use RecoverableSecurityException's built-in action.
             exception.userAction.actionIntent.intentSender
@@ -1485,7 +1699,11 @@ class MyExoplayerPlugin :
             return
         }
 
-        pendingMetadataWrite = PendingMetadataWrite(path, metadata, result)
+        pendingMetadataWrite = PendingMetadataWrite(
+            updates = updates,
+            result = result,
+            returnBatchResults = returnBatchResults,
+        )
         try {
             safeActivity.startIntentSenderForResult(
                 intentSender,
@@ -1512,7 +1730,7 @@ class MyExoplayerPlugin :
             pending.result.error(
                 "WRITE_PERMISSION_DENIED",
                 "User denied permission to modify the media item.",
-                mapOf("path" to pending.path),
+                mapOf("paths" to pending.updates.map { it.path }),
             )
             return true
         }
@@ -1523,19 +1741,26 @@ class MyExoplayerPlugin :
         }
 
         try {
-            val success = AndroidMetadataWriter.updateMetadata(
+            when (val batchResult = performMetadataBatchWrite(
                 safeContext,
-                pending.path,
-                pending.metadata,
-            )
-            if (success) {
-                pending.result.success(true)
-            } else {
-                pending.result.error(
-                    "WRITE_FAILED",
-                    "Failed to update audio metadata.",
-                    mapOf("path" to pending.path),
-                )
+                pending.updates,
+                failOnItemError = !pending.returnBatchResults,
+            )) {
+                is MetadataBatchWriteResult.Completed -> {
+                    if (pending.returnBatchResults) {
+                        pending.result.success(batchResult.results)
+                    } else {
+                        pending.result.success(batchResult.results.firstOrNull() == true)
+                    }
+                }
+
+                is MetadataBatchWriteResult.PermissionRequired -> {
+                    pending.result.error(
+                        "WRITE_PERMISSION_DENIED",
+                        "Additional permission is required to modify one or more media items.",
+                        mapOf("paths" to pending.updates.map { it.path }),
+                    )
+                }
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -1543,13 +1768,28 @@ class MyExoplayerPlugin :
                 "WRITE_FAILED",
                 e.message,
                 mapOf(
-                    "path" to pending.path,
+                    "paths" to pending.updates.map { it.path },
                     "exception" to e::class.java.name,
                 ),
             )
         }
 
         return true
+    }
+
+    private fun resolveRequestUri(
+        path: String,
+        metadata: Map<String, Any?>,
+    ): String? {
+        val fallbackMediaUri = metadata["fallbackMediaUri"]
+            ?.toString()
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        return when {
+            path.startsWith("content://") -> path
+            fallbackMediaUri?.startsWith("content://") == true -> fallbackMediaUri
+            else -> context?.let { AndroidMetadataWriter.resolveMediaStoreUri(it, path) }
+        }
     }
 
     private fun ensureLocalPath(path: String): Pair<String, Boolean> {

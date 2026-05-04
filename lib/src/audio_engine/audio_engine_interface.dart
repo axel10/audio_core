@@ -4,6 +4,7 @@ import '../fft_processor.dart';
 import '../track_artwork.dart';
 import '../rust/api/simple/equalizer.dart';
 import '../track_metadata.dart';
+import '../track_metadata_update.dart';
 
 /// Define a snapshot for highly accurate position synchronization.
 class PositionSnapshot {
@@ -106,6 +107,14 @@ abstract class AudioEngine {
     required String path,
     required Map<String, Object?> metadata,
   });
+
+  Future<List<bool>> copyTrackMetadataBatch({
+    required List<TrackMetadataCopyRequest> requests,
+  }) async {
+    throw UnimplementedError(
+      'copyTrackMetadataBatch is not implemented on this platform.',
+    );
+  }
 
   Future<TrackMetadata> getTrackMetadata({
     required String path,

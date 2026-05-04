@@ -4,6 +4,7 @@ import '../fft_processor.dart';
 import '../rust/api/simple_api.dart' as rust;
 import '../rust/api/simple/equalizer.dart';
 import '../track_metadata.dart';
+import '../track_metadata_update.dart';
 import 'audio_engine_interface.dart';
 import 'pcm_waveform_support.dart';
 import 'rust_metadata_bridge.dart';
@@ -216,6 +217,27 @@ class RustAudioEngine
       metadata: trackMetadataUpdateFromMap(metadata),
     );
     return true;
+  }
+
+  @override
+  Future<List<bool>> copyTrackMetadataBatch({
+    required List<TrackMetadataCopyRequest> requests,
+  }) async {
+    final results = <bool>[];
+    for (final request in requests) {
+      try {
+        final metadata = await rust.getTrackMetadata(path: request.sourcePath);
+        await rust.removeAllTags(path: request.targetPath);
+        await rust.updateTrackMetadata(
+          path: request.targetPath,
+          metadata: metadata,
+        );
+        results.add(true);
+      } catch (_) {
+        results.add(false);
+      }
+    }
+    return results;
   }
 
   @override
