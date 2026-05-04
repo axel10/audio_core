@@ -1112,6 +1112,110 @@ class AudioCoreController extends ChangeNotifier
     );
   }
 
+  bool _needsMetadataWriteSyncForPath(String path) {
+    if (player.currentPath != path) {
+      return false;
+    }
+    if (Platform.isAndroid) {
+      return true;
+    }
+    final file = path.startsWith('content://') ? null : File(path);
+    return file != null &&
+        file.existsSync() &&
+        file.lengthSync() >= 60 * 1024 * 1024;
+  }
+
+  Future<bool> _writeMetadataRequest(
+    TrackMetadataWriteRequest request, {
+    bool managePlaybackSync = true,
+  }) async {
+    return _updateMetadataAtPath(
+      path: request.path,
+      fallbackMediaUri: request.fallbackMediaUri,
+      metadata: request.metadata,
+      clearBeforeWrite: request.clearBeforeWrite,
+      managePlaybackSync: managePlaybackSync,
+    );
+  }
+
+  Future<List<bool>> updateMetadataBatch(
+    List<TrackMetadataWriteRequest> requests,
+  ) async {
+    if (requests.isEmpty) return const <bool>[];
+
+    final normalizedRequests = <TrackMetadataWriteRequest>[];
+    final normalizedIndexes = <int>[];
+    final finalResults = List<bool>.filled(
+      requests.length,
+      false,
+      growable: false,
+    );
+    for (var i = 0; i < requests.length; i++) {
+      final request = requests[i];
+      final path = request.path.trim();
+      if (path.isEmpty) {
+        continue;
+      }
+      normalizedRequests.add(
+        TrackMetadataWriteRequest(
+          path: path,
+          metadata: request.metadata,
+          clearBeforeWrite: request.clearBeforeWrite,
+          fallbackMediaUri: request.fallbackMediaUri,
+        ),
+      );
+      normalizedIndexes.add(i);
+    }
+
+    if (normalizedRequests.isEmpty) {
+      return finalResults;
+    }
+
+    final needsSync = normalizedRequests.any((request) {
+      return _needsMetadataWriteSyncForPath(request.path);
+    });
+
+    var preparedForWrite = false;
+    try {
+      if (needsSync) {
+        await _engine.prepareForFileWrite();
+        await Future.delayed(const Duration(milliseconds: 200));
+        preparedForWrite = true;
+      }
+
+      final batchSupported = await _engine.supportsBatchMetadataWrite();
+      final operationResults = batchSupported
+          ? await _engine.updateTrackMetadataBatch(requests: normalizedRequests)
+          : [
+              for (final request in normalizedRequests)
+                await _writeMetadataRequest(request, managePlaybackSync: false),
+            ];
+
+      for (var i = 0; i < normalizedIndexes.length; i++) {
+        finalResults[normalizedIndexes[i]] = operationResults[i];
+      }
+      notifyListeners();
+      return finalResults;
+    } catch (e) {
+      final errorText = e is PlatformException
+          ? [
+              if (e.code.isNotEmpty) e.code,
+              if (e.message != null && e.message!.isNotEmpty) e.message!,
+              if (e.details != null) 'details: ${e.details}',
+            ].join(' | ')
+          : e.toString();
+      debugPrint(
+        '[AudioCore][Metadata] updateMetadataBatch failed: $errorText',
+      );
+      player.setError('Metadata batch update failed: $errorText');
+      return finalResults;
+    } finally {
+      if (preparedForWrite) {
+        await _engine.finishFileWrite().catchError((_) {});
+      }
+    }
+  }
+
   /// Reads metadata for the current track or an explicit file path.
   ///
   /// If [path] is omitted, this uses the currently playing track.

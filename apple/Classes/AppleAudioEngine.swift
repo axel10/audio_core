@@ -320,6 +320,13 @@ final class AppleAudioEngine {
     preparedAccessPaths.insert(path)
   }
 
+  func prepareForFileWrite(paths: [String]) throws {
+    let normalizedPaths = Self.normalizedUniquePaths(paths)
+    for path in normalizedPaths {
+      try prepareForFileWrite(path: path)
+    }
+  }
+
   func finishFileWrite(path: String? = nil) throws {
     debugPrint(
       "[AppleAudioEngine] finishFileWrite request path=\(path ?? "nil") " +
@@ -343,6 +350,13 @@ final class AppleAudioEngine {
     }
     self.pendingEdit = nil
     preparedAccessPaths.remove(pendingEdit.path)
+  }
+
+  func finishFileWrite(paths: [String]) throws {
+    let normalizedPaths = Self.normalizedUniquePaths(paths)
+    for path in normalizedPaths {
+      try finishFileWrite(path: path)
+    }
   }
 
   func registerPersistentAccess(path: String) -> Bool {
@@ -435,6 +449,25 @@ final class AppleAudioEngine {
       return url.standardizedFileURL.resolvingSymlinksInPath().path
     }
     return URL(fileURLWithPath: trimmed).standardizedFileURL.resolvingSymlinksInPath().path
+  }
+
+  private static func normalizedUniquePaths(_ paths: [String]) -> [String] {
+    var seen = Set<String>()
+    var result: [String] = []
+    for path in paths {
+      let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+      let url: URL
+      if trimmed.hasPrefix("file://"), let parsed = URL(string: trimmed) {
+        url = parsed
+      } else {
+        url = URL(fileURLWithPath: trimmed)
+      }
+      let normalized = url.standardizedFileURL.resolvingSymlinksInPath().path
+      if seen.insert(normalized).inserted {
+        result.append(normalized)
+      }
+    }
+    return result
   }
 
   private func publicDeck() -> PlaybackDeck? {

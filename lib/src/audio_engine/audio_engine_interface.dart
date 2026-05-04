@@ -108,6 +108,16 @@ abstract class AudioEngine {
     required Map<String, Object?> metadata,
   });
 
+  Future<List<bool>> updateTrackMetadataBatch({
+    required List<TrackMetadataWriteRequest> requests,
+  }) async {
+    throw UnimplementedError(
+      'updateTrackMetadataBatch is not implemented on this platform.',
+    );
+  }
+
+  Future<bool> supportsBatchMetadataWrite() async => true;
+
   Future<List<bool>> copyTrackMetadataBatch({
     required List<TrackMetadataCopyRequest> requests,
   }) async {

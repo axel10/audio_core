@@ -436,6 +436,37 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
+  Future<List<bool>> updateTrackMetadataBatch({
+    required List<TrackMetadataWriteRequest> requests,
+  }) async {
+    final List<dynamic>? rawResults = await _channel
+        .invokeMethod<List<dynamic>>(
+          'updateTrackMetadataBatch',
+          <String, Object?>{
+            'updates': requests
+                .map((request) => request.toMap())
+                .toList(growable: false),
+          },
+        );
+    if (rawResults == null) {
+      return List<bool>.filled(requests.length, false, growable: false);
+    }
+    return rawResults.map((entry) => entry == true).toList(growable: false);
+  }
+
+  @override
+  Future<bool> supportsBatchMetadataWrite() async {
+    try {
+      final bool? result = await _channel.invokeMethod<bool>(
+        'supportsBatchMetadataWrite',
+      );
+      return result ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  @override
   Future<List<bool>> copyTrackMetadataBatch({
     required List<TrackMetadataCopyRequest> requests,
   }) async {

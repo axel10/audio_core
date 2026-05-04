@@ -243,8 +243,13 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
 
     case "prepareForFileWrite":
       let path = Self.readString(call.arguments, key: "path")
+      let paths = Self.readStringList(call.arguments, key: "paths")
       do {
-        try engine.prepareForFileWrite(path: path)
+        if !paths.isEmpty {
+          try engine.prepareForFileWrite(paths: paths)
+        } else {
+          try engine.prepareForFileWrite(path: path)
+        }
         sendPlayerState()
         emitLatestFftSnapshot()
         result(nil)
@@ -255,8 +260,13 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
 
     case "finishFileWrite":
       let path = Self.readString(call.arguments, key: "path")
+      let paths = Self.readStringList(call.arguments, key: "paths")
       do {
-        try engine.finishFileWrite(path: path)
+        if !paths.isEmpty {
+          try engine.finishFileWrite(paths: paths)
+        } else {
+          try engine.finishFileWrite(path: path)
+        }
         sendPlayerState()
         emitLatestFftSnapshot()
         result(nil)
@@ -423,5 +433,17 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       return trimmed.isEmpty ? nil : trimmed
     }
     return nil
+  }
+
+  private static func readStringList(_ arguments: Any?, key: String) -> [String] {
+    guard let dict = arguments as? [String: Any],
+          let values = dict[key] as? [Any] else {
+      return []
+    }
+    return values.compactMap { entry in
+      guard let value = entry as? String else { return nil }
+      let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+      return trimmed.isEmpty ? nil : trimmed
+    }
   }
 }

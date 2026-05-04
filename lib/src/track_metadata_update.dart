@@ -358,3 +358,28 @@ class TrackMetadataCopyRequest {
     };
   }
 }
+
+/// A single metadata write request for a target track.
+class TrackMetadataWriteRequest {
+  const TrackMetadataWriteRequest({
+    required this.path,
+    required this.metadata,
+    this.clearBeforeWrite = false,
+    this.fallbackMediaUri,
+  });
+
+  final String path;
+  final TrackMetadataUpdate metadata;
+  final bool clearBeforeWrite;
+  final String? fallbackMediaUri;
+
+  Map<String, Object?> toMap() {
+    return <String, Object?>{
+      'path': path,
+      'metadata': metadata.toMap(includeEmptyCollections: clearBeforeWrite),
+      if (fallbackMediaUri != null && fallbackMediaUri!.trim().isNotEmpty)
+        'fallbackMediaUri': fallbackMediaUri!.trim(),
+      if (clearBeforeWrite) 'clearBeforeWrite': true,
+    };
+  }
+}

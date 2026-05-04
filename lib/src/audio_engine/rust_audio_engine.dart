@@ -220,6 +220,29 @@ class RustAudioEngine
   }
 
   @override
+  Future<List<bool>> updateTrackMetadataBatch({
+    required List<TrackMetadataWriteRequest> requests,
+  }) async {
+    final results = <bool>[];
+    for (final request in requests) {
+      try {
+        final metadata = trackMetadataUpdateFromUpdate(
+          request.metadata,
+          includeEmptyCollections: request.clearBeforeWrite,
+        );
+        await rust.updateTrackMetadata(path: request.path, metadata: metadata);
+        results.add(true);
+      } catch (_) {
+        results.add(false);
+      }
+    }
+    return results;
+  }
+
+  @override
+  Future<bool> supportsBatchMetadataWrite() async => true;
+
+  @override
   Future<List<bool>> copyTrackMetadataBatch({
     required List<TrackMetadataCopyRequest> requests,
   }) async {

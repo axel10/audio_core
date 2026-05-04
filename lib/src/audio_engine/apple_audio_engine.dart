@@ -440,6 +440,48 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
+  Future<List<bool>> updateTrackMetadataBatch({
+    required List<TrackMetadataWriteRequest> requests,
+  }) async {
+    if (requests.isEmpty) return const <bool>[];
+
+    final normalizedRequests = requests
+        .map(
+          (request) => TrackMetadataWriteRequest(
+            path: _normalizePath(request.path),
+            metadata: request.metadata,
+            clearBeforeWrite: request.clearBeforeWrite,
+            fallbackMediaUri: request.fallbackMediaUri,
+          ),
+        )
+        .toList(growable: false);
+    final paths = normalizedRequests.map((request) => request.path).toSet();
+
+    return _withAppleBatchFileWriteAccess(paths, () async {
+      final results = <bool>[];
+      for (final request in normalizedRequests) {
+        try {
+          final metadata = trackMetadataUpdateFromUpdate(
+            request.metadata,
+            includeEmptyCollections: request.clearBeforeWrite,
+          );
+          await rust.updateTrackMetadata(
+            path: request.path,
+            metadata: metadata,
+          );
+          results.add(true);
+        } catch (_) {
+          results.add(false);
+        }
+      }
+      return results;
+    });
+  }
+
+  @override
+  Future<bool> supportsBatchMetadataWrite() async => true;
+
+  @override
   Future<List<bool>> copyTrackMetadataBatch({
     required List<TrackMetadataCopyRequest> requests,
   }) async {
@@ -549,6 +591,40 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     } finally {
       await _channel.invokeMethod('finishFileWrite', arguments);
       _preparedWritePaths.remove(path);
+    }
+  }
+
+  Future<T> _withAppleBatchFileWriteAccess<T>(
+    Iterable<String> paths,
+    Future<T> Function() action,
+  ) async {
+    final uniquePaths = <String>[];
+    final alreadyPrepared = <String>{};
+    for (final path in paths) {
+      final normalized = _normalizePath(path);
+      if (alreadyPrepared.add(normalized) &&
+          !_preparedWritePaths.contains(normalized)) {
+        uniquePaths.add(normalized);
+      }
+    }
+
+    if (uniquePaths.isEmpty) {
+      return await action();
+    }
+
+    _preparedWritePaths.addAll(uniquePaths);
+    final arguments = <String, Object?>{
+      'playerId': 'main',
+      'paths': uniquePaths,
+    };
+    try {
+      await _channel.invokeMethod('prepareForFileWrite', arguments);
+      return await action();
+    } finally {
+      await _channel.invokeMethod('finishFileWrite', arguments);
+      for (final path in uniquePaths) {
+        _preparedWritePaths.remove(path);
+      }
     }
   }
 

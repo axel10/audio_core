@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import '../rust/api/simple/metadata.dart' as rust;
 import '../track_metadata.dart';
+import '../track_metadata_update.dart';
 
 rust.TrackMetadataUpdate trackMetadataUpdateFromMap(
   Map<String, Object?> metadata,
@@ -25,6 +26,15 @@ rust.TrackMetadataUpdate trackMetadataUpdateFromMap(
     remixer: _asString(metadata['remixer']),
     genres: _asStringList(metadata['genres']),
     pictures: _asPictureList(metadata['pictures']),
+  );
+}
+
+rust.TrackMetadataUpdate trackMetadataUpdateFromUpdate(
+  TrackMetadataUpdate metadata, {
+  bool includeEmptyCollections = false,
+}) {
+  return trackMetadataUpdateFromMap(
+    metadata.toMap(includeEmptyCollections: includeEmptyCollections),
   );
 }
 

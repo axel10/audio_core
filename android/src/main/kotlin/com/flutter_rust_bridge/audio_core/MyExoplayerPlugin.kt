@@ -329,12 +329,12 @@ class MyExoplayerPlugin :
     override fun onMethodCall(call: MethodCall, originalResult: Result) {
         val result = MainThreadResult(originalResult)
         val playerId = call.argument<String>("playerId") ?: "main"
-        if(call.method != "getLatestFft"){
-            NativeLog.d(
-                "AudioCore",
-                "onMethodCall method=${call.method} playerId=$playerId args=${call.arguments}",
-            )
-        }
+//        if(call.method != "getLatestFft"){
+//            NativeLog.d(
+//                "AudioCore",
+//                "onMethodCall method=${call.method} playerId=$playerId args=${call.arguments}",
+//            )
+//        }
 
 //        NativeLog.d(
 //            "AudioCore",
@@ -481,6 +481,10 @@ class MyExoplayerPlugin :
                 val rawUpdates = call.argument<List<Map<String, Any?>>>("updates")
                     ?: return result.error("INVALID_ARGUMENT", "Updates are null", null)
                 handleUpdateTrackMetadataBatch(rawUpdates, result)
+                return
+            }
+            "supportsBatchMetadataWrite" -> {
+                result.success(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
                 return
             }
             "copyTrackMetadataBatch" -> {
