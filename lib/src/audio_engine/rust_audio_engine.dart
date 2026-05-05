@@ -113,6 +113,9 @@ class RustAudioEngine
       });
 
   @override
+  Future<String> getDecodeEngine() => Future.value(rust.getAudioDecodeEngine());
+
+  @override
   Future<Duration> getDuration() async {
     final ms = await rust.getAudioDurationMs();
     return Duration(milliseconds: ms.toInt());

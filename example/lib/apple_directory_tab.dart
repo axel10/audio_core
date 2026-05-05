@@ -122,7 +122,7 @@ class _AppleDirectoryTabState extends State<AppleDirectoryTab> {
 
     String? selected;
     try {
-      selected = await FilePicker.platform.getDirectoryPath(
+      selected = await FilePicker.getDirectoryPath(
         dialogTitle: 'Choose a music directory',
       );
     } catch (e) {

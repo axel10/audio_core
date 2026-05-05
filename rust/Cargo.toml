@@ -29,6 +29,7 @@ symphonia = { version = "0.5.5", features = ["all"] }
 rodio = { git="https://github.com/axel10/rodio",branch = "master", default-features = true, features = ["symphonia-all"] }
 realfft = "3.5.0"
 fundsp = "0.23.0"
+ffmpeg_core = { path = "../../crates/ffmpeg_core" }
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21.1"
@@ -45,4 +46,3 @@ windows = { version = "0.52", features = [
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
-

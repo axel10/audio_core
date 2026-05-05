@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:audio_core/audio_core.dart';
+import 'package:audio_converter/audio_converter.dart';
 import 'package:file_picker/file_picker.dart';
 import 'equalizer_panel.dart';
 import 'fade_demo_tab.dart';
@@ -117,6 +118,7 @@ class VisualizerDemoPage extends StatefulWidget {
 
 class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
   late final AudioCoreController _controller;
+  final AudioConverter _audioConverter = AudioConverter();
   StreamSubscription<FftFrame>? _subSmooth;
   StreamSubscription<FftFrame>? _subResponsive;
   List<double> _bandsSmooth = const [];
@@ -124,6 +126,8 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
   AudioLibraryFolder? _mediaLibraryRoot;
   bool _mediaLibraryLoading = false;
   String? _mediaLibraryError;
+  String? _playbackDecodeEngine;
+  String? _converterEngine;
 
   final GlobalKey<RandomLabTabState> _randomLabKey =
       GlobalKey<RandomLabTabState>();
@@ -196,6 +200,26 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
     });
 
     _bootstrapAudioLibrary();
+    _refreshEngineInfo();
+  }
+
+  Future<void> _refreshEngineInfo() async {
+    try {
+      final playbackEngine = await _controller.engine.getDecodeEngine();
+      final converterCapabilities = await _audioConverter.getCapabilities();
+      if (!mounted) return;
+      setState(() {
+        _playbackDecodeEngine = playbackEngine;
+        _converterEngine = converterCapabilities.engine;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _playbackDecodeEngine ??= 'unknown';
+        _converterEngine ??= 'unavailable';
+      });
+      debugPrint('[AudioCore][Example] Failed to refresh engine info: $e');
+    }
   }
 
   Future<void> _bootstrapAudioLibrary() async {
@@ -263,7 +287,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
       return;
     }
 
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: _audioFileExtensions,
       allowMultiple: true,
@@ -321,6 +345,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
       autoPlayFirst: true,
       fadeSetting: fadeSetting,
     );
+    await _refreshEngineInfo();
   }
 
   Future<void> _handleImportedTracks(
@@ -335,6 +360,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
     // platform-specific metadata such as Android's mediaUri survives.
     if (tracks.length == 1) {
       await _controller.playTrack(tracks.first, fadeSetting: fadeSetting);
+      await _refreshEngineInfo();
       return;
     }
 
@@ -343,6 +369,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
       autoPlayFirst: true,
       fadeSetting: fadeSetting,
     );
+    await _refreshEngineInfo();
   }
 
   Future<void> _loadWaveform() async {
@@ -397,6 +424,8 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                   child: Column(
                     children: [
                       _buildPlayerControls(),
+                      const SizedBox(height: 8),
+                      _buildEngineInfo(context),
                       if (Platform.isAndroid)
                         Padding(
                           padding: const EdgeInsets.only(top: 8),
@@ -511,6 +540,32 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
           ),
           const SizedBox(width: 12),
         ],
+      ),
+    );
+  }
+
+  Widget _buildEngineInfo(BuildContext context) {
+    final playbackEngine = _playbackDecodeEngine ?? 'loading...';
+    final converterEngine = _converterEngine ?? 'loading...';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
+      child: DefaultTextStyle(
+        style: Theme.of(context).textTheme.bodyMedium!,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Playback decode engine: $playbackEngine'),
+            const SizedBox(height: 4),
+            Text('audio_converter engine: $converterEngine'),
+          ],
+        ),
       ),
     );
   }

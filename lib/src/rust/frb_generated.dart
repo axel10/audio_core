@@ -142,6 +142,8 @@ abstract class RustLibApi extends BaseApi {
 
   Future<String?> crateApiSimpleControllerGetLoadedAudioPath();
 
+  String crateApiSimpleControllerGetAudioDecodeEngine();
+
   Future<TrackMetadataUpdate> crateApiSimpleMetadataGetTrackMetadata({
     required String path,
   });
@@ -765,6 +767,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiSimpleControllerGetLoadedAudioPathConstMeta =>
       const TaskConstMeta(debugName: "get_loaded_audio_path", argNames: []);
+
+  @override
+  String crateApiSimpleControllerGetAudioDecodeEngine() {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 36)!;
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSimpleControllerGetAudioDecodeEngineConstMeta,
+        argValues: const [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSimpleControllerGetAudioDecodeEngineConstMeta =>
+      const TaskConstMeta(debugName: "get_audio_decode_engine", argNames: []);
 
   @override
   Future<TrackMetadataUpdate> crateApiSimpleMetadataGetTrackMetadata({

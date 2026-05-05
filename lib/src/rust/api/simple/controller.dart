@@ -81,6 +81,9 @@ Future<Float32List> getLatestFft() =>
 Future<String?> getLoadedAudioPath() =>
     RustLib.instance.api.crateApiSimpleControllerGetLoadedAudioPath();
 
+String getAudioDecodeEngine() =>
+    RustLib.instance.api.crateApiSimpleControllerGetAudioDecodeEngine();
+
 Future<void> handleDeviceChanged() =>
     RustLib.instance.api.crateApiSimpleControllerHandleDeviceChanged();
 

@@ -90,6 +90,8 @@ abstract class AudioEngine {
   // Status updates
   Stream<AudioStatus> get statusStream;
 
+  Future<String> getDecodeEngine();
+
   // File synchronization (locking)
   Future<void> prepareForFileWrite();
   Future<void> finishFileWrite();

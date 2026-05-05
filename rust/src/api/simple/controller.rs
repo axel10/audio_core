@@ -1,4 +1,6 @@
 use super::equalizer::{EqSource, EqualizerConfig, EqualizerShared};
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+use super::ffmpeg_source::FfmpegAudioSource;
 use super::fft::{clear_fft_buffer, FftSource, RAW_FFT_BINS};
 use log::info;
 use rodio::cpal::traits::{DeviceTrait, HostTrait};
@@ -70,6 +72,7 @@ struct PlaybackDeck {
     loaded_duration: Duration,
     source_start_offset: Duration,
     gain: f32,
+    decode_engine: String,
 }
 
 impl PlaybackDeck {
@@ -115,6 +118,7 @@ struct PlayerController {
     pending_edit: Option<PendingEdit>,
     pause_fade_in_progress: bool,
     pending_playback_state: Option<String>,
+    last_decode_engine: Option<String>,
 }
 
 struct PendingEdit {
@@ -207,6 +211,7 @@ impl PlayerController {
             pending_edit: None,
             pause_fade_in_progress: false,
             pending_playback_state: None,
+            last_decode_engine: None,
         }
     }
 
@@ -317,18 +322,43 @@ impl PlayerController {
         let file_size = metadata.len();
 
         // 60MB 以下的文件使用内存缓存模式，60MB 以上使用流式读取
-        let source: Box<dyn Source<Item = f32> + Send> = if file_size < 60 * 1024 * 1024 {
-            let lazy_source = LazyMemorySource::new(file, file_size);
-            let decoder = Decoder::builder()
-                .with_data(lazy_source)
-                .with_byte_len(file_size)
-                .with_seekable(true)
-                .build()
-                .map_err(|e| format!("decode failed: {e}"))?;
-            Box::new(decoder)
-        } else {
-            let decoder = Decoder::try_from(file).map_err(|e| format!("decode failed: {e}"))?;
-            Box::new(decoder)
+        let (source, decode_engine): (Box<dyn Source<Item = f32> + Send>, String) = {
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            {
+                if let Ok(ffmpeg_source) = FfmpegAudioSource::open(path) {
+                    (Box::new(ffmpeg_source), "ffmpeg".to_string())
+                } else if file_size < 60 * 1024 * 1024 {
+                    let lazy_source = LazyMemorySource::new(file, file_size);
+                    let decoder = Decoder::builder()
+                        .with_data(lazy_source)
+                        .with_byte_len(file_size)
+                        .with_seekable(true)
+                        .build()
+                        .map_err(|e| format!("decode failed: {e}"))?;
+                    (Box::new(decoder), "symphonia".to_string())
+                } else {
+                    let decoder =
+                        Decoder::try_from(file).map_err(|e| format!("decode failed: {e}"))?;
+                    (Box::new(decoder), "symphonia".to_string())
+                }
+            }
+            #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+            {
+                if file_size < 60 * 1024 * 1024 {
+                    let lazy_source = LazyMemorySource::new(file, file_size);
+                    let decoder = Decoder::builder()
+                        .with_data(lazy_source)
+                        .with_byte_len(file_size)
+                        .with_seekable(true)
+                        .build()
+                        .map_err(|e| format!("decode failed: {e}"))?;
+                    (Box::new(decoder), "symphonia".to_string())
+                } else {
+                    let decoder =
+                        Decoder::try_from(file).map_err(|e| format!("decode failed: {e}"))?;
+                    (Box::new(decoder), "symphonia".to_string())
+                }
+            }
         };
 
         let total = source.total_duration().unwrap_or(Duration::ZERO);
@@ -367,6 +397,7 @@ impl PlayerController {
             loaded_duration: total,
             source_start_offset: clamped_offset,
             gain,
+            decode_engine,
         })
     }
 
@@ -380,6 +411,7 @@ impl PlayerController {
         self.clear_pending_playback_state();
         let previous_public_path = self.public_path().map(str::to_string);
         let deck = self.open_deck_from_path(path, start_offset, auto_play, 1.0)?;
+        self.last_decode_engine = Some(deck.decode_engine.clone());
 
         self.transition_generation = self.transition_generation.wrapping_add(1);
         if let Some(incoming) = self.incoming_deck.take() {
@@ -590,6 +622,7 @@ impl PlayerController {
         self.cached_sample_rate = 0;
         self.pending_edit = None;
         self.equalizer = EqualizerShared::new(EqualizerConfig::default());
+        self.last_decode_engine = None;
     }
 
     fn prepare_for_file_write(&mut self) -> Result<(), String> {
@@ -1165,6 +1198,18 @@ pub fn get_loaded_audio_path() -> Option<String> {
         return c.public_path().map(str::to_string);
     }
     None
+}
+
+pub fn get_audio_decode_engine() -> String {
+    if let Ok(c) = controller().lock() {
+        if let Some(deck) = c.public_deck() {
+            return deck.decode_engine.clone();
+        }
+        if let Some(engine) = c.last_decode_engine.as_ref() {
+            return engine.clone();
+        }
+    }
+    "unknown".to_string()
 }
 
 pub fn handle_device_changed() -> Result<(), String> {

@@ -100,7 +100,7 @@ class _MetadataTabState extends State<MetadataTab> {
     if (track == null) return;
 
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         type: FileType.image,
         allowMultiple: false,
       );
@@ -191,7 +191,7 @@ class _MetadataTabState extends State<MetadataTab> {
   }
 
   Future<List<AudioTrack>?> _pickAudioTracks(String title) async {
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       dialogTitle: title,
       type: FileType.custom,
       allowedExtensions: _audioFileExtensions,

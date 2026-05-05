@@ -185,6 +185,9 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
+  Future<String> getDecodeEngine() async => 'apple-native';
+
+  @override
   Future<Duration> getDuration() async {
     final int? ms = await _channel.invokeMethod(
       'getDuration',

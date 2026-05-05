@@ -194,6 +194,9 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
+  Future<String> getDecodeEngine() async => 'android-native';
+
+  @override
   Future<Duration> getDuration() async {
     final int? ms = await _channel.invokeMethod('getDuration', {
       'playerId': _activePlayerId,
