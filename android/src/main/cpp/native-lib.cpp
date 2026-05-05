@@ -2,7 +2,15 @@
 #include <android/log.h>
 #include "EqualizerEngine.h"
 #include <memory>
+#include <string>
 #include <chromaprint.h>
+#include <vector>
+#include <cmath>
+#include <algorithm>
+
+#ifdef ENABLE_ANDROID_FFMPEG_FALLBACK
+#include "audio/ffmpeg_audio_reader.h"
+#endif
 
 #define LOG_TAG "MyExoplayerNative"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -121,3 +129,174 @@ Java_com_flutter_1rust_1bridge_audio_1core_ChromaprintNative_nativeDestroy(
         chromaprint_free(ctx);
     }
 }
+
+static std::string JStringToStdString(JNIEnv *env, jstring input) {
+    if (!input) {
+        return {};
+    }
+    const char *chars = env->GetStringUTFChars(input, nullptr);
+    if (!chars) {
+        return {};
+    }
+    std::string result(chars);
+    env->ReleaseStringUTFChars(input, chars);
+    return result;
+}
+
+#ifdef ENABLE_ANDROID_FFMPEG_FALLBACK
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_flutter_1rust_1bridge_audio_1core_ChromaprintNative_nativeGetFingerprintFromFileFfmpeg(
+        JNIEnv* env,
+        jobject /* this */,
+        jstring path) {
+    const auto fileName = JStringToStdString(env, path);
+    if (fileName.empty()) {
+        return nullptr;
+    }
+
+    chromaprint::FFmpegAudioReader reader;
+    if (!reader.Open(fileName)) {
+        return nullptr;
+    }
+
+    ChromaprintContext *ctx = chromaprint_new(CHROMAPRINT_ALGORITHM_DEFAULT);
+    if (!ctx) {
+        return nullptr;
+    }
+
+    const int sampleRate = reader.GetSampleRate();
+    const int channels = reader.GetChannels();
+    if (sampleRate <= 0 || channels <= 0 || !chromaprint_start(ctx, sampleRate, channels)) {
+        chromaprint_free(ctx);
+        return nullptr;
+    }
+
+    const size_t targetFrames = static_cast<size_t>(sampleRate) * 20;
+    size_t processedFrames = 0;
+
+    while (!reader.IsFinished() && processedFrames < targetFrames) {
+        const int16_t *frameData = nullptr;
+        size_t frameSize = 0;
+        if (!reader.Read(&frameData, &frameSize)) {
+            chromaprint_free(ctx);
+            return nullptr;
+        }
+
+        if (!frameData || frameSize == 0) {
+            continue;
+        }
+
+        const size_t framesToProcess = std::min(frameSize, targetFrames - processedFrames);
+        if (!chromaprint_feed(
+                ctx,
+                frameData,
+                static_cast<int>(framesToProcess * static_cast<size_t>(channels)))) {
+            chromaprint_free(ctx);
+            return nullptr;
+        }
+
+        processedFrames += framesToProcess;
+    }
+
+    if (!chromaprint_finish(ctx)) {
+        chromaprint_free(ctx);
+        return nullptr;
+    }
+
+    char *fp = nullptr;
+    if (chromaprint_get_fingerprint(ctx, &fp) != 1 || !fp) {
+        chromaprint_free(ctx);
+        return nullptr;
+    }
+
+    jstring result = env->NewStringUTF(fp);
+    chromaprint_dealloc(fp);
+    chromaprint_free(ctx);
+    return result;
+}
+
+extern "C" JNIEXPORT jdoubleArray JNICALL
+Java_com_flutter_1rust_1bridge_audio_1core_ChromaprintNative_nativeGetWaveformFromFileFfmpeg(
+        JNIEnv* env,
+        jobject /* this */,
+        jstring path,
+        jint expectedChunks) {
+    const auto fileName = JStringToStdString(env, path);
+    if (fileName.empty()) {
+        return nullptr;
+    }
+
+    chromaprint::FFmpegAudioReader reader;
+    if (!reader.Open(fileName)) {
+        return nullptr;
+    }
+
+    constexpr size_t kWindowFrames = 1024;
+    std::vector<double> waveform;
+    waveform.reserve(expectedChunks > 0 ? static_cast<size_t>(expectedChunks) : 256);
+
+    double sum = 0.0;
+    size_t frameCount = 0;
+
+    while (!reader.IsFinished()) {
+        const int16_t *frameData = nullptr;
+        size_t frameSize = 0;
+        if (!reader.Read(&frameData, &frameSize)) {
+            return nullptr;
+        }
+
+        if (!frameData || frameSize == 0) {
+            continue;
+        }
+
+        const int channels = std::max(1, reader.GetChannels());
+        for (size_t frameIndex = 0; frameIndex < frameSize; ++frameIndex) {
+            double mono = 0.0;
+            for (int channel = 0; channel < channels; ++channel) {
+                mono += static_cast<double>(frameData[frameIndex * channels + channel]);
+            }
+            mono /= static_cast<double>(channels);
+            sum += std::abs(mono) / 32768.0;
+            ++frameCount;
+
+            if (frameCount >= kWindowFrames) {
+                waveform.push_back(sum / static_cast<double>(frameCount));
+                sum = 0.0;
+                frameCount = 0;
+            }
+        }
+    }
+
+    if (frameCount > 0) {
+        waveform.push_back(sum / static_cast<double>(frameCount));
+    }
+
+    if (waveform.empty()) {
+        waveform.push_back(0.0);
+    }
+
+    jdoubleArray result = env->NewDoubleArray(static_cast<jsize>(waveform.size()));
+    if (!result) {
+        return nullptr;
+    }
+    env->SetDoubleArrayRegion(result, 0, static_cast<jsize>(waveform.size()), waveform.data());
+    return result;
+}
+#else
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_flutter_1rust_1bridge_audio_1core_ChromaprintNative_nativeGetFingerprintFromFileFfmpeg(
+        JNIEnv*,
+        jobject,
+        jstring) {
+    return nullptr;
+}
+
+extern "C" JNIEXPORT jdoubleArray JNICALL
+Java_com_flutter_1rust_1bridge_audio_1core_ChromaprintNative_nativeGetWaveformFromFileFfmpeg(
+        JNIEnv*,
+        jobject,
+        jstring,
+        jint) {
+    return nullptr;
+}
+#endif

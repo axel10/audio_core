@@ -7,4 +7,6 @@ object ChromaprintNative {
     external fun nativeProcess(handle: Long, buffer: ByteBuffer, numShorts: Int)
     external fun nativeGetFingerprint(handle: Long): String?
     external fun nativeDestroy(handle: Long)
+    external fun nativeGetFingerprintFromFileFfmpeg(path: String): String?
+    external fun nativeGetWaveformFromFileFfmpeg(path: String, expectedChunks: Int): DoubleArray?
 }

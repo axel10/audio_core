@@ -10,6 +10,7 @@ import 'api/simple.dart';
 import 'api/simple/audio_fingerprint.dart';
 import 'api/simple/controller.dart';
 import 'api/simple/equalizer.dart';
+import 'api/simple/ffmpeg_source.dart';
 import 'api/simple/metadata.dart';
 import 'api/simple/palette.dart';
 import 'dart:async';
@@ -30,6 +31,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32;
 
   CrossPlatformFinalizerArg
+  get rust_arc_decrement_strong_count_FfmpegAudioSourcePtr => wire
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfmpegAudioSource;
+
+  CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_ThemePaletteOptionsPtr => wire
       .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerThemePaletteOptions;
 
@@ -43,14 +48,41 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  FfmpegAudioSource
+  dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfmpegAudioSource(
+    dynamic raw,
+  );
+
+  @protected
   ThemePaletteOptions
   dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerThemePaletteOptions(
     dynamic raw,
   );
 
   @protected
+  FfmpegAudioSource
+  dco_decode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfmpegAudioSource(
+    dynamic raw,
+  );
+
+  @protected
+  FfmpegAudioSource
+  dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfmpegAudioSource(
+    dynamic raw,
+  );
+
+  @protected
+  Duration dco_decode_Chrono_Duration(dynamic raw);
+
+  @protected
   BTreeMapStringU32
   dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32(
+    dynamic raw,
+  );
+
+  @protected
+  FfmpegAudioSource
+  dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfmpegAudioSource(
     dynamic raw,
   );
 
@@ -76,6 +108,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32(
     dynamic raw,
   );
+
+  @protected
+  Duration dco_decode_box_autoadd_Chrono_Duration(dynamic raw);
 
   @protected
   EqualizerConfig dco_decode_box_autoadd_equalizer_config(dynamic raw);
@@ -132,6 +167,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  Duration? dco_decode_opt_box_autoadd_Chrono_Duration(dynamic raw);
+
+  @protected
   int? dco_decode_opt_box_autoadd_i_32(dynamic raw);
 
   @protected
@@ -168,14 +206,41 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  FfmpegAudioSource
+  sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfmpegAudioSource(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   ThemePaletteOptions
   sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerThemePaletteOptions(
     SseDeserializer deserializer,
   );
 
   @protected
+  FfmpegAudioSource
+  sse_decode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfmpegAudioSource(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FfmpegAudioSource
+  sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfmpegAudioSource(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  Duration sse_decode_Chrono_Duration(SseDeserializer deserializer);
+
+  @protected
   BTreeMapStringU32
   sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FfmpegAudioSource
+  sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfmpegAudioSource(
     SseDeserializer deserializer,
   );
 
@@ -201,6 +266,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   sse_decode_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32(
     SseDeserializer deserializer,
   );
+
+  @protected
+  Duration sse_decode_box_autoadd_Chrono_Duration(SseDeserializer deserializer);
 
   @protected
   EqualizerConfig sse_decode_box_autoadd_equalizer_config(
@@ -263,6 +331,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  Duration? sse_decode_opt_box_autoadd_Chrono_Duration(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   int? sse_decode_opt_box_autoadd_i_32(SseDeserializer deserializer);
 
   @protected
@@ -308,6 +381,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void
+  sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfmpegAudioSource(
+    FfmpegAudioSource self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
   sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerThemePaletteOptions(
     ThemePaletteOptions self,
     SseSerializer serializer,
@@ -315,8 +395,32 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void
+  sse_encode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfmpegAudioSource(
+    FfmpegAudioSource self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
+  sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfmpegAudioSource(
+    FfmpegAudioSource self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_Chrono_Duration(Duration self, SseSerializer serializer);
+
+  @protected
+  void
   sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32(
     BTreeMapStringU32 self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
+  sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfmpegAudioSource(
+    FfmpegAudioSource self,
     SseSerializer serializer,
   );
 
@@ -343,6 +447,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void
   sse_encode_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32(
     BTreeMapStringU32 self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_Chrono_Duration(
+    Duration self,
     SseSerializer serializer,
   );
 
@@ -420,6 +530,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_Chrono_Duration(
+    Duration? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_i_32(int? self, SseSerializer serializer);
 
   @protected
@@ -478,6 +594,22 @@ class RustLibWire implements BaseWire {
       );
 
   void
+  rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfmpegAudioSource(
+    int ptr,
+  ) => wasmModule
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfmpegAudioSource(
+        ptr,
+      );
+
+  void
+  rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfmpegAudioSource(
+    int ptr,
+  ) => wasmModule
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfmpegAudioSource(
+        ptr,
+      );
+
+  void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerThemePaletteOptions(
     int ptr,
   ) => wasmModule
@@ -507,6 +639,16 @@ extension type RustLibWasmModule._(JSObject _) implements JSObject {
 
   external void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32(
+    int ptr,
+  );
+
+  external void
+  rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfmpegAudioSource(
+    int ptr,
+  );
+
+  external void
+  rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfmpegAudioSource(
     int ptr,
   );
 

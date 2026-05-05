@@ -239,6 +239,10 @@ class MyExoplayerPlugin :
         val cppFingerprintProcessor = CppFingerprintProcessor()
 
         val renderersFactory = object : DefaultRenderersFactory(safeContext) {
+            init {
+                setExtensionRendererMode(EXTENSION_RENDERER_MODE_ON)
+            }
+
             override fun buildAudioSink(
                 context: Context,
                 enableFloatOutput: Boolean,
@@ -361,13 +365,17 @@ class MyExoplayerPlugin :
                 // Amplituda's processing and any content:// materialization can be expensive,
                 // so keep it off the main thread to avoid janking the UI.
                 Thread {
+                    var localPath = path
+                    var isTemp = false
                     try {
                         val amp = amplituda ?: run {
                             result.error("INTERNAL_ERROR", "Amplituda not initialized", null)
                             return@Thread
                         }
 
-                        val (localPath, isTemp) = ensureLocalPath(path)
+                        val resolvedPath = ensureLocalPath(path)
+                        localPath = resolvedPath.first
+                        isTemp = resolvedPath.second
 
                         amp.processAudio(localPath).get({ amResult ->
                             try {
@@ -383,13 +391,40 @@ class MyExoplayerPlugin :
                             }
                         }, { error ->
                             try {
-                                result.error("AMPLITUDA_ERROR", error.message, null)
+                                val fallbackWaveform = ChromaprintNative
+                                    .nativeGetWaveformFromFileFfmpeg(localPath, expectedChunks)
+                                    ?.toList()
+                                if (fallbackWaveform != null) {
+                                    val processedData = if (expectedChunks > 0) {
+                                        downsampleWaveform(fallbackWaveform, expectedChunks)
+                                    } else {
+                                        fallbackWaveform
+                                    }
+                                    result.success(processedData)
+                                } else {
+                                    result.error("AMPLITUDA_ERROR", error.message, null)
+                                }
                             } finally {
                                 if (isTemp) java.io.File(localPath).delete()
                             }
                         })
                     } catch (e: Exception) {
-                        result.error("AMPLITUDA_ERROR", e.message, null)
+                        val fallbackWaveform = ChromaprintNative
+                            .nativeGetWaveformFromFileFfmpeg(localPath, expectedChunks)
+                            ?.toList()
+                        if (fallbackWaveform != null) {
+                            val processedData = if (expectedChunks > 0) {
+                                downsampleWaveform(fallbackWaveform, expectedChunks)
+                            } else {
+                                fallbackWaveform
+                            }
+                            result.success(processedData)
+                        } else {
+                            result.error("AMPLITUDA_ERROR", e.message, null)
+                        }
+                        if (isTemp) {
+                            java.io.File(localPath).delete()
+                        }
                     }
                 }.start()
                 return
@@ -400,8 +435,7 @@ class MyExoplayerPlugin :
                 val safeContext = context ?: return result.error("INTERNAL_ERROR", "Context is null", null)
 
                 Thread {
-                    val uri = if (localPath.startsWith("/")) Uri.parse("file://$localPath") else Uri.parse(localPath)
-                    val fingerprint = AudioFingerprintExtractor.extractFingerprint(safeContext, uri)
+                    val fingerprint = AudioFingerprintExtractor.extractFingerprint(safeContext, localPath)
                     
                     if (fingerprint != null) {
                         result.success(fingerprint)
@@ -1825,6 +1859,25 @@ class MyExoplayerPlugin :
             val start = (i * chunkSize).toInt()
             val end = ((i + 1) * chunkSize).toInt().coerceAtMost(amplitudes.size)
             var max = 0
+            for (j in start until end) {
+                val value = amplitudes.get(j)
+                if (value > max) max = value
+            }
+            result.add(max)
+        }
+        return result
+    }
+
+    private fun downsampleWaveform(amplitudes: List<Double>, targetSize: Int): List<Double> {
+        if (targetSize <= 0 || amplitudes.isEmpty()) return emptyList()
+        if (amplitudes.size <= targetSize) return amplitudes
+
+        val result = ArrayList<Double>(targetSize)
+        val chunkSize = amplitudes.size.toDouble() / targetSize
+        for (i in 0 until targetSize) {
+            val start = (i * chunkSize).toInt()
+            val end = ((i + 1) * chunkSize).toInt().coerceAtMost(amplitudes.size)
+            var max = 0.0
             for (j in start until end) {
                 val value = amplitudes.get(j)
                 if (value > max) max = value

@@ -30,6 +30,18 @@ android {
         versionName = flutter.versionName
     }
 
+    packaging {
+        jniLibs {
+      //      pickFirsts += listOf(
+      //          "**/libavcodec.so",
+      //          "**/libavformat.so",
+      //          "**/libavutil.so",
+      //          "**/libswresample.so",
+      //          "**/libswscale.so",
+      //      )
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.

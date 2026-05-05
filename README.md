@@ -1,72 +1,39 @@
 # audio_core
 
-A new Flutter FFI plugin project.
+vibe_flow播放核心
 
-## Getting Started
+## Android FFmpeg fallback
 
-This project is a starting point for a Flutter
-[FFI plugin](https://flutter.dev/to/ffi-package),
-a specialized package that includes native code directly invoked with Dart FFI.
+`audio_core` can use Media3's FFmpeg extension as a fallback decoder on Android,
+but the extension only becomes available when FFmpeg shared libraries are
+present.
 
-## Project structure
+Build flow:
 
-This template uses the following structure:
+1. `audio_converter` is responsible for producing the Android FFmpeg shared
+   libraries.
+2. Its Android build copies the FFmpeg `.so` files into
+   `audio_converter/android/src/main/jniLibs/<abi>`.
+3. `audio_core` then consumes those shared libraries when building the Android
+   plugin and enables the vendored Media3 FFmpeg renderer.
 
-* `src`: Contains the native source code, and a CmakeFile.txt file for building
-  that source code into a dynamic library.
+Practical requirement:
 
-* `lib`: Contains the Dart code that defines the API of the plugin, and which
-  calls into the native code using `dart:ffi`.
+* If you want FFmpeg fallback in `audio_core`, make sure the project also depends
+  on `audio_converter`, and that `audio_converter` has already populated its
+  Android FFmpeg assets.
+* If the FFmpeg libraries are missing, `audio_core` will still build and run,
+  but the FFmpeg extension will stay disabled and ExoPlayer will fall back to
+  the normal MediaCodec path.
 
-* platform folders (`android`, `ios`, `windows`, etc.): Contains the build files
-  for building and bundling the native code library with the platform application.
+Implementation notes:
 
-## Building and bundling native code
-
-The `pubspec.yaml` specifies FFI plugins as follows:
-
-```yaml
-  plugin:
-    platforms:
-      some_platform:
-        ffiPlugin: true
-```
-
-This configuration invokes the native build for the various target platforms
-and bundles the binaries in Flutter applications using these FFI plugins.
-
-This can be combined with dartPluginClass, such as when FFI is used for the
-implementation of one platform in a federated plugin:
-
-```yaml
-  plugin:
-    implements: some_other_plugin
-    platforms:
-      some_platform:
-        dartPluginClass: SomeClass
-        ffiPlugin: true
-```
-
-A plugin can have both FFI and method channels:
-
-```yaml
-  plugin:
-    platforms:
-      some_platform:
-        pluginClass: SomeName
-        ffiPlugin: true
-```
-
-The native build systems that are invoked by FFI (and method channel) plugins are:
-
-* For Android: Gradle, which invokes the Android NDK for native builds.
-  * See the documentation in android/build.gradle.
-* For iOS and MacOS: Xcode, via CocoaPods.
-  * See the documentation in ios/audio_core.podspec.
-  * See the documentation in macos/audio_core.podspec.
-* For Linux and Windows: CMake.
-  * See the documentation in linux/CMakeLists.txt.
-  * See the documentation in windows/CMakeLists.txt.
+* `audio_core` vendors the Media3 FFmpeg extension source under
+  `android/media3-src/decoder_ffmpeg`.
+* The Android build no longer depends on the third-party `nextlib-media3ext`
+  wrapper.
+* The FFmpeg shared objects are not built by `audio_core` itself; they are
+  expected to come from `audio_converter`.
 
 ## Binding to native code
 
@@ -83,10 +50,3 @@ For example, see `sum` in `lib/audio_core.dart`.
 Longer-running functions should be invoked on a helper isolate to avoid
 dropping frames in Flutter applications.
 For example, see `sumAsync` in `lib/audio_core.dart`.
-
-## Flutter help
-
-For help getting started with Flutter, view our
-[online documentation](https://docs.flutter.dev), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
-
