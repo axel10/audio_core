@@ -323,10 +323,30 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         ))
       }
 
-    case "finishFileWrite":
-      let path = Self.readString(call.arguments, key: "path")
+    case "prepareForFileWrite":
       do {
-        try engine.finishFileWrite(path: path)
+        if let paths = Self.readStringArray(call.arguments, key: "paths"), !paths.isEmpty {
+          try engine.prepareForFileWrite(paths: paths)
+        } else {
+          try engine.prepareForFileWrite(path: Self.readString(call.arguments, key: "path"))
+        }
+        result(nil)
+      } catch {
+        sendPlayerState(error: error.localizedDescription)
+        result(FlutterError(
+          code: "PREPARE_FILE_WRITE_FAILED",
+          message: error.localizedDescription,
+          details: nil
+        ))
+      }
+
+    case "finishFileWrite":
+      do {
+        if let paths = Self.readStringArray(call.arguments, key: "paths"), !paths.isEmpty {
+          try engine.finishFileWrite(paths: paths)
+        } else {
+          try engine.finishFileWrite(path: Self.readString(call.arguments, key: "path"))
+        }
         result(nil)
       } catch {
         sendPlayerState(error: error.localizedDescription)
@@ -336,6 +356,50 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
           details: nil
         ))
       }
+
+    case "registerPersistentAccess":
+      guard let path = Self.readString(call.arguments, key: "path") else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
+        return
+      }
+      result(engine.registerPersistentAccess(path: path))
+
+    case "forgetPersistentAccess":
+      guard let path = Self.readString(call.arguments, key: "path") else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
+        return
+      }
+      engine.forgetPersistentAccess(path: path)
+      result(nil)
+
+    case "hasPersistentAccess":
+      guard let path = Self.readString(call.arguments, key: "path") else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
+        return
+      }
+      result(engine.hasPersistentAccess(path: path))
+
+    case "listPersistentAccessPaths":
+      result(engine.listPersistentAccessPaths())
+
+    case "beginScopedAccess":
+      guard let path = Self.readString(call.arguments, key: "path") else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
+        return
+      }
+      result(engine.beginScopedAccess(path: path))
+
+    case "endScopedAccess":
+      guard let path = Self.readString(call.arguments, key: "path") else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
+        return
+      }
+      engine.endScopedAccess(path: path)
+      result(nil)
+
+    case "dispose":
+      engine.dispose()
+      result(nil)
 
     case "logMessage":
       let message = Self.readString(call.arguments, key: "message") ?? ""
@@ -496,6 +560,13 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
   private static func readString(_ arguments: Any?, key: String) -> String? {
     guard let args = arguments as? [String: Any] else { return nil }
     return args[key] as? String
+  }
+
+  private static func readStringArray(_ arguments: Any?, key: String) -> [String]? {
+    guard let args = arguments as? [String: Any] else { return nil }
+    guard let values = args[key] as? [Any] else { return nil }
+    let strings = values.compactMap { $0 as? String }.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    return strings.isEmpty ? nil : strings
   }
 
   private static func readTrackMetadataArgs(_ args: [String: Any]) -> [String: Any] {
