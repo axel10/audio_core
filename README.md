@@ -26,6 +26,20 @@ Practical requirement:
   but the FFmpeg extension will stay disabled and ExoPlayer will fall back to
   the normal MediaCodec path.
 
+## Apple FFmpeg fallback
+
+On iOS and macOS, `audio_core` now prefers `AVFoundation` for mainstream
+formats such as `m4a`, `mp3`, and `wav`, and falls back to FFmpeg for colder
+formats that AVFoundation cannot open.
+
+Implementation notes:
+
+* FFmpeg assets are consumed from the sibling `audio_ffmpeg_lib` package.
+* The iOS pod now requires iOS 13.0 or newer because the FFmpeg asset package
+  does the same.
+* Cold-format playback is decoded into PCM and scheduled through
+  `AVAudioPlayerNode`.
+
 Implementation notes:
 
 * `audio_core` vendors the Media3 FFmpeg extension source under

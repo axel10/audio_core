@@ -5,13 +5,15 @@ homepage:
 publish_to: 'none'
 environment:
   sdk: ^3.11.1
-  flutter: '>=3.3.0'
+  flutter: '>=3.7.0'
 
 dependencies:
   dart_chromaprint: ^1.1.0
   desktop_drop: ^0.7.0
   flutter:
     sdk: flutter
+  audio_ffmpeg_lib:
+    path: ../audio_ffmpeg_lib
   flutter_rust_bridge: 2.11.1
   meta: ^1.17.0
   path_provider: ^2.1.5
@@ -50,12 +52,12 @@ flutter:
         pluginClass: MyExoplayerPlugin
       ios:
         pluginClass: AudioCorePlugin
-        ffiPlugin: true
+        sharedDarwinSource: true
       linux:
         ffiPlugin: true
       macos:
         pluginClass: AudioCorePlugin
-        ffiPlugin: true
+        sharedDarwinSource: true
       windows:
         ffiPlugin: true
 

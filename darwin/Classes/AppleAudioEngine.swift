@@ -13,6 +13,82 @@ private struct AppleFftGroupingConfig {
   var aggregationMode: AppleFftAggregationMode = .peak
 }
 
+private enum AppleAudioLoadBackend {
+  case avFoundation
+  case ffmpeg
+}
+
+private enum AppleAudioSampleSource {
+  case avFoundation(AVAudioFile)
+  case ffmpeg(AppleFFmpegDecodedAudio)
+
+  var sampleRate: Double {
+    switch self {
+    case .avFoundation(let file):
+      return file.processingFormat.sampleRate
+    case .ffmpeg(let decoded):
+      return decoded.sampleRate
+    }
+  }
+
+  var channelCount: Int {
+    switch self {
+    case .avFoundation(let file):
+      return Int(file.processingFormat.channelCount)
+    case .ffmpeg(let decoded):
+      return decoded.channelCount
+    }
+  }
+
+  var frameCount: AVAudioFramePosition {
+    switch self {
+    case .avFoundation(let file):
+      return file.length
+    case .ffmpeg(let decoded):
+      return decoded.frameCount
+    }
+  }
+
+  func interleavedSamples(
+    sampleStride: Int = 1,
+    maxDurationMs: Int = 0
+  ) throws -> [Float] {
+    switch self {
+    case .avFoundation(let file):
+      return try AppleAudioEngine.readInterleavedPCM(
+        file: file,
+        sampleStride: sampleStride,
+        maxDurationMs: maxDurationMs
+      )
+    case .ffmpeg(let decoded):
+      let durationFrames = maxDurationMs > 0
+        ? AVAudioFramePosition((decoded.sampleRate * Double(maxDurationMs) / 1000.0).rounded(.down))
+        : decoded.frameCount
+      return decoded.interleavedSamples(
+        startFrame: 0,
+        frameCount: Int(durationFrames),
+        sampleStride: sampleStride
+      )
+    }
+  }
+
+  func monoSamples(
+    startFrame: AVAudioFramePosition = 0,
+    frameCount: Int? = nil
+  ) throws -> [Double] {
+    switch self {
+    case .avFoundation(let file):
+      return try AppleAudioEngine.readMonoWindow(
+        file: file,
+        startFrame: startFrame,
+        frameCount: frameCount ?? Int(file.length)
+      ).map(Double.init)
+    case .ffmpeg(let decoded):
+      return decoded.monoSamples(startFrame: startFrame, frameCount: frameCount)
+    }
+  }
+}
+
 final class AppleAudioEngine {
   private struct PendingEdit {
     let path: String
@@ -23,8 +99,12 @@ final class AppleAudioEngine {
 
   private let fftSize = 1024
   private let fftBinCount = 512
+  private let ffmpegScheduleChunkFrames = 4096
   private let waveformRmsWindowsPerChunk = 8
   private let waveformPrecisionScale = 100.0
+  private let avFoundationPreferredExtensions: Set<String> = [
+    "aac", "aif", "aiff", "caf", "m4a", "m4p", "mp3", "mp4", "m4v", "mov", "wav",
+  ]
   private let fileAccess: SecurityScopedFileAccessCoordinator
   private let engine = AVAudioEngine()
   private let deckMixerNode = AVAudioMixerNode()
@@ -76,17 +156,11 @@ final class AppleAudioEngine {
     releaseCurrentAccessIfNeeded()
 
     let url = try fileAccess.acquireAccess(for: path)
-    let file = try AVAudioFile(forReading: url)
-    currentDeck.sampleRate = file.processingFormat.sampleRate
-    currentDeck.loadedURL = url
-    currentDeck.loadedFile = file
-    currentDeck.playbackFramePosition = 0
-    currentDeck.isPlaybackScheduled = false
-    currentDeck.gain = 1.0
+    try loadAsset(into: currentDeck, from: url)
     preparedAccessPaths.remove(url.path)
     debugPrint(
       "[AppleAudioEngine] load done path=\(path) sampleRate=\(currentDeck.sampleRate) " +
-      "length=\(file.length) public=\(publicURL()?.path ?? "nil")"
+      "length=\(currentDeck.frameCount) public=\(publicURL()?.path ?? "nil")"
     )
   }
 
@@ -178,7 +252,7 @@ final class AppleAudioEngine {
       "[AppleAudioEngine] seek request positionMs=\(positionMs) " +
       "public=\(publicURL()?.path ?? "nil")"
     )
-    guard let currentFile = publicFile() else {
+    guard let currentDeck = publicDeck() else {
       throw NSError(
         domain: "AudioCore",
         code: 2,
@@ -186,19 +260,14 @@ final class AppleAudioEngine {
       )
     }
 
-    let targetDeck = publicDeck()
-    let targetFrame = framePosition(forMilliseconds: positionMs, sampleRate: publicSampleRate())
-    let clampedFrame = max(0, min(targetFrame, currentFile.length))
-    let wasPlaying = targetDeck?.isPlaying ?? false
-    if let deck = targetDeck {
-      deck.playbackFramePosition = clampedFrame
-    }
+    let targetFrame = framePosition(forMilliseconds: positionMs, sampleRate: currentDeck.sampleRate)
+    let clampedFrame = max(0, min(targetFrame, currentDeck.frameCount))
+    let wasPlaying = currentDeck.isPlaying
+    currentDeck.playbackFramePosition = clampedFrame
 
     if wasPlaying {
       stopPlayback(releasingFile: false, preservePosition: true)
-      if let deck = targetDeck {
-        try startPlaybackIfNeeded(on: deck, from: clampedFrame, volume: latestVolume)
-      }
+      try startPlaybackIfNeeded(on: currentDeck, from: clampedFrame, volume: latestVolume)
     }
     debugPrint(
       "[AppleAudioEngine] seek applied positionMs=\(positionMs) frame=\(clampedFrame) " +
@@ -218,8 +287,9 @@ final class AppleAudioEngine {
   }
 
   func getDurationMs() -> Int {
-    guard let currentFile = publicFile() else { return 0 }
-    return max(0, frameCountToMilliseconds(currentFile.length, sampleRate: publicSampleRate()))
+    let frameCount = publicFrameCount()
+    guard frameCount > 0 else { return 0 }
+    return max(0, frameCountToMilliseconds(frameCount, sampleRate: publicSampleRate()))
   }
 
   func getCurrentPositionMs() -> Int {
@@ -228,61 +298,49 @@ final class AppleAudioEngine {
   }
 
   func getLatestFft() throws -> [Double] {
-    guard let url = publicURL() else {
+    guard let source = publicSampleSource() else {
       return groupedZeroFrame()
     }
 
     let positionMs = getCurrentPositionMs()
     let centerFrame = AVAudioFramePosition((Double(positionMs) / 1000.0) * publicSampleRate())
     let startFrame = max(0, centerFrame - AVAudioFramePosition(fftSize / 2))
-    let monoSamples = try readMonoWindow(
-      url: url,
-      startFrame: startFrame,
-      frameCount: fftSize
-    )
+    let monoSamples = try source.monoSamples(startFrame: startFrame, frameCount: fftSize)
     return groupMagnitudes(computeMagnitudes(from: monoSamples))
   }
 
   func getWaveform(path: String, expectedChunks: Int) throws -> [Double] {
     guard expectedChunks > 0 else { return [] }
     return try fileAccess.withTemporaryAccess(for: path) { url in
-      let file = try AVAudioFile(forReading: url)
-      let format = file.processingFormat
-      let pcm = try readInterleavedPCM(file: file, sampleStride: 1)
-      if pcm.isEmpty {
-        return Array(repeating: 0.0, count: expectedChunks)
-      }
-
-      let monoSamples = mixToMonoSamples(pcm, channels: Int(format.channelCount))
-      return processWaveform(samples: monoSamples, expectedChunks: expectedChunks)
+      let source = try decodeAsset(for: url)
+      return processWaveform(
+        samples: try source.monoSamples(),
+        expectedChunks: expectedChunks
+      )
     }
   }
 
   func getAudioPcm(path: String, sampleStride: Int) throws -> [Float] {
     return try fileAccess.withTemporaryAccess(for: path) { url in
-      try readInterleavedPCM(url: url, sampleStride: sampleStride)
+      let source = try decodeAsset(for: url)
+      return try source.interleavedSamples(sampleStride: sampleStride)
     }
   }
 
   func getAudioPcmChannelCount(path: String) throws -> Int {
     try fileAccess.withTemporaryAccess(for: path) { url in
-      let file = try AVAudioFile(forReading: url)
-      return Int(file.processingFormat.channelCount)
+      let source = try decodeAsset(for: url)
+      return source.channelCount
     }
   }
 
   func getFingerprintPcm(path: String, maxDurationMs: Int) throws -> [String: Any] {
     try fileAccess.withTemporaryAccess(for: path) { url in
-      let file = try AVAudioFile(forReading: url)
-      let format = file.processingFormat
+      let source = try decodeAsset(for: url)
       return [
-        "samples": try readInterleavedPCM(
-          url: url,
-          sampleStride: 0,
-          maxDurationMs: maxDurationMs
-        ),
-        "sampleRate": Int(format.sampleRate.rounded()),
-        "channels": Int(format.channelCount),
+        "samples": try source.interleavedSamples(sampleStride: 1, maxDurationMs: maxDurationMs),
+        "sampleRate": Int(source.sampleRate.rounded()),
+        "channels": source.channelCount,
       ]
     }
   }
@@ -432,6 +490,37 @@ final class AppleAudioEngine {
     latestEqualizerConfig
   }
 
+  func extractFingerprint(path: String, expectedChunks: Int) throws -> String? {
+    // The Apple platform path currently keeps fingerprinting on the Dart/Rust side.
+    // This native method exists so the plugin interface stays buildable.
+    _ = path
+    _ = expectedChunks
+    return nil
+  }
+
+  func fitTrackMetadata(_ entry: [String: Any]) -> [String: Any] {
+    entry
+  }
+
+  func fitTrackMetadataInLibrary(path: String) throws -> [String: Any] {
+    _ = path
+    return [:]
+  }
+
+  func deleteFromLibrary(path: String) throws {
+    _ = path
+  }
+
+  func saveWaveform(path: String, data: [Double]) throws {
+    _ = path
+    _ = data
+  }
+
+  func addSilenceToWaveform(path: String, data: [Double]) throws {
+    _ = path
+    _ = data
+  }
+
   private func emitPlayerState(playbackState: String? = nil, error: String? = nil) {
     onPlayerStateChanged?(playbackState, error)
   }
@@ -488,8 +577,76 @@ final class AppleAudioEngine {
     publicDeck()?.loadedFile
   }
 
+  private func publicFFmpegPCM() -> AppleFFmpegDecodedAudio? {
+    publicDeck()?.ffmpegPCM
+  }
+
+  private func publicSampleSource() -> AppleAudioSampleSource? {
+    if let url = publicURL(), publicFile() != nil {
+      if let freshFile = try? AVAudioFile(forReading: url) {
+        return .avFoundation(freshFile)
+      }
+    }
+    if let decoded = publicFFmpegPCM() {
+      return .ffmpeg(decoded)
+    }
+    return nil
+  }
+
   private func publicSampleRate() -> Double {
     publicDeck()?.sampleRate ?? 44_100
+  }
+
+  private func publicFrameCount() -> AVAudioFramePosition {
+    publicDeck()?.frameCount ?? 0
+  }
+
+  private func publicChannelCount() -> Int {
+    publicDeck()?.channelCount ?? 0
+  }
+
+  private func preferredLoadBackend(for url: URL) -> AppleAudioLoadBackend {
+    let preferredExtension = url.pathExtension.lowercased()
+    if avFoundationPreferredExtensions.contains(preferredExtension) {
+      return .avFoundation
+    }
+    return .ffmpeg
+  }
+
+  private func decodeAsset(for url: URL) throws -> AppleAudioSampleSource {
+    switch preferredLoadBackend(for: url) {
+    case .avFoundation:
+      do {
+        return .avFoundation(try AVAudioFile(forReading: url))
+      } catch {
+        debugPrint(
+          "[AppleAudioEngine] AVFoundation decode failed, falling back to ffmpeg path=\(url.path) error=\(error)"
+        )
+        return .ffmpeg(try AppleFFmpegDecoder.decode(path: url.path))
+      }
+    case .ffmpeg:
+      return .ffmpeg(try AppleFFmpegDecoder.decode(path: url.path))
+    }
+  }
+
+  private func loadAsset(into deck: PlaybackDeck, from url: URL) throws {
+    let source = try decodeAsset(for: url)
+    switch source {
+    case .avFoundation(let file):
+      deck.sampleRate = file.processingFormat.sampleRate
+      deck.loadedURL = url
+      deck.loadedFile = file
+      deck.loadedFFmpegPCM = nil
+    case .ffmpeg(let decoded):
+      deck.sampleRate = decoded.sampleRate
+      deck.loadedURL = url
+      deck.loadedFile = nil
+      deck.loadedFFmpegPCM = decoded
+    }
+    deck.playbackFramePosition = 0
+    deck.isPlaybackScheduled = false
+    deck.gain = 1.0
+    deck.scheduledPCMBuffers.removeAll()
   }
 
   private func configureEngineIfNeeded() {
@@ -542,7 +699,7 @@ final class AppleAudioEngine {
     from framePosition: AVAudioFramePosition,
     volume: Double
   ) throws {
-    guard let currentFile = deck.loadedFile else {
+    guard deck.isLoaded else {
       throw NSError(
         domain: "AudioCore",
         code: 1,
@@ -558,9 +715,10 @@ final class AppleAudioEngine {
       return
     }
 
-    let clampedFrame = max(0, min(framePosition, currentFile.length))
-    guard clampedFrame < currentFile.length else {
-      deck.playbackFramePosition = currentFile.length
+    let totalFrameCount = deck.frameCount
+    let clampedFrame = max(0, min(framePosition, totalFrameCount))
+    guard clampedFrame < totalFrameCount else {
+      deck.playbackFramePosition = totalFrameCount
       return
     }
 
@@ -570,16 +728,30 @@ final class AppleAudioEngine {
 
     deck.stopPlaybackNode()
     let generation = deck.playbackGeneration
-    let framesRemaining = AVAudioFrameCount(currentFile.length - clampedFrame)
     let scheduledPath = deck.loadedURL?.path
-    schedulePlaybackSegment(
-      currentFile,
-      on: deck,
-      startingFrame: clampedFrame,
-      frameCount: framesRemaining,
-      generation: generation,
-      expectedPath: scheduledPath
-    )
+    if let decoded = deck.ffmpegPCM {
+      let scheduled = scheduleFFmpegPlayback(
+        decoded,
+        on: deck,
+        startingFrame: clampedFrame,
+        generation: generation,
+        expectedPath: scheduledPath
+      )
+      guard scheduled else {
+        deck.playbackFramePosition = totalFrameCount
+        return
+      }
+    } else if let currentFile = deck.loadedFile {
+      let framesRemaining = AVAudioFrameCount(currentFile.length - clampedFrame)
+      schedulePlaybackSegment(
+        currentFile,
+        on: deck,
+        startingFrame: clampedFrame,
+        frameCount: framesRemaining,
+        generation: generation,
+        expectedPath: scheduledPath
+      )
+    }
     deck.playbackFramePosition = clampedFrame
     deck.isPlaybackScheduled = true
     deck.playerNode.volume = Float(volume)
@@ -626,6 +798,57 @@ final class AppleAudioEngine {
         )
       }
     )
+  }
+
+  private func scheduleFFmpegPlayback(
+    _ decoded: AppleFFmpegDecodedAudio,
+    on deck: PlaybackDeck,
+    startingFrame: AVAudioFramePosition,
+    generation: UInt64,
+    expectedPath: String?
+  ) -> Bool {
+    let buffers = decoded.buildBufferQueue(
+      startFrame: startingFrame,
+      chunkFrames: ffmpegScheduleChunkFrames
+    )
+    deck.scheduledPCMBuffers = buffers
+
+    guard !buffers.isEmpty else {
+      handlePlaybackCompleted(deck: deck, generation: generation, expectedPath: expectedPath)
+      return false
+    }
+
+    for (index, buffer) in buffers.enumerated() {
+      let isLastBuffer = index == buffers.count - 1
+      if #available(macOS 10.13, iOS 11.0, *) {
+        deck.playerNode.scheduleBuffer(
+          buffer,
+          at: nil,
+          options: [],
+          completionCallbackType: .dataPlayedBack,
+          completionHandler: { [weak self] _ in
+            if isLastBuffer {
+              self?.handlePlaybackCompleted(
+                deck: deck,
+                generation: generation,
+                expectedPath: expectedPath
+              )
+            }
+          }
+        )
+      } else {
+        deck.playerNode.scheduleBuffer(buffer, completionHandler: { [weak self] in
+          if isLastBuffer {
+            self?.handlePlaybackCompleted(
+              deck: deck,
+              generation: generation,
+              expectedPath: expectedPath
+            )
+          }
+        })
+      }
+    }
+    return true
   }
 
   private func scheduleLegacyPlaybackCompletionCheck(
@@ -714,11 +937,14 @@ final class AppleAudioEngine {
       }
       if let currentFile = deck.loadedFile {
         deck.playbackFramePosition = currentFile.length
+      } else if let decoded = deck.ffmpegPCM {
+        deck.playbackFramePosition = decoded.frameCount
       }
       // Ensure the native node reports a stopped state so the Dart layer can
       // reliably treat this as a completed track and advance the queue.
       deck.stopPlaybackNode()
       deck.isPlaybackScheduled = false
+      deck.scheduledPCMBuffers.removeAll()
       self.emitPlayerState(playbackState: "ENDED")
     }
   }
@@ -776,9 +1002,11 @@ final class AppleAudioEngine {
 
     if currentDeck.isLoaded {
       currentDeck.playerNode.pause()
+      currentDeck.scheduledPCMBuffers.removeAll()
     }
     if incomingDeck.isLoaded {
       incomingDeck.playerNode.pause()
+      incomingDeck.scheduledPCMBuffers.removeAll()
     }
 
     // Emit the settled paused state only after the node has actually paused,
@@ -824,19 +1052,15 @@ final class AppleAudioEngine {
     }
 
     let incomingURL = try fileAccess.acquireAccess(for: path)
-    let incomingFile = try AVAudioFile(forReading: incomingURL)
-    incomingDeck.sampleRate = incomingFile.processingFormat.sampleRate
-    incomingDeck.loadedURL = incomingURL
-    incomingDeck.loadedFile = incomingFile
+    try loadAsset(into: incomingDeck, from: incomingURL)
     let startFrame: AVAudioFramePosition
     if let positionMs, positionMs > 0 {
       let targetFrame = framePosition(forMilliseconds: positionMs, sampleRate: incomingDeck.sampleRate)
-      startFrame = max(0, min(targetFrame, incomingFile.length))
+      startFrame = max(0, min(targetFrame, incomingDeck.frameCount))
     } else {
       startFrame = 0
     }
     incomingDeck.playbackFramePosition = startFrame
-    incomingDeck.isPlaybackScheduled = false
     incomingDeck.gain = 0.0
 
     currentDeck.playbackFramePosition = currentDeck.currentPlaybackFramePosition()
@@ -900,10 +1124,12 @@ final class AppleAudioEngine {
     swap(&currentDeck.playerNode, &incomingDeck.playerNode)
     swap(&currentDeck.loadedURL, &incomingDeck.loadedURL)
     swap(&currentDeck.loadedFile, &incomingDeck.loadedFile)
+    swap(&currentDeck.loadedFFmpegPCM, &incomingDeck.loadedFFmpegPCM)
     swap(&currentDeck.sampleRate, &incomingDeck.sampleRate)
     swap(&currentDeck.playbackFramePosition, &incomingDeck.playbackFramePosition)
     swap(&currentDeck.isPlaybackScheduled, &incomingDeck.isPlaybackScheduled)
     swap(&currentDeck.gain, &incomingDeck.gain)
+    swap(&currentDeck.scheduledPCMBuffers, &incomingDeck.scheduledPCMBuffers)
 
     currentDeck.gain = 1.0
     currentDeck.playerNode.volume = Float(latestVolume)
@@ -976,7 +1202,7 @@ final class AppleAudioEngine {
     Array(repeating: 0.0, count: fftGroupingConfig.frequencyGroups)
   }
 
-  private func readInterleavedPCM(
+  fileprivate static func readInterleavedPCM(
     file: AVAudioFile,
     sampleStride: Int,
     maxDurationMs: Int = 0
@@ -1025,13 +1251,13 @@ final class AppleAudioEngine {
     return samples
   }
 
-  private func readInterleavedPCM(
+  fileprivate static func readInterleavedPCM(
     url: URL,
     sampleStride: Int,
     maxDurationMs: Int = 0
   ) throws -> [Float] {
     let file = try AVAudioFile(forReading: url)
-    return try readInterleavedPCM(file: file, sampleStride: sampleStride, maxDurationMs: maxDurationMs)
+    return try Self.readInterleavedPCM(file: file, sampleStride: sampleStride, maxDurationMs: maxDurationMs)
   }
 
   private func mixToMonoSamples(_ pcm: [Float], channels: Int) -> [Double] {
@@ -1105,12 +1331,11 @@ final class AppleAudioEngine {
     return (value * waveformPrecisionScale).rounded() / waveformPrecisionScale
   }
 
-  private func readMonoWindow(
-    url: URL,
+  fileprivate static func readMonoWindow(
+    file: AVAudioFile,
     startFrame: AVAudioFramePosition,
     frameCount: Int
   ) throws -> [Float] {
-    let file = try AVAudioFile(forReading: url)
     let format = file.processingFormat
     let channels = Int(format.channelCount)
     let safeStart = max(0, min(startFrame, file.length))
@@ -1146,7 +1371,16 @@ final class AppleAudioEngine {
     return mono
   }
 
-  private func computeMagnitudes(from samples: [Float]) -> [Double] {
+  fileprivate static func readMonoWindow(
+    url: URL,
+    startFrame: AVAudioFramePosition,
+    frameCount: Int
+  ) throws -> [Float] {
+    let file = try AVAudioFile(forReading: url)
+    return try Self.readMonoWindow(file: file, startFrame: startFrame, frameCount: frameCount)
+  }
+
+  private func computeMagnitudes(from samples: [Double]) -> [Double] {
     let count = samples.count
     guard count > 0 else {
       return Array(repeating: 0.0, count: fftBinCount)
@@ -1158,7 +1392,7 @@ final class AppleAudioEngine {
     for index in 0..<count {
       let phase = (2.0 * Double.pi * Double(index)) / denominator
       let weight = 0.5 - 0.5 * cos(phase)
-      windowed[index] = Float(Double(windowed[index]) * weight)
+      windowed[index] *= weight
       windowSum += weight
     }
     let safeWindowSum = max(windowSum, 1e-9)

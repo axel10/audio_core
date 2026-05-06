@@ -1,6 +1,11 @@
 import AVFoundation
 import Foundation
+
+#if os(iOS)
+import Flutter
+#elseif os(macOS)
 import FlutterMacOS
+#endif
 
 public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
   private let fileAccess = SecurityScopedFileAccessCoordinator()
@@ -10,6 +15,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
   private var fftEventSink: FlutterEventSink?
   private var fftTimer: Timer?
   private var fftEmissionInFlight = false
+  private var fftEmitCount = 0
 
   public override init() {
     self.engine = AppleAudioEngine(fileAccess: fileAccess)
@@ -20,13 +26,18 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
   }
 
   public static func register(with registrar: FlutterPluginRegistrar) {
+    #if os(iOS)
+    let messenger = registrar.messenger()
+    #else
+    let messenger = registrar.messenger
+    #endif
     let channel = FlutterMethodChannel(
       name: "audio_core.player",
-      binaryMessenger: registrar.messenger
+      binaryMessenger: messenger
     )
     let fftChannel = FlutterEventChannel(
       name: "audio_core.player/fft",
-      binaryMessenger: registrar.messenger
+      binaryMessenger: messenger
     )
     let instance = AudioCorePlugin()
     instance.channel = channel
@@ -199,117 +210,125 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         }
       }
 
-    case "getAudioPcm":
+    case "extractFingerprint":
       guard let args = call.arguments as? [String: Any],
             let path = args["path"] as? String else {
         result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
         return
       }
-      let sampleStride = (args["sampleStride"] as? Int) ?? 0
-      do {
-        result(try engine.getAudioPcm(path: path, sampleStride: sampleStride))
-      } catch {
-        sendPlayerState(error: error.localizedDescription)
-        result(FlutterError(code: "PCM_FAILED", message: error.localizedDescription, details: nil))
+      let expectedChunks = Self.readInt(call.arguments, key: "expectedChunks") ?? 0
+      DispatchQueue.global(qos: .userInitiated).async {
+        do {
+          let fingerprint = try self.engine.extractFingerprint(
+            path: path,
+            expectedChunks: expectedChunks
+          )
+          DispatchQueue.main.async {
+            result(fingerprint)
+          }
+        } catch {
+          self.sendPlayerState(error: error.localizedDescription)
+          DispatchQueue.main.async {
+            result(FlutterError(code: "FINGERPRINT_FAILED", message: error.localizedDescription, details: nil))
+          }
+        }
       }
 
-    case "getAudioPcmChannelCount":
+    case "fitTrackMetadata":
+      guard let args = call.arguments as? [String: Any] else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "Arguments are null", details: nil))
+        return
+      }
+      let entry = AudioCorePlugin.readTrackMetadataArgs(args)
+      result(engine.fitTrackMetadata(entry))
+
+    case "fitTrackMetadataInLibrary":
       guard let args = call.arguments as? [String: Any],
             let path = args["path"] as? String else {
         result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
         return
       }
       do {
-        result(try engine.getAudioPcmChannelCount(path: path))
+        result(try engine.fitTrackMetadataInLibrary(path: path))
       } catch {
         sendPlayerState(error: error.localizedDescription)
-        result(FlutterError(code: "PCM_FAILED", message: error.localizedDescription, details: nil))
+        result(FlutterError(
+          code: "FIT_LIBRARY_FAILED",
+          message: error.localizedDescription,
+          details: nil
+        ))
       }
 
-    case "getFingerprintPcm":
+    case "deleteFromLibrary":
       guard let args = call.arguments as? [String: Any],
             let path = args["path"] as? String else {
         result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
         return
       }
-      let maxDurationMs = Self.readInt(call.arguments, key: "maxDurationMs") ?? 20_000
       do {
-        result(try engine.getFingerprintPcm(path: path, maxDurationMs: maxDurationMs))
-      } catch {
-        sendPlayerState(error: error.localizedDescription)
-        result(FlutterError(code: "PCM_FAILED", message: error.localizedDescription, details: nil))
-      }
-
-    case "prepareForFileWrite":
-      let path = Self.readString(call.arguments, key: "path")
-      do {
-        try engine.prepareForFileWrite(path: path)
-        sendPlayerState()
-        emitLatestFftSnapshot()
+        try engine.deleteFromLibrary(path: path)
         result(nil)
       } catch {
         sendPlayerState(error: error.localizedDescription)
-        result(FlutterError(code: "PREPARE_FAILED", message: error.localizedDescription, details: nil))
+        result(FlutterError(
+          code: "DELETE_LIBRARY_FAILED",
+          message: error.localizedDescription,
+          details: nil
+        ))
+      }
+
+    case "saveWaveform":
+      guard let args = call.arguments as? [String: Any],
+            let path = args["path"] as? String,
+            let data = args["data"] as? [Double] else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path or data is null", details: nil))
+        return
+      }
+      do {
+        try engine.saveWaveform(path: path, data: data)
+        result(nil)
+      } catch {
+        sendPlayerState(error: error.localizedDescription)
+        result(FlutterError(code: "SAVE_WAVEFORM_FAILED", message: error.localizedDescription, details: nil))
+      }
+
+    case "addSilenceToWaveform":
+      guard let args = call.arguments as? [String: Any],
+            let path = args["path"] as? String,
+            let data = args["data"] as? [Double] else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path or data is null", details: nil))
+        return
+      }
+      do {
+        try engine.addSilenceToWaveform(path: path, data: data)
+        result(nil)
+      } catch {
+        sendPlayerState(error: error.localizedDescription)
+        result(FlutterError(
+          code: "ADD_SILENCE_TO_WAVEFORM_FAILED",
+          message: error.localizedDescription,
+          details: nil
+        ))
       }
 
     case "finishFileWrite":
       let path = Self.readString(call.arguments, key: "path")
       do {
         try engine.finishFileWrite(path: path)
-        sendPlayerState()
-        emitLatestFftSnapshot()
         result(nil)
       } catch {
         sendPlayerState(error: error.localizedDescription)
-        result(FlutterError(code: "FINISH_FAILED", message: error.localizedDescription, details: nil))
+        result(FlutterError(
+          code: "FINISH_FILE_WRITE_FAILED",
+          message: error.localizedDescription,
+          details: nil
+        ))
       }
 
-    case "registerPersistentAccess":
-      guard let path = Self.readString(call.arguments, key: "path") else {
-        result(false)
-        return
-      }
-      result(engine.registerPersistentAccess(path: path))
-
-    case "forgetPersistentAccess":
-      guard let path = Self.readString(call.arguments, key: "path") else {
-        result(nil)
-        return
-      }
-      engine.forgetPersistentAccess(path: path)
-      result(nil)
-
-    case "hasPersistentAccess":
-      guard let path = Self.readString(call.arguments, key: "path") else {
-        result(false)
-        return
-      }
-      result(engine.hasPersistentAccess(path: path))
-
-    case "listPersistentAccessPaths":
-      result(engine.listPersistentAccessPaths())
-
-    case "beginScopedAccess":
-      guard let path = Self.readString(call.arguments, key: "path") else {
-        result(false)
-        return
-      }
-      result(engine.beginScopedAccess(path: path))
-
-    case "endScopedAccess":
-      guard let path = Self.readString(call.arguments, key: "path") else {
-        result(nil)
-        return
-      }
-      engine.endScopedAccess(path: path)
-      result(nil)
-
-    case "dispose":
-      debugPrint("[AudioCorePlugin] method=dispose")
-      engine.dispose()
-      stopFftStreaming()
-      fftEventSink = nil
-      sendPlayerState()
+    case "logMessage":
+      let message = Self.readString(call.arguments, key: "message") ?? ""
+      let level = Self.readString(call.arguments, key: "level") ?? "info"
+      self.logMessage(level: level, message: message)
       result(nil)
 
     default:
@@ -322,46 +341,57 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     eventSink events: @escaping FlutterEventSink
   ) -> FlutterError? {
     fftEventSink = events
-    startFftStreaming()
+    startFftTimerIfNeeded()
     emitLatestFftSnapshot()
     return nil
   }
 
   public func onCancel(withArguments arguments: Any?) -> FlutterError? {
-    stopFftStreaming()
+    stopFftTimer()
     fftEventSink = nil
     return nil
   }
 
   private func sendPlayerState(playbackState: String? = nil, error: String? = nil) {
-    guard let channel else { return }
-    let payload = engine.statusPayload(playbackState: playbackState, error: error)
-    let stateText = String(describing: payload["state"] ?? "nil")
-    let pathText = String(describing: payload["path"] ?? "nil")
-    let positionText = String(describing: payload["position"] ?? "nil")
-    let durationText = String(describing: payload["duration"] ?? "nil")
-    let playingText = String(describing: payload["isPlaying"] ?? "nil")
-    let errorText = String(describing: payload["error"] ?? "nil")
-    debugPrint(
-      "[AudioCorePlugin] emit state=\(stateText) " +
-      "path=\(pathText) pos=\(positionText) " +
-      "dur=\(durationText) playing=\(playingText) " +
-      "error=\(errorText)"
+    channel?.invokeMethod(
+      "onPlayerStateChanged",
+      arguments: engine.statusPayload(playbackState: playbackState, error: error)
     )
-    DispatchQueue.main.async {
-      channel.invokeMethod(
-        "onPlayerStateChanged",
-        arguments: payload
-      )
+  }
+
+  private func emitLatestFftSnapshot() {
+    guard !fftEmissionInFlight else { return }
+    fftEmissionInFlight = true
+    defer { fftEmissionInFlight = false }
+
+    guard let fftEventSink else { return }
+    do {
+      let fft = try engine.getLatestFft()
+      fftEmitCount &+= 1
+      if fft.isEmpty || fftEmitCount % 60 == 0 {
+        debugPrint(
+          "[AudioCorePlugin] fft emit count=\(fftEmitCount) values=\(fft.count) " +
+          "first=\(fft.first.map { String(format: "%.6f", $0) } ?? "nil")"
+        )
+      }
+      fftEventSink([
+        "type": "fft",
+        "payload": [
+          "values": fft,
+        ],
+      ])
+    } catch {
+      fftEventSink([
+        "type": "error",
+        "payload": error.localizedDescription,
+      ])
     }
   }
 
-  private func startFftStreaming() {
+  private func startFftTimerIfNeeded() {
     guard fftTimer == nil else { return }
-    fftTimer = Timer.scheduledTimer(
-      withTimeInterval: 1.0 / 30.0,
-      repeats: true
-    ) { [weak self] _ in
+    debugPrint("[AudioCorePlugin] fft timer start")
+    fftTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
       self?.emitLatestFftSnapshot()
     }
     if let fftTimer {
@@ -369,61 +399,49 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     }
   }
 
-  private func stopFftStreaming() {
+  private func stopFftTimer() {
+    guard fftTimer != nil else { return }
+    debugPrint("[AudioCorePlugin] fft timer stop")
     fftTimer?.invalidate()
     fftTimer = nil
-    fftEmissionInFlight = false
+    fftEmitCount = 0
   }
 
-  private func emitLatestFftSnapshot() {
-    guard fftEventSink != nil, !fftEmissionInFlight else { return }
-    fftEmissionInFlight = true
-    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-      guard let self else { return }
-      let values: [Double]
-      do {
-        values = try self.engine.getLatestFft()
-      } catch {
-        values = []
-        DispatchQueue.main.async {
-          self.sendPlayerState(error: error.localizedDescription)
-        }
-      }
-
-      DispatchQueue.main.async { [weak self] in
-        guard let self else { return }
-        defer { self.fftEmissionInFlight = false }
-        guard let sink = self.fftEventSink else { return }
-        sink([
-          "playerId": "main",
-          "values": values,
-        ])
-      }
+  private func logMessage(level: String, message: String) {
+    switch level.lowercased() {
+    case "debug":
+      debugPrint("[AudioCorePlugin] \(message)")
+    case "warning":
+      debugPrint("[AudioCorePlugin][warning] \(message)")
+    case "error":
+      debugPrint("[AudioCorePlugin][error] \(message)")
+    default:
+      debugPrint("[AudioCorePlugin] \(message)")
     }
   }
 
   private static func readInt(_ arguments: Any?, key: String) -> Int? {
-    guard let map = arguments as? [String: Any] else { return nil }
-    if let value = map[key] as? Int { return value }
-    if let value = map[key] as? Int64 { return Int(value) }
-    if let value = map[key] as? Double { return Int(value) }
-    if let value = map[key] as? NSNumber { return value.intValue }
+    guard let args = arguments as? [String: Any] else { return nil }
+    if let value = args[key] as? Int { return value }
+    if let value = args[key] as? Double { return Int(value) }
+    if let value = args[key] as? NSNumber { return value.intValue }
     return nil
   }
 
   private static func readDouble(_ arguments: Any?, key: String) -> Double? {
-    guard let map = arguments as? [String: Any] else { return nil }
-    if let value = map[key] as? Double { return value }
-    if let value = map[key] as? Int { return Double(value) }
-    if let value = map[key] as? Int64 { return Double(value) }
-    if let value = map[key] as? NSNumber { return value.doubleValue }
+    guard let args = arguments as? [String: Any] else { return nil }
+    if let value = args[key] as? Double { return value }
+    if let value = args[key] as? Int { return Double(value) }
+    if let value = args[key] as? NSNumber { return value.doubleValue }
     return nil
   }
 
   private static func readString(_ arguments: Any?, key: String) -> String? {
-    guard let map = arguments as? [String: Any] else { return nil }
-    guard let value = map[key] as? String else { return nil }
-    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? nil : trimmed
+    guard let args = arguments as? [String: Any] else { return nil }
+    return args[key] as? String
+  }
+
+  private static func readTrackMetadataArgs(_ args: [String: Any]) -> [String: Any] {
+    args
   }
 }

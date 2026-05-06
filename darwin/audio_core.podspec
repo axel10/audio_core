@@ -3,6 +3,9 @@
 # Run `pod lib lint audio_core.podspec` to validate before publishing.
 #
 Pod::Spec.new do |s|
+  ffmpeg_lib_root = '$(PODS_ROOT)/../Flutter/ephemeral/.symlinks/plugins/audio_ffmpeg_lib/macos/ffmpeg_lib'
+  ffmpeg_lib_arm64 = "#{ffmpeg_lib_root}/arm64/lib"
+  ffmpeg_lib_x86_64 = "#{ffmpeg_lib_root}/amd64/lib"
   s.name             = 'audio_core'
   s.version          = '0.0.1'
   s.summary          = 'A new Flutter FFI plugin project.'
@@ -13,15 +16,12 @@ A new Flutter FFI plugin project.
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Your Company' => 'email@example.com' }
 
-  # This will ensure the source files in Classes/ are included in the native
-  # builds of apps using this FFI plugin. Podspec does not support relative
-  # paths, so Classes contains a forwarder C file that relatively imports
-  # `../src/*` so that the C sources can be shared among all target platforms.
   s.source           = { :path => '.' }
-  s.source_files     = 'Classes/**/*'
+  s.source_files     = ['Classes/**/*']
+  s.dependency 'audio_ffmpeg_lib'
   s.dependency 'FlutterMacOS'
 
-  s.platform = :osx, '10.11'
+  s.platform = :osx, '11.0'
   s.swift_version = '5.0'
 
   s.script_phase = {
@@ -37,6 +37,41 @@ A new Flutter FFI plugin project.
 
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
-    'OTHER_LDFLAGS' => '-force_load ${BUILT_PRODUCTS_DIR}/libaudio_core.a',
+    'HEADER_SEARCH_PATHS' => [
+      '$(inherited)',
+      "#{ffmpeg_lib_root}/arm64/include",
+      "#{ffmpeg_lib_root}/amd64/include",
+    ].join(' '),
+    'LIBRARY_SEARCH_PATHS' => '$(inherited)',
+    'OTHER_LDFLAGS[arch=arm64]' => [
+      '$(inherited)',
+      "-L#{ffmpeg_lib_arm64}",
+    ].join(' '),
+    'OTHER_LDFLAGS[arch=x86_64]' => [
+      '$(inherited)',
+      "-L#{ffmpeg_lib_x86_64}",
+    ].join(' '),
+    'OTHER_LDFLAGS' => [
+      '-lavformat',
+      '-lavcodec',
+      '-lavutil',
+      '-lswresample',
+      '-lswscale',
+      '-lmp3lame',
+      '-lopus',
+      '-lm',
+      '-lz',
+      '-lbz2',
+      '-liconv',
+      '-framework',
+      'AudioToolbox',
+      '-framework',
+      'AVFoundation',
+      '-framework',
+      'CoreMedia',
+      '-framework',
+      'VideoToolbox',
+      '-force_load ${BUILT_PRODUCTS_DIR}/libaudio_core.a',
+    ].join(' '),
   }
 end

@@ -38,7 +38,8 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
 
       final args = (call.arguments as Map?)?.cast<String, dynamic>() ?? {};
       _currentPath = args['path'] as String? ?? _currentPath;
-      final playbackState = args['state'] as String?;
+      final playbackState =
+          args['playbackState'] as String? ?? args['state'] as String?;
       final positionMs = (args['position'] as num?)?.toInt() ?? 0;
       final durationMs = (args['duration'] as num?)?.toInt() ?? 0;
       final isPlaying = args['isPlaying'] as bool? ?? false;
@@ -185,7 +186,7 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
-  Future<String> getDecodeEngine() async => 'apple-native';
+  Future<String> getDecodeEngine() async => 'apple-native+ffmpeg-fallback';
 
   @override
   Future<Duration> getDuration() async {
@@ -560,6 +561,22 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
       final values = event['values'];
       if (values is List) {
         _latestFftCache = values
+            .map((e) => (e as num).toDouble())
+            .toList(growable: false);
+        return;
+      }
+      final payload = event['payload'];
+      if (payload is Map) {
+        final nestedValues = payload['values'];
+        if (nestedValues is List) {
+          _latestFftCache = nestedValues
+              .map((e) => (e as num).toDouble())
+              .toList(growable: false);
+          return;
+        }
+      }
+      if (payload is List) {
+        _latestFftCache = payload
             .map((e) => (e as num).toDouble())
             .toList(growable: false);
         return;
