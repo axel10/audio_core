@@ -265,6 +265,7 @@ struct AppleFFmpegDecodedAudio {
 
 final class AppleFFmpegStreamAudio {
   private let path: String
+  var sourcePath: String { path }
   private(set) var sampleRate: Double = 0
   private(set) var channelCount: Int = 0
   private(set) var frameCount: AVAudioFramePosition = 0
@@ -299,6 +300,24 @@ final class AppleFFmpegStreamAudio {
       audio_core_ffmpeg_close_stream(decoder)
       self.decoder = nil
     }
+  }
+
+  func makeTemporaryChunk(
+    startFrame: AVAudioFramePosition,
+    maxFrames: Int
+  ) throws -> AppleFFmpegDecodedAudio? {
+    guard maxFrames > 0, sampleRate > 0 else { return nil }
+    let tempStream = try AppleFFmpegStreamAudio(
+      path: path,
+      targetSampleRate: sampleRate,
+      startFrame: startFrame
+    )
+    defer { tempStream.close() }
+
+    guard let chunk = try tempStream.nextChunk(maxFrames: maxFrames) else {
+      return nil
+    }
+    return chunk
   }
 
   func nextChunk(maxFrames: Int) throws -> AppleFFmpegDecodedAudio? {

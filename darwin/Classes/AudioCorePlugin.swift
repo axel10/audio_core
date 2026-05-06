@@ -13,8 +13,12 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
   private var channel: FlutterMethodChannel?
   private var fftEventChannel: FlutterEventChannel?
   private var fftEventSink: FlutterEventSink?
-  private var fftTimer: Timer?
+  private var fftTimer: DispatchSourceTimer?
+  private let fftTimerQueue = DispatchQueue(label: "audio_core.plugin.fft.timer")
+  private let fftWorkQueue = DispatchQueue(label: "audio_core.plugin.fft.work", qos: .userInitiated)
+  private let fftStateLock = NSLock()
   private var fftEmissionInFlight = false
+  private var fftRefreshPending = false
   private var fftEmitCount = 0
   private let loadQueue = DispatchQueue(label: "audio_core.plugin.load", qos: .userInitiated)
 
@@ -367,31 +371,8 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
   }
 
   private func emitLatestFftSnapshot() {
-    guard !fftEmissionInFlight else { return }
-    fftEmissionInFlight = true
-    defer { fftEmissionInFlight = false }
-
-    guard let fftEventSink else { return }
-    do {
-      let fft = try engine.getLatestFft()
-      fftEmitCount &+= 1
-      if fft.isEmpty || fftEmitCount % 60 == 0 {
-        debugPrint(
-          "[AudioCorePlugin] fft emit count=\(fftEmitCount) values=\(fft.count) " +
-          "first=\(fft.first.map { String(format: "%.6f", $0) } ?? "nil")"
-        )
-      }
-      fftEventSink([
-        "type": "fft",
-        "payload": [
-          "values": fft,
-        ],
-      ])
-    } catch {
-      fftEventSink([
-        "type": "error",
-        "payload": error.localizedDescription,
-      ])
+    fftWorkQueue.async { [weak self] in
+      self?.performFftSnapshot()
     }
   }
 
@@ -399,20 +380,78 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     guard fftTimer == nil else { return }
     let interval = 1.0 / 30.0
     debugPrint("[AudioCorePlugin] fft timer start intervalMs=\(Int((interval * 1000.0).rounded()))")
-    fftTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+    let timer = DispatchSource.makeTimerSource(queue: fftTimerQueue)
+    timer.schedule(
+      deadline: .now(),
+      repeating: interval,
+      leeway: .milliseconds(5)
+    )
+    timer.setEventHandler { [weak self] in
       self?.emitLatestFftSnapshot()
     }
-    if let fftTimer {
-      RunLoop.main.add(fftTimer, forMode: .common)
-    }
+    fftTimer = timer
+    timer.resume()
   }
 
   private func stopFftTimer() {
     guard fftTimer != nil else { return }
     debugPrint("[AudioCorePlugin] fft timer stop")
-    fftTimer?.invalidate()
+    fftTimer?.cancel()
     fftTimer = nil
     fftEmitCount = 0
+    fftStateLock.lock()
+    fftEmissionInFlight = false
+    fftRefreshPending = false
+    fftStateLock.unlock()
+  }
+
+  private func performFftSnapshot() {
+    fftStateLock.lock()
+    if fftEmissionInFlight {
+      fftRefreshPending = true
+      fftStateLock.unlock()
+      return
+    }
+    fftEmissionInFlight = true
+    fftStateLock.unlock()
+
+    defer {
+      var shouldRefresh = false
+      fftStateLock.lock()
+      fftEmissionInFlight = false
+      shouldRefresh = fftRefreshPending
+      fftRefreshPending = false
+      fftStateLock.unlock()
+
+      if shouldRefresh {
+        emitLatestFftSnapshot()
+      }
+    }
+
+    guard let sink = fftEventSink else { return }
+    do {
+      let fft = try engine.getLatestFft()
+      fftEmitCount &+= 1
+      if fft.isEmpty || fftEmitCount % 30 == 0 {
+        debugPrint(
+          "[AudioCorePlugin] fft emit count=\(fftEmitCount) values=\(fft.count) " +
+          "first=\(fft.first.map { String(format: "%.6f", $0) } ?? "nil")"
+        )
+      }
+      DispatchQueue.main.async {
+        sink([
+          "playerId": "main",
+          "values": fft,
+        ])
+      }
+    } catch {
+      DispatchQueue.main.async {
+        sink([
+          "playerId": "main",
+          "error": error.localizedDescription,
+        ])
+      }
+    }
   }
 
   private func logMessage(level: String, message: String) {

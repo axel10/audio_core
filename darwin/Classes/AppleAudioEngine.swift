@@ -1,3 +1,4 @@
+import Accelerate
 import AVFoundation
 import Foundation
 
@@ -21,6 +22,7 @@ private enum AppleAudioLoadBackend {
 private enum AppleAudioSampleSource {
   case avFoundation(AVAudioFile)
   case ffmpeg(AppleFFmpegDecodedAudio)
+  case ffmpegStream(AppleFFmpegStreamAudio)
 
   var sampleRate: Double {
     switch self {
@@ -28,6 +30,8 @@ private enum AppleAudioSampleSource {
       return file.processingFormat.sampleRate
     case .ffmpeg(let decoded):
       return decoded.sampleRate
+    case .ffmpegStream(let stream):
+      return stream.sampleRate
     }
   }
 
@@ -37,6 +41,8 @@ private enum AppleAudioSampleSource {
       return Int(file.processingFormat.channelCount)
     case .ffmpeg(let decoded):
       return decoded.channelCount
+    case .ffmpegStream(let stream):
+      return stream.channelCount
     }
   }
 
@@ -46,6 +52,8 @@ private enum AppleAudioSampleSource {
       return file.length
     case .ffmpeg(let decoded):
       return decoded.frameCount
+    case .ffmpegStream(let stream):
+      return stream.frameCount
     }
   }
 
@@ -69,6 +77,15 @@ private enum AppleAudioSampleSource {
         frameCount: Int(durationFrames),
         sampleStride: sampleStride
       )
+    case .ffmpegStream(let stream):
+      let durationFrames = maxDurationMs > 0
+        ? AVAudioFramePosition((stream.sampleRate * Double(maxDurationMs) / 1000.0).rounded(.down))
+        : stream.frameCount
+      return try AppleAudioEngine.readFFmpegStreamInterleavedPCM(
+        stream: stream,
+        sampleStride: sampleStride,
+        maxFrames: Int(durationFrames)
+      )
     }
   }
 
@@ -85,7 +102,84 @@ private enum AppleAudioSampleSource {
       ).map(Double.init)
     case .ffmpeg(let decoded):
       return decoded.monoSamples(startFrame: startFrame, frameCount: frameCount)
+    case .ffmpegStream(let stream):
+      return try AppleAudioEngine.readFFmpegStreamMonoWindow(
+        stream: stream,
+        startFrame: startFrame,
+        frameCount: frameCount ?? Int(stream.frameCount)
+      )
     }
+  }
+}
+
+private final class AppleFftCaptureBuffer {
+  private let capacity: Int
+  private var samples: [Float]
+  private var writeIndex: Int = 0
+  private var storedCount: Int = 0
+  private let lock = NSLock()
+
+  init(capacity: Int) {
+    self.capacity = max(1, capacity)
+    self.samples = Array(repeating: 0, count: self.capacity)
+  }
+
+  func clear() {
+    lock.lock()
+    writeIndex = 0
+    storedCount = 0
+    lock.unlock()
+  }
+
+  func append(buffer: AVAudioPCMBuffer) {
+    let frameLength = Int(buffer.frameLength)
+    guard frameLength > 0 else { return }
+    guard let channelData = buffer.floatChannelData else { return }
+
+    let channelCount = max(Int(buffer.format.channelCount), 1)
+
+    lock.lock()
+    defer { lock.unlock() }
+
+    for frame in 0..<frameLength {
+      var sum: Float = 0
+      for channel in 0..<channelCount {
+        sum += channelData[channel][frame]
+      }
+      samples[writeIndex] = sum / Float(channelCount)
+      writeIndex += 1
+      if writeIndex >= capacity {
+        writeIndex = 0
+      }
+      if storedCount < capacity {
+        storedCount += 1
+      }
+    }
+  }
+
+  func snapshot(lastFrames: Int) -> [Float] {
+    guard lastFrames > 0 else { return [] }
+
+    lock.lock()
+    defer { lock.unlock() }
+
+    let count = min(lastFrames, storedCount)
+    guard count > 0 else { return [] }
+
+    var output = Array(repeating: Float(0), count: count)
+    let startIndex = writeIndex - count
+    if startIndex >= 0 {
+      output.replaceSubrange(0..<count, with: samples[startIndex..<(startIndex + count)])
+      return output
+    }
+
+    let leadingCount = -startIndex
+    let trailingCount = count - leadingCount
+    output.replaceSubrange(0..<leadingCount, with: samples[(capacity - leadingCount)..<capacity])
+    if trailingCount > 0 {
+      output.replaceSubrange(leadingCount..<count, with: samples[0..<trailingCount])
+    }
+    return output
   }
 }
 
@@ -99,6 +193,7 @@ final class AppleAudioEngine {
 
   private let fftSize = 1024
   private let fftBinCount = 512
+  private let fftLog2Size: vDSP_Length = 9
   private let ffmpegScheduleChunkFrames = 4096
   private let ffmpegPlaybackLookaheadBuffers = 3
   private let ffmpegPlaybackQueue = DispatchQueue(label: "audio_core.ffmpeg.playback", qos: .userInitiated)
@@ -121,6 +216,9 @@ final class AppleAudioEngine {
   private var preparedAccessPaths = Set<String>()
   private var isEngineConfigured = false
   private var fftGroupingConfig = AppleFftGroupingConfig()
+  private let fftSetup: FFTSetup?
+  private let fftCaptureBuffer = AppleFftCaptureBuffer(capacity: 16_384)
+  private var isFftTapInstalled = false
 
   var onPlayerStateChanged: ((String?, String?) -> Void)?
 
@@ -130,8 +228,16 @@ final class AppleAudioEngine {
 
   init(fileAccess: SecurityScopedFileAccessCoordinator) {
     self.fileAccess = fileAccess
+    self.fftSetup = vDSP_create_fftsetup(fftLog2Size, FFTRadix(kFFTRadix2))
     configureEngineIfNeeded()
     applyEqualizerConfig(latestEqualizerConfig)
+  }
+
+  deinit {
+    if let fftSetup {
+      vDSP_destroy_fftsetup(fftSetup)
+    }
+    equalizerNode.removeTap(onBus: 0)
   }
 
   func ensureReady() {
@@ -310,14 +416,7 @@ final class AppleAudioEngine {
   }
 
   func getLatestFft() throws -> [Double] {
-    guard let source = publicSampleSource() else {
-      return groupedZeroFrame()
-    }
-
-    let positionMs = getCurrentPositionMs()
-    let centerFrame = AVAudioFramePosition((Double(positionMs) / 1000.0) * publicSampleRate())
-    let startFrame = max(0, centerFrame - AVAudioFramePosition(fftSize / 2))
-    let monoSamples = try source.monoSamples(startFrame: startFrame, frameCount: fftSize)
+    let monoSamples = fftCaptureBuffer.snapshot(lastFrames: fftSize)
     return groupMagnitudes(computeMagnitudes(from: monoSamples))
   }
 
@@ -593,6 +692,10 @@ final class AppleAudioEngine {
     publicDeck()?.ffmpegPCM
   }
 
+  private func resetFftCaptureBuffer() {
+    fftCaptureBuffer.clear()
+  }
+
   private func publicSampleSource() -> AppleAudioSampleSource? {
     if let url = publicURL(), publicFile() != nil {
       if let freshFile = try? AVAudioFile(forReading: url) {
@@ -601,6 +704,9 @@ final class AppleAudioEngine {
     }
     if let decoded = publicFFmpegPCM() {
       return .ffmpeg(decoded)
+    }
+    if let stream = publicDeck()?.loadedFFmpegStream {
+      return .ffmpegStream(stream)
     }
     return nil
   }
@@ -688,6 +794,14 @@ final class AppleAudioEngine {
         deck.loadedFile = nil
         deck.loadedFFmpegPCM = playbackPCM
         deck.loadedFFmpegStream = nil
+      case .ffmpegStream(let stream):
+        // Defensive fallback: decodeAsset currently never returns a stream in this branch,
+        // but keep the switch exhaustive and preserve a usable PCM fallback if it ever does.
+        throw NSError(
+          domain: "AudioCore",
+          code: 2,
+          userInfo: [NSLocalizedDescriptionKey: "unexpected ffmpeg stream in avFoundation load path"]
+        )
       }
     case .ffmpeg:
       let targetSampleRate = playbackSampleRate()
@@ -710,6 +824,7 @@ final class AppleAudioEngine {
     deck.isPlaybackScheduled = false
     deck.gain = 1.0
     deck.scheduledPCMBuffers.removeAll()
+    resetFftCaptureBuffer()
     debugPrint(
       "[AppleAudioEngine] loadAsset done path=\(url.path) source=\(deck.sampleRate) " +
       "elapsedMs=\(String(format: "%.1f", currentTimestampMs() - startMs))"
@@ -726,8 +841,21 @@ final class AppleAudioEngine {
     engine.connect(incomingDeck.playerNode, to: deckMixerNode, format: nil)
     engine.connect(deckMixerNode, to: equalizerNode, format: nil)
     engine.connect(equalizerNode, to: engine.mainMixerNode, format: nil)
+    installFftCaptureTapIfNeeded()
     engine.prepare()
     isEngineConfigured = true
+  }
+
+  private func installFftCaptureTapIfNeeded() {
+    guard !isFftTapInstalled else { return }
+    equalizerNode.installTap(
+      onBus: 0,
+      bufferSize: AVAudioFrameCount(fftSize),
+      format: nil
+    ) { [weak self] buffer, _ in
+      self?.fftCaptureBuffer.append(buffer: buffer)
+    }
+    isFftTapInstalled = true
   }
 
   private func applyEqualizerConfig(_ config: AppleEqualizerConfig) {
@@ -1204,6 +1332,9 @@ final class AppleAudioEngine {
 
     currentDeck.clear(releasingFile: releasingFile)
     incomingDeck.clear(releasingFile: releasingFile)
+    if releasingFile {
+      resetFftCaptureBuffer()
+    }
 
     if !releasingFile {
       currentDeck.loadedFFmpegStream?.close()
@@ -1489,6 +1620,22 @@ final class AppleAudioEngine {
     return samples
   }
 
+  fileprivate static func readFFmpegStreamInterleavedPCM(
+    stream: AppleFFmpegStreamAudio,
+    sampleStride: Int,
+    maxFrames: Int
+  ) throws -> [Float] {
+    guard maxFrames > 0 else { return [] }
+    guard let chunk = try stream.makeTemporaryChunk(startFrame: 0, maxFrames: maxFrames) else {
+      return []
+    }
+    return chunk.interleavedSamples(
+      startFrame: 0,
+      frameCount: Int(chunk.frameCount),
+      sampleStride: sampleStride
+    )
+  }
+
   fileprivate static func readInterleavedPCM(
     url: URL,
     sampleStride: Int,
@@ -1609,6 +1756,18 @@ final class AppleAudioEngine {
     return mono
   }
 
+  fileprivate static func readFFmpegStreamMonoWindow(
+    stream: AppleFFmpegStreamAudio,
+    startFrame: AVAudioFramePosition,
+    frameCount: Int
+  ) throws -> [Double] {
+    guard frameCount > 0 else { return [] }
+    guard let chunk = try stream.makeTemporaryChunk(startFrame: startFrame, maxFrames: frameCount) else {
+      return Array(repeating: 0.0, count: frameCount)
+    }
+    return chunk.monoSamples(startFrame: 0, frameCount: frameCount)
+  }
+
   fileprivate static func readMonoWindow(
     url: URL,
     startFrame: AVAudioFramePosition,
@@ -1618,50 +1777,54 @@ final class AppleAudioEngine {
     return try Self.readMonoWindow(file: file, startFrame: startFrame, frameCount: frameCount)
   }
 
-  private func computeMagnitudes(from samples: [Double]) -> [Double] {
-    let count = samples.count
+  private func computeMagnitudes(from samples: [Float]) -> [Double] {
+    let count = min(samples.count, fftSize)
     guard count > 0 else {
       return Array(repeating: 0.0, count: fftBinCount)
     }
 
-    var windowed = samples
-    let denominator = max(Double(count - 1), 1.0)
+    var windowed = Array(repeating: Float(0), count: fftSize)
+    let denominator = max(Float(count - 1), 1.0)
     var windowSum = 0.0
     for index in 0..<count {
-      let phase = (2.0 * Double.pi * Double(index)) / denominator
-      let weight = 0.5 - 0.5 * cos(phase)
-      windowed[index] *= weight
-      windowSum += weight
+      let phase = (2.0 * Double.pi * Double(index)) / Double(denominator)
+      let weight = Float(0.5 - 0.5 * cos(phase))
+      windowed[index] = samples[index] * weight
+      windowSum += Double(weight)
     }
     let safeWindowSum = max(windowSum, 1e-9)
 
-    var magnitudes = Array(repeating: 0.0, count: fftBinCount)
-    let n = Double(count)
-    for bin in 0..<fftBinCount {
-      let theta = -2.0 * Double.pi * Double(bin) / n
-      let cosTheta = cos(theta)
-      let sinTheta = sin(theta)
-      var wReal = 1.0
-      var wImag = 0.0
-      var real = 0.0
-      var imag = 0.0
-
-      for sample in windowed {
-        let value = Double(sample)
-        real += value * wReal
-        imag += value * wImag
-
-        let nextReal = (wReal * cosTheta) - (wImag * sinTheta)
-        let nextImag = (wReal * sinTheta) + (wImag * cosTheta)
-        wReal = nextReal
-        wImag = nextImag
-      }
-
-      let scale = bin == 0 ? 1.0 : 2.0
-      magnitudes[bin] = (sqrt((real * real) + (imag * imag)) * scale) / safeWindowSum
+    guard let fftSetup else {
+      return Array(repeating: 0.0, count: fftBinCount)
     }
 
-    return magnitudes
+    var real = Array(repeating: Float(0), count: fftBinCount)
+    var imag = Array(repeating: Float(0), count: fftBinCount)
+    for index in 0..<fftBinCount {
+      real[index] = windowed[index * 2]
+      imag[index] = windowed[(index * 2) + 1]
+    }
+
+    return real.withUnsafeMutableBufferPointer { realBuffer in
+      imag.withUnsafeMutableBufferPointer { imagBuffer in
+        var splitComplex = DSPSplitComplex(
+          realp: realBuffer.baseAddress!,
+          imagp: imagBuffer.baseAddress!
+        )
+        vDSP_fft_zrip(fftSetup, &splitComplex, 1, fftLog2Size, FFTDirection(FFT_FORWARD))
+
+        var magnitudes = Array(repeating: 0.0, count: fftBinCount)
+        magnitudes[0] = Double(abs(splitComplex.realp[0])) / safeWindowSum
+        if fftBinCount > 1 {
+          for bin in 1..<fftBinCount {
+            let realValue = Double(splitComplex.realp[bin])
+            let imagValue = Double(splitComplex.imagp[bin])
+            magnitudes[bin] = (sqrt((realValue * realValue) + (imagValue * imagValue)) * 2.0) / safeWindowSum
+          }
+        }
+        return magnitudes
+      }
+    }
   }
 
   private func groupMagnitudes(_ magnitudes: [Double]) -> [Double] {
