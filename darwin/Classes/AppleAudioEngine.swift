@@ -200,7 +200,7 @@ final class AppleAudioEngine {
   private let waveformRmsWindowsPerChunk = 8
   private let waveformPrecisionScale = 100.0
   private let avFoundationPreferredExtensions: Set<String> = [
-    "aac", "aif", "aiff", "caf", "m4a", "m4p", "mp3", "mp4", "m4v", "mov", "wav","flac"
+    "aac", "aif", "aiff", "caf", "m4a", "m4p", "mp3", "mp4", "m4v", "mov", "wav"
   ]
   private let fileAccess: SecurityScopedFileAccessCoordinator
   private let engine = AVAudioEngine()
