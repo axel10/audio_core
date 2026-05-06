@@ -5,8 +5,6 @@ pub mod controller;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 pub mod equalizer;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
-pub mod ffmpeg_source;
-#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub mod fft;
 
 pub mod metadata;
@@ -32,29 +30,6 @@ pub mod equalizer {
         pub bass_boost_frequency_hz: f32,
         pub bass_boost_q: f32,
         pub band_gains_db: Vec<f32>,
-    }
-}
-
-#[cfg(any(target_os = "ios", target_os = "macos", target_os = "android"))]
-pub mod ffmpeg_source {
-    use std::path::Path;
-
-    use chrono::TimeDelta;
-
-    pub struct FfmpegAudioSource;
-
-    impl FfmpegAudioSource {
-        pub fn open(_path: impl AsRef<Path>) -> Result<Self, String> {
-            Err("FFmpeg audio source is not supported on this platform".to_string())
-        }
-
-        pub fn seek_to(&mut self, _position: TimeDelta) -> Result<(), String> {
-            Err("FFmpeg audio source is not supported on this platform".to_string())
-        }
-
-        pub fn total_duration(&self) -> Option<TimeDelta> {
-            None
-        }
     }
 }
 

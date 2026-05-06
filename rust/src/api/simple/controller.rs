@@ -1,6 +1,6 @@
 use super::equalizer::{EqSource, EqualizerConfig, EqualizerShared};
 #[cfg(any(target_os = "windows", target_os = "linux"))]
-use super::ffmpeg_source::FfmpegAudioSource;
+use ffmpeg_core::AudioSource as CoreAudioSource;
 use super::fft::{clear_fft_buffer, FftSource, RAW_FFT_BINS};
 use log::info;
 use rodio::cpal::traits::{DeviceTrait, HostTrait};
@@ -18,6 +18,70 @@ use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+struct FfmpegAudioSource {
+    inner: CoreAudioSource,
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+impl FfmpegAudioSource {
+    fn open(path: impl AsRef<std::path::Path>) -> Result<Self, String> {
+        CoreAudioSource::open(path)
+            .map(|inner| Self { inner })
+            .map_err(|error| error.to_string())
+    }
+
+    fn seek_to(&mut self, position: Duration) -> Result<(), String> {
+        self.inner
+            .seek_to(position)
+            .map_err(|error| error.to_string())
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
+    }
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+impl Iterator for FfmpegAudioSource {
+    type Item = rodio::Sample;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+impl Source for FfmpegAudioSource {
+    fn current_span_len(&self) -> Option<usize> {
+        self.inner.current_span_len()
+    }
+
+    fn channels(&self) -> rodio::ChannelCount {
+        std::num::NonZero::new(self.inner.channels())
+            .expect("ffmpeg source channels must be non-zero")
+    }
+
+    fn sample_rate(&self) -> rodio::SampleRate {
+        std::num::NonZero::new(self.inner.sample_rate())
+            .expect("ffmpeg source sample rate must be non-zero")
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.total_duration()
+    }
+
+    fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
+        self.seek_to(pos).map_err(|error| {
+            rodio::source::SeekError::Other(std::sync::Arc::new(std::io::Error::other(error)))
+        })
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FadeMode {
