@@ -31,6 +31,13 @@ packages:
       relative: true
     source: path
     version: "0.0.1"
+  audio_ffmpeg_lib:
+    dependency: transitive
+    description:
+      path: "../../audio_ffmpeg_lib"
+      relative: true
+    source: path
+    version: "0.0.1"
   audio_metadata_reader:
     dependency: "direct main"
     description:
