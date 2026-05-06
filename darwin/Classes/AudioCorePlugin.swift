@@ -20,6 +20,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
   private var fftEmissionInFlight = false
   private var fftRefreshPending = false
   private var fftEmitCount = 0
+  private var fftLastEmitAtMs: Double?
   private let loadQueue = DispatchQueue(label: "audio_core.plugin.load", qos: .userInitiated)
 
   public override init() {
@@ -399,6 +400,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     fftTimer?.cancel()
     fftTimer = nil
     fftEmitCount = 0
+    fftLastEmitAtMs = nil
     fftStateLock.lock()
     fftEmissionInFlight = false
     fftRefreshPending = false
@@ -432,9 +434,15 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     do {
       let fft = try engine.getLatestFft()
       fftEmitCount &+= 1
-      if fft.isEmpty || fftEmitCount % 30 == 0 {
+      let emitCount = fftEmitCount
+      let emittedAtMs = Date().timeIntervalSince1970 * 1000.0
+      let deltaMs = fftLastEmitAtMs.map { emittedAtMs - $0 }
+      fftLastEmitAtMs = emittedAtMs
+      if fft.isEmpty || emitCount % 30 == 0 {
         debugPrint(
-          "[AudioCorePlugin] fft emit count=\(fftEmitCount) values=\(fft.count) " +
+          "[AudioCorePlugin] fft emit count=\(emitCount) values=\(fft.count) " +
+          "deltaMs=\(deltaMs.map { String(format: "%.1f", $0) } ?? "nil") " +
+          "emittedAtMs=\(String(format: "%.1f", emittedAtMs)) " +
           "first=\(fft.first.map { String(format: "%.6f", $0) } ?? "nil")"
         )
       }
@@ -442,6 +450,8 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         sink([
           "playerId": "main",
           "values": fft,
+          "emitCount": emitCount,
+          "emittedAtMs": Int(emittedAtMs.rounded()),
         ])
       }
     } catch {

@@ -55,35 +55,43 @@ class _AudioDropRegionState extends State<AudioDropRegion> {
 
   @override
   Widget build(BuildContext context) {
-    return DropTarget(
-      enable: _enabled,
-      onDragEntered: (_) => setState(() => _isDragging = true),
-      onDragExited: (_) => setState(() => _isDragging = false),
-      onDragDone: (detail) async {
-        setState(() => _isDragging = false);
-        await _handleDrop(detail.files);
-      },
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: _isDragging ? const Color(0xFF2AD4FF) : Colors.transparent,
-            width: 2,
-          ),
-        ),
-        child: Stack(
-          children: [
-            widget.child,
-            if (_enabled && widget.controller.player.currentPath == null)
-              Center(
-                child: Text(
-                  widget.overlayText,
-                  style: const TextStyle(color: Colors.white70),
-                ),
+    return AnimatedBuilder(
+      animation: widget.controller,
+      child: widget.child,
+      builder: (context, child) {
+        return DropTarget(
+          enable: _enabled,
+          onDragEntered: (_) => setState(() => _isDragging = true),
+          onDragExited: (_) => setState(() => _isDragging = false),
+          onDragDone: (detail) async {
+            setState(() => _isDragging = false);
+            await _handleDrop(detail.files);
+          },
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _isDragging
+                    ? const Color(0xFF2AD4FF)
+                    : Colors.transparent,
+                width: 2,
               ),
-          ],
-        ),
-      ),
+            ),
+            child: Stack(
+              children: [
+                child ?? const SizedBox.shrink(),
+                if (_enabled && widget.controller.player.currentPath == null)
+                  Center(
+                    child: Text(
+                      widget.overlayText,
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -184,5 +192,56 @@ class DemoSpectrumPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant DemoSpectrumPainter oldDelegate) {
     return oldDelegate.bands != bands || oldDelegate.color != color;
+  }
+}
+
+class RawSpectrumPainter extends CustomPainter {
+  RawSpectrumPainter(this.bands);
+
+  final List<double> bands;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (bands.isEmpty || size.height <= 0 || size.width <= 0) {
+      return;
+    }
+
+    const safeTop = 8.0;
+    const safeBottom = 8.0;
+    const gap = 1.0;
+    const minBarHeight = 1.0;
+
+    final usableHeight = (size.height - safeTop - safeBottom).clamp(
+      0.0,
+      size.height,
+    );
+    final maxValue = bands.fold<double>(0.0, (max, value) {
+      return value > max ? value : max;
+    });
+    final scale = maxValue <= 0.0 ? 0.0 : 1.0 / maxValue;
+    final barWidth = ((size.width - (bands.length + 1) * gap) / bands.length)
+        .clamp(1.0, 12.0);
+
+    final paint = Paint()..color = const Color(0xFF64FFDA);
+    final baseline = size.height - safeBottom;
+
+    for (var i = 0; i < bands.length; i++) {
+      final normalized = (bands[i] * scale).clamp(0.0, 1.0);
+      final height = (normalized * usableHeight)
+          .clamp(math.min<double>(minBarHeight, usableHeight), usableHeight)
+          .toDouble();
+      final left = gap + i * (barWidth + gap);
+      final top = baseline - height;
+      final rect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(left, top, barWidth, height),
+        const Radius.circular(1),
+      );
+      canvas.drawRRect(rect, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant RawSpectrumPainter oldDelegate) {
+    return oldDelegate.bands != bands;
   }
 }

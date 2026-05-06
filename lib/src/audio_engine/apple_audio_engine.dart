@@ -25,6 +25,9 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   EqualizerConfig? _lastConfig;
   final Set<String> _preparedWritePaths = <String>{};
   List<double> _latestFftCache = const <double>[];
+  List<double> _lastLoggedFftFrame = const <double>[];
+  int? _lastFftEventAtMs;
+  int _fftEventCount = 0;
 
   @override
   Stream<AudioStatus> get statusStream => _statusController.stream;
@@ -78,6 +81,9 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     await _fftSubscription?.cancel();
     _fftSubscription = null;
     _latestFftCache = const <double>[];
+    _lastLoggedFftFrame = const <double>[];
+    _lastFftEventAtMs = null;
+    _fftEventCount = 0;
     await _channel.invokeMethod('dispose');
     _currentPath = null;
     _preparedWritePaths.clear();
@@ -88,6 +94,9 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     await _fftSubscription?.cancel();
     _fftSubscription = null;
     _latestFftCache = const <double>[];
+    _lastLoggedFftFrame = const <double>[];
+    _lastFftEventAtMs = null;
+    _fftEventCount = 0;
     await _statusController.close();
     await _channel.invokeMethod('dispose');
     _preparedWritePaths.clear();
@@ -98,6 +107,9 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     _currentPath = path;
     _preparedWritePaths.clear();
     _latestFftCache = const <double>[];
+    _lastLoggedFftFrame = const <double>[];
+    _lastFftEventAtMs = null;
+    _fftEventCount = 0;
     await _channel.invokeMethod('load', <String, Object?>{
       'url': path,
       'playerId': 'main',
@@ -112,6 +124,9 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   }) async {
     _currentPath = path;
     _latestFftCache = const <double>[];
+    _lastLoggedFftFrame = const <double>[];
+    _lastFftEventAtMs = null;
+    _fftEventCount = 0;
     await _channel.invokeMethod('crossfade', <String, Object?>{
       'path': path,
       'durationMs': duration.inMilliseconds,
@@ -138,6 +153,9 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
 
     _currentVolume = resolvedTargetVolume;
     _latestFftCache = const <double>[];
+    _lastLoggedFftFrame = const <double>[];
+    _lastFftEventAtMs = null;
+    _fftEventCount = 0;
     await setVolume(resolvedTargetVolume);
     await load(path);
 
@@ -557,21 +575,41 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   void _handleFftEvent(dynamic event) {
+    final receivedAtMs = DateTime.now().millisecondsSinceEpoch;
     if (event is Map) {
+      final emitCount = (event['emitCount'] as num?)?.toInt();
+      final emittedAtMs = (event['emittedAtMs'] as num?)?.toInt();
       final values = event['values'];
       if (values is List) {
         _latestFftCache = values
             .map((e) => (e as num).toDouble())
             .toList(growable: false);
+        _fftEventCount += 1;
+        _logFftEvent(
+          receivedAtMs: receivedAtMs,
+          emitCount: emitCount,
+          emittedAtMs: emittedAtMs,
+          valueCount: _latestFftCache.length,
+        );
         return;
       }
       final payload = event['payload'];
       if (payload is Map) {
+        final nestedEmitCount = (payload['emitCount'] as num?)?.toInt() ?? emitCount;
+        final nestedEmittedAtMs =
+            (payload['emittedAtMs'] as num?)?.toInt() ?? emittedAtMs;
         final nestedValues = payload['values'];
         if (nestedValues is List) {
           _latestFftCache = nestedValues
               .map((e) => (e as num).toDouble())
               .toList(growable: false);
+          _fftEventCount += 1;
+          _logFftEvent(
+            receivedAtMs: receivedAtMs,
+            emitCount: nestedEmitCount,
+            emittedAtMs: nestedEmittedAtMs,
+            valueCount: _latestFftCache.length,
+          );
           return;
         }
       }
@@ -579,16 +617,74 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
         _latestFftCache = payload
             .map((e) => (e as num).toDouble())
             .toList(growable: false);
+        _fftEventCount += 1;
+        _logFftEvent(
+          receivedAtMs: receivedAtMs,
+          emitCount: emitCount,
+          emittedAtMs: emittedAtMs,
+          valueCount: _latestFftCache.length,
+        );
         return;
       }
     } else if (event is List) {
       _latestFftCache = event
           .map((e) => (e as num).toDouble())
           .toList(growable: false);
+      _fftEventCount += 1;
+      _logFftEvent(
+        receivedAtMs: receivedAtMs,
+        emitCount: null,
+        emittedAtMs: null,
+        valueCount: _latestFftCache.length,
+      );
       return;
     }
 
     _latestFftCache = const <double>[];
+  }
+
+  void _logFftEvent({
+    required int receivedAtMs,
+    required int? emitCount,
+    required int? emittedAtMs,
+    required int valueCount,
+  }) {
+    if (!kDebugMode) return;
+
+    final deltaMs = _lastFftEventAtMs == null
+        ? null
+        : receivedAtMs - _lastFftEventAtMs!;
+    _lastFftEventAtMs = receivedAtMs;
+
+    if (_fftEventCount <= 5 || _fftEventCount % 30 == 0) {
+      final bridgeLagMs = emittedAtMs == null ? null : receivedAtMs - emittedAtMs;
+      final frameDelta = _meanAbsoluteDelta(_latestFftCache, _lastLoggedFftFrame);
+      final peak = _latestFftCache.fold<double>(0.0, (max, value) {
+        return value > max ? value : max;
+      });
+      debugPrint(
+        '[AppleAudioEngine] fft received count=$_fftEventCount '
+        'nativeEmitCount=${emitCount?.toString() ?? "nil"} '
+        'values=$valueCount '
+        'deltaMs=${deltaMs?.toString() ?? "nil"} '
+        'bridgeLagMs=${bridgeLagMs?.toString() ?? "nil"} '
+        'frameDelta=${frameDelta.toStringAsFixed(6)} '
+        'peak=${peak.toStringAsFixed(6)} '
+        'receivedAtMs=$receivedAtMs '
+        'nativeEmittedAtMs=${emittedAtMs?.toString() ?? "nil"}',
+      );
+      _lastLoggedFftFrame = List<double>.from(_latestFftCache);
+    }
+  }
+
+  double _meanAbsoluteDelta(List<double> lhs, List<double> rhs) {
+    final count = lhs.length < rhs.length ? lhs.length : rhs.length;
+    if (count == 0) return 0.0;
+    var total = 0.0;
+    for (var i = 0; i < count; i++) {
+      total += (lhs[i] - rhs[i]).abs();
+    }
+    return total / count;
   }
 
   Future<T> _withAppleFileWriteAccess<T>(

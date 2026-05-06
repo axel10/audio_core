@@ -218,6 +218,11 @@ final class AppleAudioEngine {
   private var fftGroupingConfig = AppleFftGroupingConfig()
   private let fftSetup: FFTSetup?
   private let fftCaptureBuffer = AppleFftCaptureBuffer(capacity: 16_384)
+  private let fftResultLock = NSLock()
+  private var latestFftFrame: [Double]
+  private var latestRawTapMagnitudes: [Double]
+  private var fftTapCount: Int = 0
+  private var fftLastTapAtMs: Double?
   private var isFftTapInstalled = false
 
   var onPlayerStateChanged: ((String?, String?) -> Void)?
@@ -229,6 +234,8 @@ final class AppleAudioEngine {
   init(fileAccess: SecurityScopedFileAccessCoordinator) {
     self.fileAccess = fileAccess
     self.fftSetup = vDSP_create_fftsetup(fftLog2Size, FFTRadix(kFFTRadix2))
+    self.latestFftFrame = Array(repeating: 0.0, count: fftBinCount)
+    self.latestRawTapMagnitudes = Array(repeating: 0.0, count: fftBinCount)
     configureEngineIfNeeded()
     applyEqualizerConfig(latestEqualizerConfig)
   }
@@ -254,6 +261,7 @@ final class AppleAudioEngine {
       skipHighFrequencyGroups: max(0, skipHighFrequencyGroups),
       aggregationMode: AppleFftAggregationMode(rawValue: aggregationMode) ?? .peak
     )
+    refreshLatestFftFrame()
   }
 
   var isPlaying: Bool {
@@ -416,8 +424,12 @@ final class AppleAudioEngine {
   }
 
   func getLatestFft() throws -> [Double] {
-    let monoSamples = fftCaptureBuffer.snapshot(lastFrames: fftSize)
-    return groupMagnitudes(computeMagnitudes(from: monoSamples))
+    if let sampledFrame = try sampleFftFrameFromPlaybackPosition() {
+      return sampledFrame
+    }
+    fftResultLock.lock()
+    defer { fftResultLock.unlock() }
+    return latestFftFrame
   }
 
   func getWaveform(path: String, expectedChunks: Int) throws -> [Double] {
@@ -688,12 +700,22 @@ final class AppleAudioEngine {
     publicDeck()?.loadedFile
   }
 
+  private func publicAnalysisFile() -> AVAudioFile? {
+    publicDeck()?.analysisFile
+  }
+
   private func publicFFmpegPCM() -> AppleFFmpegDecodedAudio? {
     publicDeck()?.ffmpegPCM
   }
 
   private func resetFftCaptureBuffer() {
     fftCaptureBuffer.clear()
+    fftResultLock.lock()
+    latestFftFrame = groupedZeroFrame()
+    latestRawTapMagnitudes = Array(repeating: 0.0, count: fftBinCount)
+    fftResultLock.unlock()
+    fftTapCount = 0
+    fftLastTapAtMs = nil
   }
 
   private func publicSampleSource() -> AppleAudioSampleSource? {
@@ -782,6 +804,7 @@ final class AppleAudioEngine {
         deck.sampleRate = file.processingFormat.sampleRate
         deck.loadedURL = url
         deck.loadedFile = file
+        deck.analysisFile = try AVAudioFile(forReading: url)
         deck.loadedFFmpegPCM = nil
         deck.loadedFFmpegStream = nil
       case .ffmpeg(let decoded):
@@ -792,6 +815,7 @@ final class AppleAudioEngine {
         deck.sampleRate = playbackPCM.sampleRate
         deck.loadedURL = url
         deck.loadedFile = nil
+        deck.analysisFile = nil
         deck.loadedFFmpegPCM = playbackPCM
         deck.loadedFFmpegStream = nil
       case .ffmpegStream(let stream):
@@ -817,6 +841,7 @@ final class AppleAudioEngine {
       deck.sampleRate = playbackStream.sampleRate
       deck.loadedURL = url
       deck.loadedFile = nil
+      deck.analysisFile = nil
       deck.loadedFFmpegPCM = nil
       deck.loadedFFmpegStream = playbackStream
     }
@@ -850,12 +875,91 @@ final class AppleAudioEngine {
     guard !isFftTapInstalled else { return }
     equalizerNode.installTap(
       onBus: 0,
-      bufferSize: AVAudioFrameCount(fftSize),
+      bufferSize: AVAudioFrameCount(fftSize / 2),
       format: nil
     ) { [weak self] buffer, _ in
-      self?.fftCaptureBuffer.append(buffer: buffer)
+      self?.handleFftTapBuffer(buffer)
     }
     isFftTapInstalled = true
+  }
+
+  private func handleFftTapBuffer(_ buffer: AVAudioPCMBuffer) {
+    fftCaptureBuffer.append(buffer: buffer)
+    refreshLatestFftFrame(frameLength: Int(buffer.frameLength))
+  }
+
+  private func refreshLatestFftFrame(frameLength: Int? = nil) {
+    let monoSamples = fftCaptureBuffer.snapshot(lastFrames: fftSize)
+    let magnitudes = computeMagnitudes(from: monoSamples)
+    let grouped = groupMagnitudes(magnitudes)
+
+    let tapNowMs = currentTimestampMs()
+    fftTapCount &+= 1
+    let tapDeltaMs = fftLastTapAtMs.map { tapNowMs - $0 }
+    fftLastTapAtMs = tapNowMs
+
+    let groupedDelta = meanAbsoluteDelta(grouped, comparedTo: latestFftFrame)
+    let magnitudeDelta = meanAbsoluteDelta(magnitudes, comparedTo: latestRawTapMagnitudes)
+
+    fftResultLock.lock()
+    latestFftFrame = grouped
+    latestRawTapMagnitudes = magnitudes
+    fftResultLock.unlock()
+
+    if fftTapCount <= 5 || fftTapCount % 30 == 0 {
+      debugPrint(
+        "[AppleAudioEngine] fft tap count=\(fftTapCount) " +
+        "frameLength=\(frameLength.map(String.init) ?? "nil") " +
+        "deltaMs=\(tapDeltaMs.map { String(format: "%.1f", $0) } ?? "nil") " +
+        "groupedDelta=\(String(format: "%.6f", groupedDelta)) " +
+        "magnitudeDelta=\(String(format: "%.6f", magnitudeDelta)) " +
+        "first=\(grouped.first.map { String(format: "%.6f", $0) } ?? "nil")"
+      )
+    }
+  }
+
+  private func meanAbsoluteDelta(_ lhs: [Double], comparedTo rhs: [Double]) -> Double {
+    let count = min(lhs.count, rhs.count)
+    guard count > 0 else { return 0.0 }
+    var total = 0.0
+    for index in 0..<count {
+      total += abs(lhs[index] - rhs[index])
+    }
+    return total / Double(count)
+  }
+
+  private func sampleFftFrameFromPlaybackPosition() throws -> [Double]? {
+    guard let deck = publicDeck(), deck.isLoaded else { return nil }
+
+    let totalFrameCount = deck.frameCount
+    guard totalFrameCount > 0 else { return groupedZeroFrame() }
+
+    let centerFrame = deck.currentPlaybackFramePosition()
+    let halfWindow = AVAudioFramePosition(fftSize / 2)
+    let desiredStart = max(0, centerFrame - halfWindow)
+    let maxStart = max(0, totalFrameCount - AVAudioFramePosition(fftSize))
+    let startFrame = min(desiredStart, maxStart)
+
+    let monoSamples: [Float]
+    if let analysisFile = publicAnalysisFile() {
+      monoSamples = try Self.readMonoWindow(
+        file: analysisFile,
+        startFrame: startFrame,
+        frameCount: fftSize
+      )
+    } else if let decoded = publicFFmpegPCM() {
+      monoSamples = decoded
+        .monoSamples(startFrame: startFrame, frameCount: fftSize)
+        .map(Float.init)
+    } else {
+      return nil
+    }
+
+    let grouped = groupMagnitudes(computeMagnitudes(from: monoSamples))
+    fftResultLock.lock()
+    latestFftFrame = grouped
+    fftResultLock.unlock()
+    return grouped
   }
 
   private func applyEqualizerConfig(_ config: AppleEqualizerConfig) {
@@ -1492,6 +1596,7 @@ final class AppleAudioEngine {
     swap(&currentDeck.playerNode, &incomingDeck.playerNode)
     swap(&currentDeck.loadedURL, &incomingDeck.loadedURL)
     swap(&currentDeck.loadedFile, &incomingDeck.loadedFile)
+    swap(&currentDeck.analysisFile, &incomingDeck.analysisFile)
     swap(&currentDeck.loadedFFmpegPCM, &incomingDeck.loadedFFmpegPCM)
     swap(&currentDeck.loadedFFmpegStream, &incomingDeck.loadedFFmpegStream)
     swap(&currentDeck.sampleRate, &incomingDeck.sampleRate)

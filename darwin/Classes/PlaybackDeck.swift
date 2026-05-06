@@ -5,6 +5,7 @@ final class PlaybackDeck {
   var playerNode = AVAudioPlayerNode()
   var loadedURL: URL?
   var loadedFile: AVAudioFile?
+  var analysisFile: AVAudioFile?
   var loadedFFmpegPCM: AppleFFmpegDecodedAudio?
   var loadedFFmpegStream: AppleFFmpegStreamAudio?
   var sampleRate: Double = 44_100
@@ -87,6 +88,7 @@ final class PlaybackDeck {
     if releasingFile {
       loadedURL = nil
       loadedFile = nil
+      analysisFile = nil
       loadedFFmpegPCM = nil
       loadedFFmpegStream?.close()
       loadedFFmpegStream = nil

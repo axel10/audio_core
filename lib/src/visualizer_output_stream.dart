@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import 'fft_frame.dart';
 import 'fft_processor.dart';
 import 'visualizer_output_config.dart';
@@ -33,6 +35,8 @@ class VisualizerOutputStream {
 
   Timer? _renderTimer;
   int _lastAnalysisMicros = 0;
+  int? _lastRenderTickMicros;
+  int _renderTickCount = 0;
   bool _isActive = false;
   int _listenerCount = 0;
 
@@ -106,6 +110,13 @@ class VisualizerOutputStream {
       return;
     }
 
+    final nowMicros = DateTime.now().microsecondsSinceEpoch;
+    final renderDeltaMicros = _lastRenderTickMicros == null
+        ? null
+        : nowMicros - _lastRenderTickMicros!;
+    _lastRenderTickMicros = nowMicros;
+    _renderTickCount += 1;
+
     // Get latest FFT data from source
     final rawBins = _fftSourceProvider();
     if (rawBins.isEmpty) {
@@ -113,11 +124,11 @@ class VisualizerOutputStream {
     }
 
     // Process analysis (only when we have a significant time gap)
-    final nowMicros = DateTime.now().microsecondsSinceEpoch;
+    final analysisNowMicros = DateTime.now().microsecondsSinceEpoch;
     final dtSec = _lastAnalysisMicros == 0
         ? (1000000.0 / 30.0) / 1000000.0
-        : (nowMicros - _lastAnalysisMicros) / 1000000.0;
-    _lastAnalysisMicros = nowMicros;
+        : (analysisNowMicros - _lastAnalysisMicros) / 1000000.0;
+    _lastAnalysisMicros = analysisNowMicros;
 
     _fftProcessor.processAnalysis(
       rawBins,
@@ -130,6 +141,15 @@ class VisualizerOutputStream {
 
     // Emit frame
     _emitFftFrame();
+
+    if (kDebugMode && (_renderTickCount <= 5 || _renderTickCount % 30 == 0)) {
+      debugPrint(
+        '[VisualizerOutputStream] id=$id renderTick=$_renderTickCount '
+        'rawBins=${rawBins.length} '
+        'renderDeltaMs=${renderDeltaMicros == null ? "nil" : (renderDeltaMicros / 1000.0).toStringAsFixed(1)} '
+        'targetFrameRate=${_config.targetFrameRate.toStringAsFixed(1)}',
+      );
+    }
   }
 
   int get _renderIntervalMicros {

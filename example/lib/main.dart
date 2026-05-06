@@ -48,7 +48,7 @@ void main() {
 
       final controller = AudioCoreController(
         fftSize: 1024,
-        analysisFrequencyHz: 30,
+        analysisFrequencyHz: 60,
         fadeSettings: const FadeSettings(
           fadeOnSwitch: true,
           fadeOnPauseResume: true,
@@ -119,10 +119,6 @@ class VisualizerDemoPage extends StatefulWidget {
 class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
   late final AudioCoreController _controller;
   final AudioConverter _audioConverter = AudioConverter();
-  StreamSubscription<FftFrame>? _subSmooth;
-  StreamSubscription<FftFrame>? _subResponsive;
-  List<double> _bandsSmooth = const [];
-  List<double> _bandsResponsive = const [];
   AudioLibraryFolder? _mediaLibraryRoot;
   bool _mediaLibraryLoading = false;
   String? _mediaLibraryError;
@@ -148,7 +144,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
     }
 
     // 创建平滑风格输出流 - 高平滑、低响应速度
-    final smoothOutput = _controller.visualizer.createOutput(
+    _controller.visualizer.createOutput(
       const VisualizerOutputConfig(
         id: 'smooth',
         label: 'Smooth',
@@ -166,7 +162,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
     );
 
     // 创建响应风格输出流 - 低平滑、快响应速度
-    final responsiveOutput = _controller.visualizer.createOutput(
+    _controller.visualizer.createOutput(
       const VisualizerOutputConfig(
         id: 'responsive',
         label: 'Responsive',
@@ -182,22 +178,6 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
         ),
       ),
     );
-
-    // 订阅平滑风格流
-    _subSmooth = smoothOutput.fftStream.listen((frame) {
-      if (!mounted) return;
-      setState(() {
-        _bandsSmooth = frame.values;
-      });
-    });
-
-    // 订阅响应风格流
-    _subResponsive = responsiveOutput.fftStream.listen((frame) {
-      if (!mounted) return;
-      setState(() {
-        _bandsResponsive = frame.values;
-      });
-    });
 
     _bootstrapAudioLibrary();
     _refreshEngineInfo();
@@ -386,8 +366,6 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
 
   @override
   void dispose() {
-    _subSmooth?.cancel();
-    _subResponsive?.cancel();
     // 采用单例模式后，不应在此处直接销毁全局控制器，否则页面重建会无法清理定时器
     // _controller.dispose();
     super.dispose();
@@ -395,93 +373,95 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, _) {
-        return DefaultTabController(
-          length: 7,
-          child: Scaffold(
-            appBar: AppBar(
-              title: const Text('Audio Visualizer Player Plugin Demo'),
-              backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-              bottom: const TabBar(
-                tabs: [
-                  Tab(icon: Icon(Icons.music_note), text: 'Player'),
-                  Tab(icon: Icon(Icons.info_outline), text: 'Metadata'),
-                  Tab(icon: Icon(Icons.tune), text: 'Fade Demo'),
-                  Tab(icon: Icon(Icons.blur_on), text: 'Mesh'),
-                  Tab(icon: Icon(Icons.shuffle), text: 'Random Lab'),
-                  Tab(icon: Icon(Icons.folder_open), text: 'Apple Dir'),
-                  Tab(icon: Icon(Icons.equalizer), text: 'Equalizer'),
+    return DefaultTabController(
+      length: 7,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Audio Visualizer Player Plugin Demo'),
+          backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+          bottom: const TabBar(
+            tabs: [
+              Tab(icon: Icon(Icons.music_note), text: 'Player'),
+              Tab(icon: Icon(Icons.info_outline), text: 'Metadata'),
+              Tab(icon: Icon(Icons.tune), text: 'Fade Demo'),
+              Tab(icon: Icon(Icons.blur_on), text: 'Mesh'),
+              Tab(icon: Icon(Icons.shuffle), text: 'Random Lab'),
+              Tab(icon: Icon(Icons.folder_open), text: 'Apple Dir'),
+              Tab(icon: Icon(Icons.equalizer), text: 'Equalizer'),
+            ],
+          ),
+        ),
+        body: TabBarView(
+          children: [
+            // 第一页: 播放器主界面
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  AnimatedBuilder(
+                    animation: _controller,
+                    builder: (context, _) => _buildPlayerControls(),
+                  ),
+                  const SizedBox(height: 8),
+                  _buildEngineInfo(context),
+                  if (Platform.isAndroid)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          _mediaLibraryLoading
+                              ? 'Scanning system media library...'
+                              : _mediaLibraryError == null
+                              ? 'System media library ready'
+                              : 'Library scan failed: $_mediaLibraryError',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 12),
+                  AnimatedBuilder(
+                    animation: _controller,
+                    builder: (context, _) => _buildFileAndWaveform(),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(height: 180, child: _buildRawSpectrumPanel()),
+                  const SizedBox(height: 16),
+                  // 双频谱可视化展示
+                  Expanded(
+                    child: AudioDropRegion(
+                      controller: _controller,
+                      onPathsAccepted: (paths) => _handleImportedPaths(paths),
+                      child: _buildSpectrumVisualizers(),
+                    ),
+                  ),
                 ],
               ),
             ),
-            body: TabBarView(
-              children: [
-                // 第一页: 播放器主界面
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      _buildPlayerControls(),
-                      const SizedBox(height: 8),
-                      _buildEngineInfo(context),
-                      if (Platform.isAndroid)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              _mediaLibraryLoading
-                                  ? 'Scanning system media library...'
-                                  : _mediaLibraryError == null
-                                  ? 'System media library ready'
-                                  : 'Library scan failed: $_mediaLibraryError',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ),
-                        ),
-                      const SizedBox(height: 12),
-                      _buildFileAndWaveform(),
-                      const SizedBox(height: 16),
-                      // 双频谱可视化展示
-                      Expanded(
-                        child: AudioDropRegion(
-                          controller: _controller,
-                          onPathsAccepted: (paths) =>
-                              _handleImportedPaths(paths),
-                          child: _buildSpectrumVisualizers(),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                // 第二页: 当前曲目信息 / 封面编辑
-                MetadataTab(controller: _controller),
-                // 第三页: 淡入淡出控制演示
-                FadeDemoTab(
-                  controller: _controller,
-                  onLoadMusicPressed: (fadeSetting) =>
-                      _pickAudio(fadeSetting: fadeSetting),
-                  onLoadMusicWithFadePressed: (fadeSetting) =>
-                      _pickAudio(fadeSetting: fadeSetting),
-                ),
-                // 第四页: 封面驱动的 mesh 动画背景
-                MeshDemoTab(controller: _controller),
-                // 第五页: 随机播放实验台
-                RandomLabTab(key: _randomLabKey, controller: _controller),
-                // 第六页: 苹果目录扫描页
-                AppleDirectoryTab(controller: _controller),
-                // 第七页: 均衡器界面
-                SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: EqualizerPanel(controller: _controller),
-                ),
-              ],
+            // 第二页: 当前曲目信息 / 封面编辑
+            MetadataTab(controller: _controller),
+            // 第三页: 淡入淡出控制演示
+            FadeDemoTab(
+              controller: _controller,
+              onLoadMusicPressed: (fadeSetting) =>
+                  _pickAudio(fadeSetting: fadeSetting),
+              onLoadMusicWithFadePressed: (fadeSetting) =>
+                  _pickAudio(fadeSetting: fadeSetting),
             ),
-          ),
-        );
-      },
+            // 第四页: 封面驱动的 mesh 动画背景
+            MeshDemoTab(controller: _controller),
+            // 第五页: 随机播放实验台
+            RandomLabTab(key: _randomLabKey, controller: _controller),
+            // 第六页: 苹果目录扫描页
+            AppleDirectoryTab(controller: _controller),
+            // 第七页: 均衡器界面
+            SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: EqualizerPanel(controller: _controller),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -777,80 +757,115 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
       children: [
         // 平滑风格可视化
         Expanded(
-          child: Column(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.purple.withValues(alpha: 0.3),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: const Text(
-                  'Smooth Style',
-                  style: TextStyle(
-                    color: Colors.purple,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.black,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: CustomPaint(
-                    painter: DemoSpectrumPainter(
-                      _bandsSmooth,
-                      color: Colors.purple,
-                    ),
-                    child: const SizedBox.expand(),
-                  ),
-                ),
-              ),
-            ],
+          child: _buildStreamSpectrumPanel(
+            title: 'Smooth Style',
+            titleColor: Colors.purple,
+            fillColor: Colors.purple,
+            stream: _controller.visualizer.getOutput('smooth')!.fftStream,
           ),
         ),
         const SizedBox(width: 12),
         // 响应风格可视化
         Expanded(
-          child: Column(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.orange.withValues(alpha: 0.3),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: const Text(
-                  'Responsive Style',
-                  style: TextStyle(
-                    color: Colors.orange,
-                    fontWeight: FontWeight.bold,
-                  ),
+          child: _buildStreamSpectrumPanel(
+            title: 'Responsive Style',
+            titleColor: Colors.orange,
+            fillColor: Colors.orange,
+            stream: _controller.visualizer.getOutput('responsive')!.fftStream,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStreamSpectrumPanel({
+    required String title,
+    required Color titleColor,
+    required Color fillColor,
+    required Stream<FftFrame> stream,
+  }) {
+    return StreamBuilder<FftFrame>(
+      stream: stream,
+      builder: (context, snapshot) {
+        final bands = snapshot.data?.values ?? const <double>[];
+        return Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: titleColor.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                title,
+                style: TextStyle(
+                  color: titleColor,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.black,
-                    borderRadius: BorderRadius.circular(12),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: CustomPaint(
+                  painter: DemoSpectrumPainter(bands, color: fillColor),
+                  child: const SizedBox.expand(),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildRawSpectrumPanel() {
+    return StreamBuilder<FftFrame>(
+      stream: _controller.visualizer.rawStream,
+      builder: (context, snapshot) {
+        final bands = snapshot.data?.values ?? const <double>[];
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.cyan.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Text(
+                'Raw Grouped FFT',
+                style: TextStyle(
+                  color: Colors.cyanAccent,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.08),
                   ),
+                ),
+                child: RepaintBoundary(
                   child: CustomPaint(
-                    painter: DemoSpectrumPainter(
-                      _bandsResponsive,
-                      color: Colors.orange,
-                    ),
+                    painter: RawSpectrumPainter(bands),
                     child: const SizedBox.expand(),
                   ),
                 ),
               ),
-            ],
-          ),
-        ),
-      ],
+            ),
+          ],
+        );
+      },
     );
   }
 }
