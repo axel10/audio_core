@@ -6,6 +6,7 @@ final class PlaybackDeck {
   var loadedURL: URL?
   var loadedFile: AVAudioFile?
   var loadedFFmpegPCM: AppleFFmpegDecodedAudio?
+  var loadedFFmpegStream: AppleFFmpegStreamAudio?
   var sampleRate: Double = 44_100
   var playbackFramePosition: AVAudioFramePosition = 0
   var isPlaybackScheduled = false
@@ -14,12 +15,15 @@ final class PlaybackDeck {
   var scheduledPCMBuffers: [AVAudioPCMBuffer] = []
 
   var isLoaded: Bool {
-    loadedFile != nil || loadedFFmpegPCM != nil
+    loadedFile != nil || loadedFFmpegPCM != nil || loadedFFmpegStream != nil
   }
 
   var channelCount: Int {
     if let loadedFile {
       return Int(loadedFile.processingFormat.channelCount)
+    }
+    if let loadedFFmpegStream {
+      return loadedFFmpegStream.channelCount
     }
     return loadedFFmpegPCM?.channelCount ?? 0
   }
@@ -27,6 +31,9 @@ final class PlaybackDeck {
   var frameCount: AVAudioFramePosition {
     if let loadedFile {
       return loadedFile.length
+    }
+    if let loadedFFmpegStream {
+      return loadedFFmpegStream.frameCount
     }
     return loadedFFmpegPCM?.frameCount ?? 0
   }
@@ -81,6 +88,8 @@ final class PlaybackDeck {
       loadedURL = nil
       loadedFile = nil
       loadedFFmpegPCM = nil
+      loadedFFmpegStream?.close()
+      loadedFFmpegStream = nil
     }
   }
 }

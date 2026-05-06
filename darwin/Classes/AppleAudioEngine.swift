@@ -101,6 +101,7 @@ final class AppleAudioEngine {
   private let fftBinCount = 512
   private let ffmpegScheduleChunkFrames = 4096
   private let ffmpegPlaybackLookaheadBuffers = 3
+  private let ffmpegPlaybackQueue = DispatchQueue(label: "audio_core.ffmpeg.playback", qos: .userInitiated)
   private let waveformRmsWindowsPerChunk = 8
   private let waveformPrecisionScale = 100.0
   private let avFoundationPreferredExtensions: Set<String> = [
@@ -667,37 +668,50 @@ final class AppleAudioEngine {
 
   private func loadAsset(into deck: PlaybackDeck, from url: URL) throws {
     let startMs = currentTimestampMs()
-    let source = try decodeAsset(for: url)
-    switch source {
-    case .avFoundation(let file):
-      deck.sampleRate = file.processingFormat.sampleRate
-      deck.loadedURL = url
-      deck.loadedFile = file
-      deck.loadedFFmpegPCM = nil
-    case .ffmpeg(let decoded):
-      let resampleStartMs = currentTimestampMs()
-      let targetSampleRate = playbackSampleRate()
-      let playbackPCM: AppleFFmpegDecodedAudio
-      if abs(decoded.sampleRate - targetSampleRate) >= 1 {
-        playbackPCM = try decoded.resampled(to: targetSampleRate)
-      } else {
-        playbackPCM = decoded
+    switch preferredLoadBackend(for: url) {
+    case .avFoundation:
+      let source = try decodeAsset(for: url)
+      switch source {
+      case .avFoundation(let file):
+        deck.sampleRate = file.processingFormat.sampleRate
+        deck.loadedURL = url
+        deck.loadedFile = file
+        deck.loadedFFmpegPCM = nil
+        deck.loadedFFmpegStream = nil
+      case .ffmpeg(let decoded):
+        // Some files can advertise AVFoundation support but still fail on Apple.
+        // Keep the legacy fallback for those rare cases.
+        let targetSampleRate = playbackSampleRate()
+        let playbackPCM = try decoded.resampled(to: targetSampleRate)
+        deck.sampleRate = playbackPCM.sampleRate
+        deck.loadedURL = url
+        deck.loadedFile = nil
+        deck.loadedFFmpegPCM = playbackPCM
+        deck.loadedFFmpegStream = nil
       }
+    case .ffmpeg:
+      let targetSampleRate = playbackSampleRate()
+      let playbackStream = try AppleFFmpegStreamAudio(
+        path: url.path,
+        targetSampleRate: targetSampleRate,
+        startFrame: 0
+      )
       debugPrint(
         "[AppleAudioEngine] ffmpeg load prepared path=\(url.path) targetSampleRate=\(targetSampleRate) " +
-        "elapsedResampleMs=\(String(format: "%.1f", currentTimestampMs() - resampleStartMs))"
+        "sampleRate=\(playbackStream.sampleRate) frameCount=\(playbackStream.frameCount)"
       )
-      deck.sampleRate = playbackPCM.sampleRate
+      deck.sampleRate = playbackStream.sampleRate
       deck.loadedURL = url
       deck.loadedFile = nil
-      deck.loadedFFmpegPCM = playbackPCM
+      deck.loadedFFmpegPCM = nil
+      deck.loadedFFmpegStream = playbackStream
     }
     deck.playbackFramePosition = 0
     deck.isPlaybackScheduled = false
     deck.gain = 1.0
     deck.scheduledPCMBuffers.removeAll()
     debugPrint(
-      "[AppleAudioEngine] loadAsset done path=\(url.path) source=\(source.sampleRate) " +
+      "[AppleAudioEngine] loadAsset done path=\(url.path) source=\(deck.sampleRate) " +
       "elapsedMs=\(String(format: "%.1f", currentTimestampMs() - startMs))"
     )
   }
@@ -783,8 +797,20 @@ final class AppleAudioEngine {
     deck.stopPlaybackNode()
     let generation = deck.playbackGeneration
     let scheduledPath = deck.loadedURL?.path
-    if let decoded = deck.ffmpegPCM {
+    if let stream = deck.loadedFFmpegStream {
       let scheduled = scheduleFFmpegPlayback(
+        stream,
+        on: deck,
+        startingFrame: clampedFrame,
+        generation: generation,
+        expectedPath: scheduledPath
+      )
+      guard scheduled else {
+        deck.playbackFramePosition = totalFrameCount
+        return
+      }
+    } else if let decoded = deck.loadedFFmpegPCM {
+      let scheduled = scheduleLegacyFFmpegPlayback(
         decoded,
         on: deck,
         startingFrame: clampedFrame,
@@ -859,15 +885,26 @@ final class AppleAudioEngine {
   }
 
   private func scheduleFFmpegPlayback(
-    _ decoded: AppleFFmpegDecodedAudio,
+    _ stream: AppleFFmpegStreamAudio,
     on deck: PlaybackDeck,
     startingFrame: AVAudioFramePosition,
     generation: UInt64,
     expectedPath: String?
   ) -> Bool {
     let startMs = currentTimestampMs()
-    let totalFrames = decoded.frameCount
+    let totalFrames = stream.frameCount
     let startFrame = max(0, min(startingFrame, totalFrames))
+    do {
+      try stream.ensureOpen(targetSampleRate: deck.sampleRate, startFrame: startFrame)
+    } catch {
+      debugPrint(
+        "[AppleAudioEngine] ffmpeg stream reopen failed path=\(deck.loadedURL?.path ?? "nil") " +
+        "error=\(error.localizedDescription)"
+      )
+      handlePlaybackCompleted(deck: deck, generation: generation, expectedPath: expectedPath)
+      return false
+    }
+
     var nextFrameToSchedule = startFrame
     deck.scheduledPCMBuffers.removeAll()
 
@@ -881,14 +918,28 @@ final class AppleAudioEngine {
         return false
       }
 
-      let bufferStart = nextFrameToSchedule
-      guard let buffer = decoded.buildPCMBuffer(
-        startFrame: bufferStart,
-        maxFrames: ffmpegScheduleChunkFrames
-      ) else {
+      let chunkBuffer: AppleFFmpegDecodedAudio
+      do {
+        guard let chunk = try stream.nextChunk(maxFrames: ffmpegScheduleChunkFrames) else {
+          return false
+        }
+        chunkBuffer = chunk
+      } catch {
+        debugPrint(
+          "[AppleAudioEngine] ffmpeg stream chunk decode failed path=\(deck.loadedURL?.path ?? "nil") " +
+          "error=\(error.localizedDescription)"
+        )
+        return false
+      }
+      guard chunkBuffer.frameCount > 0 else {
         return false
       }
 
+      let bufferStart = nextFrameToSchedule
+      let buffer = chunkBuffer.buildPCMBuffer(startFrame: 0, maxFrames: Int(chunkBuffer.frameCount))
+      guard let buffer else {
+        return false
+      }
       let bufferFrameCount = AVAudioFramePosition(buffer.frameLength)
       guard bufferFrameCount > 0 else {
         return false
@@ -907,9 +958,6 @@ final class AppleAudioEngine {
           guard deck.playbackGeneration == generation, deck.isPlaybackScheduled else {
             return
           }
-          if !deck.scheduledPCMBuffers.isEmpty {
-            deck.scheduledPCMBuffers.removeFirst()
-          }
           if isLastBuffer {
             self.handlePlaybackCompleted(
               deck: deck,
@@ -919,16 +967,23 @@ final class AppleAudioEngine {
             return
           }
 
-          if !scheduleNextBuffer() {
-            debugPrint(
-              "[AppleAudioEngine] ffmpeg schedule refill failed path=\(deck.loadedURL?.path ?? "nil") " +
-              "generation=\(generation)"
-            )
-            self.handlePlaybackCompleted(
-              deck: deck,
-              generation: generation,
-              expectedPath: expectedPath
-            )
+          self.ffmpegPlaybackQueue.async {
+            if !deck.scheduledPCMBuffers.isEmpty {
+              deck.scheduledPCMBuffers.removeFirst()
+            }
+            if !scheduleNextBuffer() {
+              debugPrint(
+                "[AppleAudioEngine] ffmpeg schedule refill failed path=\(deck.loadedURL?.path ?? "nil") " +
+                "generation=\(generation)"
+              )
+              DispatchQueue.main.async {
+                self.handlePlaybackCompleted(
+                  deck: deck,
+                  generation: generation,
+                  expectedPath: expectedPath
+                )
+              }
+            }
           }
         }
       }
@@ -953,11 +1008,13 @@ final class AppleAudioEngine {
     }
 
     var scheduledAny = false
-    for _ in 0..<ffmpegPlaybackLookaheadBuffers {
-      guard scheduleNextBuffer() else {
-        break
+    ffmpegPlaybackQueue.sync {
+      for _ in 0..<ffmpegPlaybackLookaheadBuffers {
+        guard scheduleNextBuffer() else {
+          break
+        }
+        scheduledAny = true
       }
-      scheduledAny = true
     }
 
     guard scheduledAny else {
@@ -968,6 +1025,57 @@ final class AppleAudioEngine {
       "[AppleAudioEngine] ffmpeg schedule initial queued=\(deck.scheduledPCMBuffers.count) " +
       "elapsedMs=\(String(format: "%.1f", currentTimestampMs() - startMs))"
     )
+    return true
+  }
+
+  private func scheduleLegacyFFmpegPlayback(
+    _ decoded: AppleFFmpegDecodedAudio,
+    on deck: PlaybackDeck,
+    startingFrame: AVAudioFramePosition,
+    generation: UInt64,
+    expectedPath: String?
+  ) -> Bool {
+    let buffers = decoded.buildBufferQueue(
+      startFrame: startingFrame,
+      chunkFrames: ffmpegScheduleChunkFrames
+    )
+    deck.scheduledPCMBuffers = buffers
+
+    guard !buffers.isEmpty else {
+      handlePlaybackCompleted(deck: deck, generation: generation, expectedPath: expectedPath)
+      return false
+    }
+
+    for (index, buffer) in buffers.enumerated() {
+      let isLastBuffer = index == buffers.count - 1
+      if #available(macOS 10.13, iOS 11.0, *) {
+        deck.playerNode.scheduleBuffer(
+          buffer,
+          at: nil,
+          options: [],
+          completionCallbackType: .dataPlayedBack,
+          completionHandler: { [weak self] _ in
+            if isLastBuffer {
+              self?.handlePlaybackCompleted(
+                deck: deck,
+                generation: generation,
+                expectedPath: expectedPath
+              )
+            }
+          }
+        )
+      } else {
+        deck.playerNode.scheduleBuffer(buffer, completionHandler: { [weak self] in
+          if isLastBuffer {
+            self?.handlePlaybackCompleted(
+              deck: deck,
+              generation: generation,
+              expectedPath: expectedPath
+            )
+          }
+        })
+      }
+    }
     return true
   }
 
@@ -1057,14 +1165,15 @@ final class AppleAudioEngine {
       }
       if let currentFile = deck.loadedFile {
         deck.playbackFramePosition = currentFile.length
-      } else if let decoded = deck.ffmpegPCM {
-        deck.playbackFramePosition = decoded.frameCount
+      } else if let stream = deck.loadedFFmpegStream {
+        deck.playbackFramePosition = stream.frameCount
       }
       // Ensure the native node reports a stopped state so the Dart layer can
       // reliably treat this as a completed track and advance the queue.
       deck.stopPlaybackNode()
       deck.isPlaybackScheduled = false
       deck.scheduledPCMBuffers.removeAll()
+      deck.loadedFFmpegStream?.close()
       self.emitPlayerState(playbackState: "ENDED")
     }
   }
@@ -1095,6 +1204,11 @@ final class AppleAudioEngine {
 
     currentDeck.clear(releasingFile: releasingFile)
     incomingDeck.clear(releasingFile: releasingFile)
+
+    if !releasingFile {
+      currentDeck.loadedFFmpegStream?.close()
+      incomingDeck.loadedFFmpegStream?.close()
+    }
 
     if releasingFile {
       currentDeck.playbackFramePosition = 0
@@ -1129,6 +1243,9 @@ final class AppleAudioEngine {
       incomingDeck.scheduledPCMBuffers.removeAll()
     }
 
+    currentDeck.loadedFFmpegStream?.close()
+    incomingDeck.loadedFFmpegStream?.close()
+
     // Emit the settled paused state only after the node has actually paused,
     // so the Dart layer does not keep animating against a stale playing state.
     emitPlayerState(playbackState: "PAUSED")
@@ -1155,7 +1272,7 @@ final class AppleAudioEngine {
       "positionMs=\(positionMs.map(String.init) ?? "nil") current=\(currentDeck.loadedURL?.path ?? "nil") " +
       "incoming=\(incomingDeck.loadedURL?.path ?? "nil")"
     )
-    guard currentDeck.loadedFile != nil else {
+    guard currentDeck.loadedFile != nil || currentDeck.loadedFFmpegStream != nil else {
       try load(path: path)
       try play(fadeDurationMs: durationMs, targetVolume: latestVolume)
       return
@@ -1235,7 +1352,7 @@ final class AppleAudioEngine {
       "[AppleAudioEngine] settleCrossfade start current=\(currentDeck.loadedURL?.path ?? "nil") " +
       "incoming=\(incomingDeck.loadedURL?.path ?? "nil")"
     )
-    guard incomingDeck.loadedFile != nil else { return }
+    guard incomingDeck.loadedFile != nil || incomingDeck.loadedFFmpegStream != nil else { return }
 
     if let oldURL = currentDeck.loadedURL {
       fileAccess.releaseAccess(for: oldURL)
@@ -1245,6 +1362,7 @@ final class AppleAudioEngine {
     swap(&currentDeck.loadedURL, &incomingDeck.loadedURL)
     swap(&currentDeck.loadedFile, &incomingDeck.loadedFile)
     swap(&currentDeck.loadedFFmpegPCM, &incomingDeck.loadedFFmpegPCM)
+    swap(&currentDeck.loadedFFmpegStream, &incomingDeck.loadedFFmpegStream)
     swap(&currentDeck.sampleRate, &incomingDeck.sampleRate)
     swap(&currentDeck.playbackFramePosition, &incomingDeck.playbackFramePosition)
     swap(&currentDeck.isPlaybackScheduled, &incomingDeck.isPlaybackScheduled)

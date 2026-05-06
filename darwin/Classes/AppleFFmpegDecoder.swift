@@ -263,6 +263,138 @@ struct AppleFFmpegDecodedAudio {
   }
 }
 
+final class AppleFFmpegStreamAudio {
+  private let path: String
+  private(set) var sampleRate: Double = 0
+  private(set) var channelCount: Int = 0
+  private(set) var frameCount: AVAudioFramePosition = 0
+  private(set) var startFrame: AVAudioFramePosition = 0
+  private var decoder: UnsafeMutableRawPointer?
+  var isOpen: Bool {
+    decoder != nil
+  }
+
+  init(path: String, targetSampleRate: Double, startFrame: AVAudioFramePosition = 0) throws {
+    self.path = path
+    try open(targetSampleRate: targetSampleRate, startFrame: startFrame)
+  }
+
+  deinit {
+    close()
+  }
+
+  func reopen(targetSampleRate: Double, startFrame: AVAudioFramePosition) throws {
+    close()
+    try open(targetSampleRate: targetSampleRate, startFrame: startFrame)
+  }
+
+  func ensureOpen(targetSampleRate: Double, startFrame: AVAudioFramePosition) throws {
+    if decoder == nil || self.startFrame != startFrame || abs(sampleRate - targetSampleRate) >= 1 {
+      try reopen(targetSampleRate: targetSampleRate, startFrame: startFrame)
+    }
+  }
+
+  func close() {
+    if let decoder {
+      audio_core_ffmpeg_close_stream(decoder)
+      self.decoder = nil
+    }
+  }
+
+  func nextChunk(maxFrames: Int) throws -> AppleFFmpegDecodedAudio? {
+    guard let decoder else { return nil }
+
+    var decodedPCM = AudioCoreFFmpegDecodedPCM(
+      samples: nil,
+      sample_count: 0,
+      channels: 0,
+      sample_rate: 0,
+      frame_count: 0
+    )
+    var isEOF = false
+    var errorPointer: UnsafeMutablePointer<CChar>?
+    let success = audio_core_ffmpeg_decode_stream_chunk(
+      decoder,
+      Int64(maxFrames),
+      &decodedPCM,
+      &isEOF,
+      &errorPointer
+    )
+
+    defer {
+      audio_core_ffmpeg_free_pcm(&decodedPCM)
+      if let errorPointer {
+        audio_core_ffmpeg_free_error(errorPointer)
+      }
+    }
+
+    guard success else {
+      let message = errorPointer.map { String(cString: $0) } ?? "ffmpeg stream decode failed"
+      throw AppleFFmpegDecoderError.decodeFailed(message)
+    }
+
+    guard let samples = decodedPCM.samples else {
+      if isEOF {
+        return nil
+      }
+      return nil
+    }
+
+    let count = Int(decodedPCM.sample_count)
+    let sampleArray = Array(UnsafeBufferPointer(start: samples, count: count))
+    let chunk = AppleFFmpegDecodedAudio(
+      sampleRate: decodedPCM.sample_rate,
+      channels: Int(decodedPCM.channels),
+      frameCount: AVAudioFramePosition(decodedPCM.frame_count),
+      samples: sampleArray
+    )
+    if chunk.frameCount == 0 && isEOF {
+      return nil
+    }
+    return chunk
+  }
+
+  private func open(targetSampleRate: Double, startFrame: AVAudioFramePosition) throws {
+    var metadata = AudioCoreFFmpegDecodedPCM(
+      samples: nil,
+      sample_count: 0,
+      channels: 0,
+      sample_rate: 0,
+      frame_count: 0
+    )
+    var errorPointer: UnsafeMutablePointer<CChar>?
+    var handle: UnsafeMutableRawPointer?
+    let success = path.withCString { cPath in
+      audio_core_ffmpeg_open_stream(
+        cPath,
+        targetSampleRate,
+        Int64(startFrame),
+        &metadata,
+        &handle,
+        &errorPointer
+      )
+    }
+
+    defer {
+      audio_core_ffmpeg_free_pcm(&metadata)
+      if let errorPointer {
+        audio_core_ffmpeg_free_error(errorPointer)
+      }
+    }
+
+    guard success, let handle else {
+      let message = errorPointer.map { String(cString: $0) } ?? "ffmpeg stream open failed"
+      throw AppleFFmpegDecoderError.decodeFailed(message)
+    }
+
+    decoder = handle
+    sampleRate = metadata.sample_rate
+    channelCount = Int(metadata.channels)
+    frameCount = AVAudioFramePosition(metadata.frame_count)
+    self.startFrame = startFrame
+  }
+}
+
 enum AppleFFmpegDecoderError: LocalizedError {
   case decodeFailed(String)
 
