@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:audio_core/audio_core.dart';
@@ -61,7 +62,7 @@ void main() {
           logarithmicScale: 4,
           normalizationFloorDb: -85,
           aggregationMode: FftAggregationMode.peak,
-          frequencyGroups: 64,
+          frequencyGroups: 32,
           targetFrameRate: 60,
           groupContrastExponent: 1.6,
           overallMultiplier: 1.2,
@@ -172,7 +173,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
           logarithmicScale: 1.5,
           normalizationFloorDb: -85,
           aggregationMode: FftAggregationMode.peak,
-          frequencyGroups: 64,
+          frequencyGroups: 32,
           targetFrameRate: 60,
           groupContrastExponent: 1.2,
         ),
@@ -838,7 +839,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                 borderRadius: BorderRadius.circular(4),
               ),
               child: const Text(
-                'Raw Grouped FFT',
+                'Raw FFT',
                 style: TextStyle(
                   color: Colors.cyanAccent,
                   fontWeight: FontWeight.bold,
@@ -847,20 +848,36 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
             ),
             const SizedBox(height: 8),
             Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.black,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.08),
-                  ),
-                ),
-                child: RepaintBoundary(
-                  child: CustomPaint(
-                    painter: RawSpectrumPainter(bands),
-                    child: const SizedBox.expand(),
-                  ),
-                ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final contentWidth = bands.isEmpty
+                      ? constraints.maxWidth
+                      : math.max(bands.length * 2.0, constraints.maxWidth);
+                  return Container(
+                    decoration: BoxDecoration(
+                      color: Colors.black,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: RepaintBoundary(
+                          child: SizedBox(
+                            width: contentWidth,
+                            height: constraints.maxHeight,
+                            child: CustomPaint(
+                              painter: RawSpectrumPainter(bands),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
           ],

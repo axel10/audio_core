@@ -223,7 +223,7 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
-  bool get fftDataIsPreGrouped => true;
+  bool get fftDataIsPreGrouped => false;
 
   @override
   Future<void> updateVisualizerFftOptions(

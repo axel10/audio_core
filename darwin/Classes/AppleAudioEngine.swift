@@ -219,7 +219,7 @@ final class AppleAudioEngine {
   private let fftSetup: FFTSetup?
   private let fftCaptureBuffer = AppleFftCaptureBuffer(capacity: 16_384)
   private let fftResultLock = NSLock()
-  private var latestFftFrame: [Double]
+  private var latestRawFft: [Double]
   private var latestRawTapMagnitudes: [Double]
   private var fftTapCount: Int = 0
   private var fftLastTapAtMs: Double?
@@ -234,7 +234,7 @@ final class AppleAudioEngine {
   init(fileAccess: SecurityScopedFileAccessCoordinator) {
     self.fileAccess = fileAccess
     self.fftSetup = vDSP_create_fftsetup(fftLog2Size, FFTRadix(kFFTRadix2))
-    self.latestFftFrame = Array(repeating: 0.0, count: fftBinCount)
+    self.latestRawFft = Array(repeating: 0.0, count: fftBinCount)
     self.latestRawTapMagnitudes = Array(repeating: 0.0, count: fftBinCount)
     configureEngineIfNeeded()
     applyEqualizerConfig(latestEqualizerConfig)
@@ -261,7 +261,7 @@ final class AppleAudioEngine {
       skipHighFrequencyGroups: max(0, skipHighFrequencyGroups),
       aggregationMode: AppleFftAggregationMode(rawValue: aggregationMode) ?? .peak
     )
-    refreshLatestFftFrame()
+    refreshLatestRawFft()
   }
 
   var isPlaying: Bool {
@@ -429,7 +429,7 @@ final class AppleAudioEngine {
     }
     fftResultLock.lock()
     defer { fftResultLock.unlock() }
-    return latestFftFrame
+    return latestRawFft
   }
 
   func getWaveform(path: String, expectedChunks: Int) throws -> [Double] {
@@ -711,7 +711,7 @@ final class AppleAudioEngine {
   private func resetFftCaptureBuffer() {
     fftCaptureBuffer.clear()
     fftResultLock.lock()
-    latestFftFrame = groupedZeroFrame()
+    latestRawFft = rawZeroFrame()
     latestRawTapMagnitudes = Array(repeating: 0.0, count: fftBinCount)
     fftResultLock.unlock()
     fftTapCount = 0
@@ -885,24 +885,23 @@ final class AppleAudioEngine {
 
   private func handleFftTapBuffer(_ buffer: AVAudioPCMBuffer) {
     fftCaptureBuffer.append(buffer: buffer)
-    refreshLatestFftFrame(frameLength: Int(buffer.frameLength))
+    refreshLatestRawFft(frameLength: Int(buffer.frameLength))
   }
 
-  private func refreshLatestFftFrame(frameLength: Int? = nil) {
+  private func refreshLatestRawFft(frameLength: Int? = nil) {
     let monoSamples = fftCaptureBuffer.snapshot(lastFrames: fftSize)
     let magnitudes = computeMagnitudes(from: monoSamples)
-    let grouped = groupMagnitudes(magnitudes)
 
     let tapNowMs = currentTimestampMs()
     fftTapCount &+= 1
     let tapDeltaMs = fftLastTapAtMs.map { tapNowMs - $0 }
     fftLastTapAtMs = tapNowMs
 
-    let groupedDelta = meanAbsoluteDelta(grouped, comparedTo: latestFftFrame)
+    let rawDelta = meanAbsoluteDelta(magnitudes, comparedTo: latestRawFft)
     let magnitudeDelta = meanAbsoluteDelta(magnitudes, comparedTo: latestRawTapMagnitudes)
 
     fftResultLock.lock()
-    latestFftFrame = grouped
+    latestRawFft = magnitudes
     latestRawTapMagnitudes = magnitudes
     fftResultLock.unlock()
 
@@ -911,9 +910,9 @@ final class AppleAudioEngine {
         "[AppleAudioEngine] fft tap count=\(fftTapCount) " +
         "frameLength=\(frameLength.map(String.init) ?? "nil") " +
         "deltaMs=\(tapDeltaMs.map { String(format: "%.1f", $0) } ?? "nil") " +
-        "groupedDelta=\(String(format: "%.6f", groupedDelta)) " +
+        "rawDelta=\(String(format: "%.6f", rawDelta)) " +
         "magnitudeDelta=\(String(format: "%.6f", magnitudeDelta)) " +
-        "first=\(grouped.first.map { String(format: "%.6f", $0) } ?? "nil")"
+        "first=\(magnitudes.first.map { String(format: "%.6f", $0) } ?? "nil")"
       )
     }
   }
@@ -932,7 +931,7 @@ final class AppleAudioEngine {
     guard let deck = publicDeck(), deck.isLoaded else { return nil }
 
     let totalFrameCount = deck.frameCount
-    guard totalFrameCount > 0 else { return groupedZeroFrame() }
+    guard totalFrameCount > 0 else { return rawZeroFrame() }
 
     let centerFrame = deck.currentPlaybackFramePosition()
     let halfWindow = AVAudioFramePosition(fftSize / 2)
@@ -955,11 +954,11 @@ final class AppleAudioEngine {
       return nil
     }
 
-    let grouped = groupMagnitudes(computeMagnitudes(from: monoSamples))
+    let rawMagnitudes = computeMagnitudes(from: monoSamples)
     fftResultLock.lock()
-    latestFftFrame = grouped
+    latestRawFft = rawMagnitudes
     fftResultLock.unlock()
-    return grouped
+    return rawMagnitudes
   }
 
   private func applyEqualizerConfig(_ config: AppleEqualizerConfig) {
@@ -1672,8 +1671,8 @@ final class AppleAudioEngine {
     return max(0, Int(((Double(framePosition) / sampleRate) * 1000.0).rounded()))
   }
 
-  private func groupedZeroFrame() -> [Double] {
-    Array(repeating: 0.0, count: fftGroupingConfig.frequencyGroups)
+  private func rawZeroFrame() -> [Double] {
+    Array(repeating: 0.0, count: fftBinCount)
   }
 
   fileprivate static func readInterleavedPCM(
@@ -1930,77 +1929,6 @@ final class AppleAudioEngine {
         return magnitudes
       }
     }
-  }
-
-  private func groupMagnitudes(_ magnitudes: [Double]) -> [Double] {
-    let groups = max(1, fftGroupingConfig.frequencyGroups)
-    guard !magnitudes.isEmpty else {
-      return groupedZeroFrame()
-    }
-    guard magnitudes.count > 1 else {
-      return Array(repeating: magnitudes.first ?? 0.0, count: groups)
-    }
-    if groups == magnitudes.count && fftGroupingConfig.skipHighFrequencyGroups == 0 {
-      return magnitudes
-    }
-
-    let totalGroups = min(max(groups + fftGroupingConfig.skipHighFrequencyGroups, groups), 512)
-    let binCount = magnitudes.count
-    var output = Array(repeating: 0.0, count: groups)
-
-    var boundaries = Array(repeating: 1, count: totalGroups + 1)
-    boundaries[0] = 1
-    boundaries[totalGroups] = binCount
-    if totalGroups > 1 {
-      for index in 1..<totalGroups {
-        let t = Double(index) / Double(totalGroups)
-        let position = pow(Double(binCount), t) - 1.0
-        boundaries[index] = Int(position.rounded())
-          .clamped(to: 1...(binCount - 1))
-      }
-    }
-
-    if totalGroups > 1 {
-      for index in 1...totalGroups {
-        if boundaries[index] <= boundaries[index - 1] {
-          boundaries[index] = min(boundaries[index - 1] + 1, binCount)
-        }
-      }
-    }
-    boundaries[totalGroups] = binCount
-
-    for group in 0..<groups {
-      let start = boundaries[group]
-      let end = boundaries[group + 1]
-      guard end > start else {
-        output[group] = 0.0
-        continue
-      }
-
-      var acc = 0.0
-      var peak = 0.0
-      var square = 0.0
-      for index in start..<end {
-        let value = magnitudes[index]
-        if value > peak {
-          peak = value
-        }
-        acc += value
-        square += value * value
-      }
-
-      let count = Double(end - start)
-      switch fftGroupingConfig.aggregationMode {
-      case .peak:
-        output[group] = peak
-      case .mean:
-        output[group] = acc / count
-      case .rms:
-        output[group] = sqrt(square / count)
-      }
-    }
-
-    return output
   }
 
   private static func bandwidthInOctaves(forQ q: Double) -> Float {

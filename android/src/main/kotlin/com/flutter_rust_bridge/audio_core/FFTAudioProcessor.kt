@@ -40,8 +40,8 @@ class FFTAudioProcessor(private val fftSize: Int = 1024) : BaseAudioProcessor() 
     private val sampleBuffer = FloatArray(fftSize)
     private var sampleCount = 0L
 
-    // Thread-safe storage for the latest magnitude spectrum
-    private val latestMagnitudes = AtomicReference<FloatArray>(FloatArray(32))
+    // Thread-safe storage for the latest raw magnitude spectrum.
+    private val latestMagnitudes = AtomicReference<FloatArray>(FloatArray(fftSize / 2))
     @Volatile
     var onFftUpdated: ((FloatArray) -> Unit)? = null
 
@@ -135,7 +135,6 @@ class FFTAudioProcessor(private val fftSize: Int = 1024) : BaseAudioProcessor() 
             this.frequencyGroups = frequencyGroups.coerceAtLeast(1)
             this.skipHighFrequencyGroups = skipHighFrequencyGroups.coerceAtLeast(0)
             this.aggregationMode = FftAggregationMode.fromName(aggregationMode)
-            latestMagnitudes.set(FloatArray(this.frequencyGroups))
         }
     }
 
@@ -163,9 +162,8 @@ class FFTAudioProcessor(private val fftSize: Int = 1024) : BaseAudioProcessor() 
             rawMagnitudes[i] = sqrt(real * real + imag * imag) / fftSize
         }
 
-        val groupedMagnitudes = groupBins(rawMagnitudes)
-        latestMagnitudes.set(groupedMagnitudes)
-        onFftUpdated?.invoke(groupedMagnitudes)
+        latestMagnitudes.set(rawMagnitudes)
+        onFftUpdated?.invoke(rawMagnitudes)
     }
 
     override fun onFlush() {
@@ -178,7 +176,7 @@ class FFTAudioProcessor(private val fftSize: Int = 1024) : BaseAudioProcessor() 
 
     private fun resetInternalState() {
         sampleCount = 0
-        latestMagnitudes.set(FloatArray(frequencyGroups.coerceAtLeast(1)))
+        latestMagnitudes.set(FloatArray(fftSize / 2))
         for (i in sampleBuffer.indices) sampleBuffer[i] = 0f
     }
 

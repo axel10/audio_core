@@ -249,7 +249,7 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
-  bool get fftDataIsPreGrouped => true;
+  bool get fftDataIsPreGrouped => false;
 
   @override
   Future<Float32List> getAudioPcm({String? path, int sampleStride = 0}) async {
@@ -595,7 +595,8 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
       }
       final payload = event['payload'];
       if (payload is Map) {
-        final nestedEmitCount = (payload['emitCount'] as num?)?.toInt() ?? emitCount;
+        final nestedEmitCount =
+            (payload['emitCount'] as num?)?.toInt() ?? emitCount;
         final nestedEmittedAtMs =
             (payload['emittedAtMs'] as num?)?.toInt() ?? emittedAtMs;
         final nestedValues = payload['values'];
@@ -657,8 +658,13 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     _lastFftEventAtMs = receivedAtMs;
 
     if (_fftEventCount <= 5 || _fftEventCount % 30 == 0) {
-      final bridgeLagMs = emittedAtMs == null ? null : receivedAtMs - emittedAtMs;
-      final frameDelta = _meanAbsoluteDelta(_latestFftCache, _lastLoggedFftFrame);
+      final bridgeLagMs = emittedAtMs == null
+          ? null
+          : receivedAtMs - emittedAtMs;
+      final frameDelta = _meanAbsoluteDelta(
+        _latestFftCache,
+        _lastLoggedFftFrame,
+      );
       final peak = _latestFftCache.fold<double>(0.0, (max, value) {
         return value > max ? value : max;
       });
