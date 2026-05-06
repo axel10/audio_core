@@ -100,6 +100,7 @@ final class AppleAudioEngine {
   private let fftSize = 1024
   private let fftBinCount = 512
   private let ffmpegScheduleChunkFrames = 4096
+  private let ffmpegPlaybackLookaheadBuffers = 3
   private let waveformRmsWindowsPerChunk = 8
   private let waveformPrecisionScale = 100.0
   private let avFoundationPreferredExtensions: Set<String> = [
@@ -121,6 +122,10 @@ final class AppleAudioEngine {
   private var fftGroupingConfig = AppleFftGroupingConfig()
 
   var onPlayerStateChanged: ((String?, String?) -> Void)?
+
+  private func currentTimestampMs() -> Double {
+    CFAbsoluteTimeGetCurrent() * 1000.0
+  }
 
   init(fileAccess: SecurityScopedFileAccessCoordinator) {
     self.fileAccess = fileAccess
@@ -149,6 +154,7 @@ final class AppleAudioEngine {
   }
 
   func load(path: String) throws {
+    let startMs = currentTimestampMs()
     debugPrint(
       "[AppleAudioEngine] load start path=\(path) public=\(publicURL()?.path ?? "nil")"
     )
@@ -156,11 +162,16 @@ final class AppleAudioEngine {
     releaseCurrentAccessIfNeeded()
 
     let url = try fileAccess.acquireAccess(for: path)
+    let acquireDoneMs = currentTimestampMs()
+    debugPrint(
+      "[AppleAudioEngine] load access ready path=\(path) elapsedMs=\(String(format: "%.1f", acquireDoneMs - startMs))"
+    )
     try loadAsset(into: currentDeck, from: url)
     preparedAccessPaths.remove(url.path)
     debugPrint(
       "[AppleAudioEngine] load done path=\(path) sampleRate=\(currentDeck.sampleRate) " +
-      "length=\(currentDeck.frameCount) public=\(publicURL()?.path ?? "nil")"
+      "length=\(currentDeck.frameCount) elapsedMs=\(String(format: "%.1f", currentTimestampMs() - startMs)) " +
+      "public=\(publicURL()?.path ?? "nil")"
     )
   }
 
@@ -626,22 +637,36 @@ final class AppleAudioEngine {
   }
 
   private func decodeAsset(for url: URL) throws -> AppleAudioSampleSource {
+    let startMs = currentTimestampMs()
     switch preferredLoadBackend(for: url) {
     case .avFoundation:
       do {
-        return .avFoundation(try AVAudioFile(forReading: url))
+        let file = try AVAudioFile(forReading: url)
+        debugPrint(
+          "[AppleAudioEngine] avfoundation decode done path=\(url.path) elapsedMs=\(String(format: "%.1f", currentTimestampMs() - startMs))"
+        )
+        return .avFoundation(file)
       } catch {
         debugPrint(
           "[AppleAudioEngine] AVFoundation decode failed, falling back to ffmpeg path=\(url.path) error=\(error)"
         )
-        return .ffmpeg(try AppleFFmpegDecoder.decode(path: url.path))
+        let decoded = try AppleFFmpegDecoder.decode(path: url.path)
+        debugPrint(
+          "[AppleAudioEngine] ffmpeg fallback decode done path=\(url.path) elapsedMs=\(String(format: "%.1f", currentTimestampMs() - startMs))"
+        )
+        return .ffmpeg(decoded)
       }
     case .ffmpeg:
-      return .ffmpeg(try AppleFFmpegDecoder.decode(path: url.path))
+      let decoded = try AppleFFmpegDecoder.decode(path: url.path)
+      debugPrint(
+        "[AppleAudioEngine] ffmpeg decode backend selected path=\(url.path) elapsedMs=\(String(format: "%.1f", currentTimestampMs() - startMs))"
+      )
+      return .ffmpeg(decoded)
     }
   }
 
   private func loadAsset(into deck: PlaybackDeck, from url: URL) throws {
+    let startMs = currentTimestampMs()
     let source = try decodeAsset(for: url)
     switch source {
     case .avFoundation(let file):
@@ -650,6 +675,7 @@ final class AppleAudioEngine {
       deck.loadedFile = file
       deck.loadedFFmpegPCM = nil
     case .ffmpeg(let decoded):
+      let resampleStartMs = currentTimestampMs()
       let targetSampleRate = playbackSampleRate()
       let playbackPCM: AppleFFmpegDecodedAudio
       if abs(decoded.sampleRate - targetSampleRate) >= 1 {
@@ -657,6 +683,10 @@ final class AppleAudioEngine {
       } else {
         playbackPCM = decoded
       }
+      debugPrint(
+        "[AppleAudioEngine] ffmpeg load prepared path=\(url.path) targetSampleRate=\(targetSampleRate) " +
+        "elapsedResampleMs=\(String(format: "%.1f", currentTimestampMs() - resampleStartMs))"
+      )
       deck.sampleRate = playbackPCM.sampleRate
       deck.loadedURL = url
       deck.loadedFile = nil
@@ -666,6 +696,10 @@ final class AppleAudioEngine {
     deck.isPlaybackScheduled = false
     deck.gain = 1.0
     deck.scheduledPCMBuffers.removeAll()
+    debugPrint(
+      "[AppleAudioEngine] loadAsset done path=\(url.path) source=\(source.sampleRate) " +
+      "elapsedMs=\(String(format: "%.1f", currentTimestampMs() - startMs))"
+    )
   }
 
   private func configureEngineIfNeeded() {
@@ -718,6 +752,7 @@ final class AppleAudioEngine {
     from framePosition: AVAudioFramePosition,
     volume: Double
   ) throws {
+    let startMs = currentTimestampMs()
     guard deck.isLoaded else {
       throw NSError(
         domain: "AudioCore",
@@ -775,6 +810,10 @@ final class AppleAudioEngine {
     deck.isPlaybackScheduled = true
     deck.playerNode.volume = Float(volume)
     deck.playerNode.play()
+    debugPrint(
+      "[AppleAudioEngine] startPlaybackIfNeeded done path=\(deck.loadedURL?.path ?? "nil") " +
+      "frame=\(clampedFrame) elapsedMs=\(String(format: "%.1f", currentTimestampMs() - startMs))"
+    )
   }
 
   private func schedulePlaybackSegment(
@@ -826,47 +865,109 @@ final class AppleAudioEngine {
     generation: UInt64,
     expectedPath: String?
   ) -> Bool {
-    let buffers = decoded.buildBufferQueue(
-      startFrame: startingFrame,
-      chunkFrames: ffmpegScheduleChunkFrames
+    let startMs = currentTimestampMs()
+    let totalFrames = decoded.frameCount
+    let startFrame = max(0, min(startingFrame, totalFrames))
+    var nextFrameToSchedule = startFrame
+    deck.scheduledPCMBuffers.removeAll()
+
+    debugPrint(
+      "[AppleAudioEngine] ffmpeg schedule start path=\(deck.loadedURL?.path ?? "nil") " +
+      "startFrame=\(startFrame) totalFrames=\(totalFrames) lookahead=\(ffmpegPlaybackLookaheadBuffers)"
     )
-    deck.scheduledPCMBuffers = buffers
 
-    guard !buffers.isEmpty else {
-      handlePlaybackCompleted(deck: deck, generation: generation, expectedPath: expectedPath)
-      return false
-    }
+    func scheduleNextBuffer() -> Bool {
+      guard nextFrameToSchedule < totalFrames else {
+        return false
+      }
 
-    for (index, buffer) in buffers.enumerated() {
-      let isLastBuffer = index == buffers.count - 1
-      if #available(macOS 10.13, iOS 11.0, *) {
-        deck.playerNode.scheduleBuffer(
-          buffer,
-          at: nil,
-          options: [],
-          completionCallbackType: .dataPlayedBack,
-          completionHandler: { [weak self] _ in
-            if isLastBuffer {
-              self?.handlePlaybackCompleted(
-                deck: deck,
-                generation: generation,
-                expectedPath: expectedPath
-              )
-            }
+      let bufferStart = nextFrameToSchedule
+      guard let buffer = decoded.buildPCMBuffer(
+        startFrame: bufferStart,
+        maxFrames: ffmpegScheduleChunkFrames
+      ) else {
+        return false
+      }
+
+      let bufferFrameCount = AVAudioFramePosition(buffer.frameLength)
+      guard bufferFrameCount > 0 else {
+        return false
+      }
+
+      nextFrameToSchedule = min(totalFrames, bufferStart + bufferFrameCount)
+      let isLastBuffer = nextFrameToSchedule >= totalFrames
+      if deck.scheduledPCMBuffers.count >= ffmpegPlaybackLookaheadBuffers {
+        deck.scheduledPCMBuffers.removeFirst()
+      }
+      deck.scheduledPCMBuffers.append(buffer)
+
+      let completion: (AVAudioPCMBuffer) -> Void = { [weak self] _ in
+        DispatchQueue.main.async {
+          guard let self = self else { return }
+          guard deck.playbackGeneration == generation, deck.isPlaybackScheduled else {
+            return
           }
-        )
-      } else {
-        deck.playerNode.scheduleBuffer(buffer, completionHandler: { [weak self] in
+          if !deck.scheduledPCMBuffers.isEmpty {
+            deck.scheduledPCMBuffers.removeFirst()
+          }
           if isLastBuffer {
-            self?.handlePlaybackCompleted(
+            self.handlePlaybackCompleted(
+              deck: deck,
+              generation: generation,
+              expectedPath: expectedPath
+            )
+            return
+          }
+
+          if !scheduleNextBuffer() {
+            debugPrint(
+              "[AppleAudioEngine] ffmpeg schedule refill failed path=\(deck.loadedURL?.path ?? "nil") " +
+              "generation=\(generation)"
+            )
+            self.handlePlaybackCompleted(
               deck: deck,
               generation: generation,
               expectedPath: expectedPath
             )
           }
+        }
+      }
+
+      if #available(macOS 10.13, iOS 11.0, *) {
+        deck.playerNode.scheduleBuffer(
+          buffer,
+          at: nil,
+          options: [],
+          completionCallbackType: isLastBuffer ? .dataPlayedBack : .dataConsumed,
+          completionHandler: { _ in
+            completion(buffer)
+          }
+        )
+      } else {
+        deck.playerNode.scheduleBuffer(buffer, completionHandler: {
+          completion(buffer)
         })
       }
+
+      return true
     }
+
+    var scheduledAny = false
+    for _ in 0..<ffmpegPlaybackLookaheadBuffers {
+      guard scheduleNextBuffer() else {
+        break
+      }
+      scheduledAny = true
+    }
+
+    guard scheduledAny else {
+      handlePlaybackCompleted(deck: deck, generation: generation, expectedPath: expectedPath)
+      return false
+    }
+    debugPrint(
+      "[AppleAudioEngine] ffmpeg schedule initial queued=\(deck.scheduledPCMBuffers.count) " +
+      "elapsedMs=\(String(format: "%.1f", currentTimestampMs() - startMs))"
+    )
     return true
   }
 

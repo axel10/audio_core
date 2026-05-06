@@ -16,6 +16,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
   private var fftTimer: Timer?
   private var fftEmissionInFlight = false
   private var fftEmitCount = 0
+  private let loadQueue = DispatchQueue(label: "audio_core.plugin.load", qos: .userInitiated)
 
   public override init() {
     self.engine = AppleAudioEngine(fileAccess: fileAccess)
@@ -61,14 +62,20 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         return
       }
       debugPrint("[AudioCorePlugin] method=load path=\(path)")
-      do {
-        try engine.load(path: path)
-        sendPlayerState()
-        emitLatestFftSnapshot()
-        result(nil)
-      } catch {
-        sendPlayerState(error: error.localizedDescription)
-        result(FlutterError(code: "LOAD_FAILED", message: error.localizedDescription, details: nil))
+      loadQueue.async {
+        do {
+          try self.engine.load(path: path)
+          DispatchQueue.main.async {
+            self.sendPlayerState()
+            self.emitLatestFftSnapshot()
+            result(nil)
+          }
+        } catch {
+          DispatchQueue.main.async {
+            self.sendPlayerState(error: error.localizedDescription)
+            result(FlutterError(code: "LOAD_FAILED", message: error.localizedDescription, details: nil))
+          }
+        }
       }
 
     case "crossfade":

@@ -1,6 +1,10 @@
 import AVFoundation
 import Foundation
 
+private func appleFFmpegTimestampMs() -> Double {
+  CFAbsoluteTimeGetCurrent() * 1000.0
+}
+
 struct AppleFFmpegDecodedAudio {
   let sampleRate: Double
   let channels: Int
@@ -144,6 +148,7 @@ struct AppleFFmpegDecodedAudio {
   }
 
   func resampled(to targetSampleRate: Double) throws -> AppleFFmpegDecodedAudio {
+    let startMs = appleFFmpegTimestampMs()
     let safeTargetSampleRate = targetSampleRate.rounded()
     guard safeTargetSampleRate > 0 else {
       return self
@@ -152,8 +157,16 @@ struct AppleFFmpegDecodedAudio {
     // AVAudioPlayerNode expects scheduled PCM buffers to match the node's
     // output sample rate, so the FFmpeg path needs an explicit resample step.
     guard abs(safeTargetSampleRate - sampleRate.rounded()) >= 1 else {
+      debugPrint(
+        "[AppleFFmpegDecoder] resample skipped sampleRate=\(sampleRate) target=\(safeTargetSampleRate)"
+      )
       return self
     }
+
+    debugPrint(
+      "[AppleFFmpegDecoder] resample start sampleRate=\(sampleRate) target=\(safeTargetSampleRate) " +
+      "frames=\(frameCount) channels=\(channelCount)"
+    )
 
     let sourceFormat = AVAudioFormat(
       standardFormatWithSampleRate: sampleRate,
@@ -236,12 +249,17 @@ struct AppleFFmpegDecodedAudio {
       }
     }
 
-    return AppleFFmpegDecodedAudio(
+    let result = AppleFFmpegDecodedAudio(
       sampleRate: safeTargetSampleRate,
       channels: channelCount,
       frameCount: AVAudioFramePosition(resampledFrameCount),
       samples: resampledSamples
     )
+    debugPrint(
+      "[AppleFFmpegDecoder] resample done durationMs=\(String(format: "%.1f", appleFFmpegTimestampMs() - startMs)) " +
+      "outputFrames=\(resampledFrameCount)"
+    )
+    return result
   }
 }
 
@@ -258,6 +276,8 @@ enum AppleFFmpegDecoderError: LocalizedError {
 
 enum AppleFFmpegDecoder {
   static func decode(path: String) throws -> AppleFFmpegDecodedAudio {
+    let startMs = appleFFmpegTimestampMs()
+    debugPrint("[AppleFFmpegDecoder] decode start path=\(path)")
     var decodedPCM = AudioCoreFFmpegDecodedPCM(
       samples: nil,
       sample_count: 0,
@@ -279,6 +299,10 @@ enum AppleFFmpegDecoder {
 
     guard success else {
       let message = errorPointer.map { String(cString: $0) } ?? "ffmpeg decode failed"
+      debugPrint(
+        "[AppleFFmpegDecoder] decode failed durationMs=\(String(format: "%.1f", appleFFmpegTimestampMs() - startMs)) " +
+        "path=\(path) error=\(message)"
+      )
       throw AppleFFmpegDecoderError.decodeFailed(message)
     }
 
@@ -288,11 +312,16 @@ enum AppleFFmpegDecoder {
 
     let count = Int(decodedPCM.sample_count)
     let sampleArray = Array(UnsafeBufferPointer(start: samples, count: count))
-    return AppleFFmpegDecodedAudio(
+    let result = AppleFFmpegDecodedAudio(
       sampleRate: decodedPCM.sample_rate,
       channels: Int(decodedPCM.channels),
       frameCount: AVAudioFramePosition(decodedPCM.frame_count),
       samples: sampleArray
     )
+    debugPrint(
+      "[AppleFFmpegDecoder] decode done durationMs=\(String(format: "%.1f", appleFFmpegTimestampMs() - startMs)) " +
+      "path=\(path) frames=\(decodedPCM.frame_count) channels=\(decodedPCM.channels) sampleRate=\(decodedPCM.sample_rate)"
+    )
+    return result
   }
 }
