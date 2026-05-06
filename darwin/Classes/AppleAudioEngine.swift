@@ -597,6 +597,18 @@ final class AppleAudioEngine {
     publicDeck()?.sampleRate ?? 44_100
   }
 
+  private func playbackSampleRate() -> Double {
+    let preferredRates = [
+      deckMixerNode.outputFormat(forBus: 0).sampleRate,
+      engine.mainMixerNode.outputFormat(forBus: 0).sampleRate,
+      engine.outputNode.inputFormat(forBus: 0).sampleRate,
+    ]
+    for rate in preferredRates where rate > 0 {
+      return rate
+    }
+    return publicSampleRate()
+  }
+
   private func publicFrameCount() -> AVAudioFramePosition {
     publicDeck()?.frameCount ?? 0
   }
@@ -638,10 +650,17 @@ final class AppleAudioEngine {
       deck.loadedFile = file
       deck.loadedFFmpegPCM = nil
     case .ffmpeg(let decoded):
-      deck.sampleRate = decoded.sampleRate
+      let targetSampleRate = playbackSampleRate()
+      let playbackPCM: AppleFFmpegDecodedAudio
+      if abs(decoded.sampleRate - targetSampleRate) >= 1 {
+        playbackPCM = try decoded.resampled(to: targetSampleRate)
+      } else {
+        playbackPCM = decoded
+      }
+      deck.sampleRate = playbackPCM.sampleRate
       deck.loadedURL = url
       deck.loadedFile = nil
-      deck.loadedFFmpegPCM = decoded
+      deck.loadedFFmpegPCM = playbackPCM
     }
     deck.playbackFramePosition = 0
     deck.isPlaybackScheduled = false

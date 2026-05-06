@@ -142,6 +142,107 @@ struct AppleFFmpegDecodedAudio {
     }
     return buffers
   }
+
+  func resampled(to targetSampleRate: Double) throws -> AppleFFmpegDecodedAudio {
+    let safeTargetSampleRate = targetSampleRate.rounded()
+    guard safeTargetSampleRate > 0 else {
+      return self
+    }
+
+    // AVAudioPlayerNode expects scheduled PCM buffers to match the node's
+    // output sample rate, so the FFmpeg path needs an explicit resample step.
+    guard abs(safeTargetSampleRate - sampleRate.rounded()) >= 1 else {
+      return self
+    }
+
+    let sourceFormat = AVAudioFormat(
+      standardFormatWithSampleRate: sampleRate,
+      channels: AVAudioChannelCount(channelCount)
+    )
+    let targetFormat = AVAudioFormat(
+      standardFormatWithSampleRate: safeTargetSampleRate,
+      channels: AVAudioChannelCount(channelCount)
+    )
+    guard let sourceFormat, let targetFormat else {
+      throw AppleFFmpegDecoderError.decodeFailed("failed to build resample formats")
+    }
+
+    guard let sourceBuffer = AVAudioPCMBuffer(
+      pcmFormat: sourceFormat,
+      frameCapacity: AVAudioFrameCount(frameCount)
+    ) else {
+      throw AppleFFmpegDecoderError.decodeFailed("failed to allocate source PCM buffer")
+    }
+    sourceBuffer.frameLength = AVAudioFrameCount(frameCount)
+    guard let sourceChannelData = sourceBuffer.floatChannelData else {
+      throw AppleFFmpegDecoderError.decodeFailed("failed to access source PCM channels")
+    }
+
+    let sourceFrameCount = Int(frameCount)
+    for channel in 0..<channelCount {
+      let channelSamples = sourceChannelData[channel]
+      let baseIndex = channel
+      for frame in 0..<sourceFrameCount {
+        channelSamples[frame] = samples[(frame * channelCount) + baseIndex]
+      }
+    }
+
+    guard let converter = AVAudioConverter(from: sourceFormat, to: targetFormat) else {
+      throw AppleFFmpegDecoderError.decodeFailed("failed to create resampler")
+    }
+
+    let targetFrameCapacity = AVAudioFrameCount(
+      max(
+        1,
+        Int((Double(frameCount) * safeTargetSampleRate / sampleRate).rounded(.up)) + 16
+      )
+    )
+    guard let targetBuffer = AVAudioPCMBuffer(
+      pcmFormat: targetFormat,
+      frameCapacity: targetFrameCapacity
+    ) else {
+      throw AppleFFmpegDecoderError.decodeFailed("failed to allocate resampled PCM buffer")
+    }
+
+    var didProvideSourceBuffer = false
+    var conversionError: NSError?
+    let status = converter.convert(to: targetBuffer, error: &conversionError) { _, outStatus in
+      if didProvideSourceBuffer {
+        outStatus.pointee = .endOfStream
+        return nil
+      }
+
+      didProvideSourceBuffer = true
+      outStatus.pointee = .haveData
+      return sourceBuffer
+    }
+
+    guard status != .error, conversionError == nil else {
+      throw AppleFFmpegDecoderError.decodeFailed(
+        conversionError?.localizedDescription ?? "failed to resample PCM"
+      )
+    }
+
+    guard let targetChannelData = targetBuffer.floatChannelData else {
+      throw AppleFFmpegDecoderError.decodeFailed("failed to access resampled PCM channels")
+    }
+
+    let resampledFrameCount = Int(targetBuffer.frameLength)
+    var resampledSamples: [Float] = []
+    resampledSamples.reserveCapacity(resampledFrameCount * channelCount)
+    for frame in 0..<resampledFrameCount {
+      for channel in 0..<channelCount {
+        resampledSamples.append(targetChannelData[channel][frame])
+      }
+    }
+
+    return AppleFFmpegDecodedAudio(
+      sampleRate: safeTargetSampleRate,
+      channels: channelCount,
+      frameCount: AVAudioFramePosition(resampledFrameCount),
+      samples: resampledSamples
+    )
+  }
 }
 
 enum AppleFFmpegDecoderError: LocalizedError {
