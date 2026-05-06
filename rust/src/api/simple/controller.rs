@@ -56,6 +56,76 @@ impl Iterator for FfmpegAudioSource {
     }
 }
 
+enum DecoderBackend {
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    Ffmpeg(FfmpegAudioSource),
+    Symphonia {
+        source: Box<dyn Source<Item = f32> + Send>,
+        engine: &'static str,
+    },
+}
+
+impl DecoderBackend {
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    fn open(path: &str, file: File, file_size: u64) -> Result<Self, String> {
+        if let Ok(ffmpeg_source) = FfmpegAudioSource::open(path) {
+            return Ok(Self::Ffmpeg(ffmpeg_source));
+        }
+
+        Self::open_symphonia(file, file_size)
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    fn open(_path: &str, file: File, file_size: u64) -> Result<Self, String> {
+        Self::open_symphonia(file, file_size)
+    }
+
+    fn open_symphonia(file: File, file_size: u64) -> Result<Self, String> {
+        let source: Box<dyn Source<Item = f32> + Send> = if file_size < 60 * 1024 * 1024 {
+            let lazy_source = LazyMemorySource::new(file, file_size);
+            let decoder = Decoder::builder()
+                .with_data(lazy_source)
+                .with_byte_len(file_size)
+                .with_seekable(true)
+                .build()
+                .map_err(|e| format!("decode failed: {e}"))?;
+            Box::new(decoder)
+        } else {
+            let decoder = Decoder::try_from(file).map_err(|e| format!("decode failed: {e}"))?;
+            Box::new(decoder)
+        };
+
+        Ok(Self::Symphonia {
+            source,
+            engine: "symphonia",
+        })
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        match self {
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            Self::Ffmpeg(source) => source.total_duration(),
+            Self::Symphonia { source, .. } => source.total_duration(),
+        }
+    }
+
+    fn engine(&self) -> &'static str {
+        match self {
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            Self::Ffmpeg(_) => "ffmpeg",
+            Self::Symphonia { engine, .. } => engine,
+        }
+    }
+
+    fn into_source(self) -> Box<dyn Source<Item = f32> + Send> {
+        match self {
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            Self::Ffmpeg(source) => Box::new(source),
+            Self::Symphonia { source, .. } => source,
+        }
+    }
+}
+
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 impl Source for FfmpegAudioSource {
     fn current_span_len(&self) -> Option<usize> {
@@ -73,7 +143,7 @@ impl Source for FfmpegAudioSource {
     }
 
     fn total_duration(&self) -> Option<Duration> {
-        self.total_duration()
+        self.inner.total_duration()
     }
 
     fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
@@ -385,54 +455,16 @@ impl PlayerController {
             .map_err(|e| format!("get metadata failed: {e}"))?;
         let file_size = metadata.len();
 
-        // 60MB 以下的文件使用内存缓存模式，60MB 以上使用流式读取
-        let (source, decode_engine): (Box<dyn Source<Item = f32> + Send>, String) = {
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
-            {
-                if let Ok(ffmpeg_source) = FfmpegAudioSource::open(path) {
-                    (Box::new(ffmpeg_source), "ffmpeg".to_string())
-                } else if file_size < 60 * 1024 * 1024 {
-                    let lazy_source = LazyMemorySource::new(file, file_size);
-                    let decoder = Decoder::builder()
-                        .with_data(lazy_source)
-                        .with_byte_len(file_size)
-                        .with_seekable(true)
-                        .build()
-                        .map_err(|e| format!("decode failed: {e}"))?;
-                    (Box::new(decoder), "symphonia".to_string())
-                } else {
-                    let decoder =
-                        Decoder::try_from(file).map_err(|e| format!("decode failed: {e}"))?;
-                    (Box::new(decoder), "symphonia".to_string())
-                }
-            }
-            #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-            {
-                if file_size < 60 * 1024 * 1024 {
-                    let lazy_source = LazyMemorySource::new(file, file_size);
-                    let decoder = Decoder::builder()
-                        .with_data(lazy_source)
-                        .with_byte_len(file_size)
-                        .with_seekable(true)
-                        .build()
-                        .map_err(|e| format!("decode failed: {e}"))?;
-                    (Box::new(decoder), "symphonia".to_string())
-                } else {
-                    let decoder =
-                        Decoder::try_from(file).map_err(|e| format!("decode failed: {e}"))?;
-                    (Box::new(decoder), "symphonia".to_string())
-                }
-            }
-        };
-
-        let total = source.total_duration().unwrap_or(Duration::ZERO);
+        let backend = DecoderBackend::open(path, file, file_size)?;
+        let total = backend.total_duration().unwrap_or(Duration::ZERO);
         let clamped_offset = if total.is_zero() {
             start_offset
         } else {
             start_offset.min(total)
         };
         player.set_volume((self.volume * gain).clamp(0.0, 1.0));
-        let eq_source = EqSource::new(source, Arc::clone(&self.equalizer));
+        let decode_engine = backend.engine().to_string();
+        let eq_source = EqSource::new(backend.into_source(), Arc::clone(&self.equalizer));
         let audio_source: Box<dyn Source<Item = f32> + Send> = if clamped_offset > Duration::ZERO {
             Box::new(eq_source.skip_duration(clamped_offset))
         } else {
