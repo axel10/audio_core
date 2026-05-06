@@ -467,6 +467,7 @@ class AudioCoreController extends ChangeNotifier
         queuePlaylistId,
         tracksToAdd,
         fadeSetting: fadeSetting,
+        reconcile: false,
       );
     }
 

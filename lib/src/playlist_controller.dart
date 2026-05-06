@@ -170,6 +170,7 @@ class PlaylistController extends ChangeNotifier {
     String id,
     List<AudioTrack> tracks, {
     FadeSettings? fadeSetting,
+    bool reconcile = true,
   }) async {
     final idx = _playlists.indexWhere((p) => p.id == id);
     if (idx < 0) return;
@@ -184,7 +185,14 @@ class PlaylistController extends ChangeNotifier {
       if (oldTrack == null && _activePlaylistTracks.isNotEmpty) {
         _currentIndex = 0;
       }
-      await _reconcile(oldTrack: oldTrack, fadeSetting: fadeSetting);
+      if (reconcile) {
+        await _reconcile(oldTrack: oldTrack, fadeSetting: fadeSetting);
+      } else {
+        await _syncActivePlaylistData();
+        _rebuildPlayOrder();
+        _reconcileRandom();
+        notifyListeners();
+      }
     } else {
       notifyListeners(); // Metadata in another playlist changed
     }
