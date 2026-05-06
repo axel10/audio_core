@@ -2008,7 +2008,7 @@ class MyExoplayerPlugin :
             fftPendingPayload = routedPlayerId to magnitudes.copyOf()
             val now = SystemClock.elapsedRealtime()
             val elapsed = now - fftLastEmitAtMs
-            val throttleMs = 16L
+            val throttleMs = 33L
             if (elapsed >= throttleMs && !fftEmitScheduled) {
                 fftLastEmitAtMs = now
                 val current = fftPendingPayload
@@ -2036,4 +2036,3 @@ class MyExoplayerPlugin :
         sink.success(payload)
     }
 }
-

@@ -390,8 +390,9 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
 
   private func startFftTimerIfNeeded() {
     guard fftTimer == nil else { return }
-    debugPrint("[AudioCorePlugin] fft timer start")
-    fftTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+    let interval = 1.0 / 30.0
+    debugPrint("[AudioCorePlugin] fft timer start intervalMs=\(Int((interval * 1000.0).rounded()))")
+    fftTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
       self?.emitLatestFftSnapshot()
     }
     if let fftTimer {
