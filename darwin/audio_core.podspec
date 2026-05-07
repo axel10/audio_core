@@ -3,9 +3,6 @@
 # Run `pod lib lint audio_core.podspec` to validate before publishing.
 #
 Pod::Spec.new do |s|
-  ffmpeg_lib_root = '$(PODS_ROOT)/../Flutter/ephemeral/.symlinks/plugins/audio_core/macos/ffmpeg_lib'
-  ffmpeg_lib_arm64 = "#{ffmpeg_lib_root}/arm64/lib"
-  ffmpeg_lib_x86_64 = "#{ffmpeg_lib_root}/amd64/lib"
   s.name             = 'audio_core'
   s.version          = '0.0.1'
   s.summary          = 'A new Flutter FFI plugin project.'
@@ -18,9 +15,11 @@ A new Flutter FFI plugin project.
 
   s.source           = { :path => '.' }
   s.source_files     = ['Classes/**/*']
-  s.dependency 'FlutterMacOS'
+  s.ios.dependency 'Flutter'
+  s.osx.dependency 'FlutterMacOS'
 
-  s.platform = :osx, '11.0'
+  s.ios.deployment_target = '15.0'
+  s.osx.deployment_target = '11.0'
   s.swift_version = '5.0'
 
   s.script_phase = {
@@ -36,21 +35,8 @@ A new Flutter FFI plugin project.
 
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
-    'HEADER_SEARCH_PATHS' => [
-      '$(inherited)',
-      "#{ffmpeg_lib_root}/arm64/include",
-      "#{ffmpeg_lib_root}/amd64/include",
-    ].join(' '),
-    'LIBRARY_SEARCH_PATHS' => '$(inherited)',
-    'OTHER_LDFLAGS[arch=arm64]' => [
-      '$(inherited)',
-      "-L#{ffmpeg_lib_arm64}",
-    ].join(' '),
-    'OTHER_LDFLAGS[arch=x86_64]' => [
-      '$(inherited)',
-      "-L#{ffmpeg_lib_x86_64}",
-    ].join(' '),
     'OTHER_LDFLAGS' => [
+      '$(inherited)',
       '-lavformat',
       '-lavcodec',
       '-lavfilter',
@@ -63,15 +49,37 @@ A new Flutter FFI plugin project.
       '-lz',
       '-lbz2',
       '-liconv',
-      '-framework',
-      'AudioToolbox',
-      '-framework',
-      'AVFoundation',
-      '-framework',
-      'CoreMedia',
-      '-framework',
-      'VideoToolbox',
+      '-framework', 'AudioToolbox',
+      '-framework', 'AVFoundation',
+      '-framework', 'CoreMedia',
+      '-framework', 'VideoToolbox',
       '-force_load ${BUILT_PRODUCTS_DIR}/libaudio_core.a',
+    ].join(' '),
+  }
+
+  s.ios.pod_target_xcconfig = {
+    'HEADER_SEARCH_PATHS' => [
+      '$(inherited)',
+      '$(PODS_TARGET_SRCROOT)/../ios/ffmpeg_lib/arm64/include',
+      '$(PODS_TARGET_SRCROOT)/../ios/ffmpeg_lib/arm64-sim/include',
+    ].join(' '),
+    'LIBRARY_SEARCH_PATHS' => [
+      '$(inherited)',
+      '$(PODS_TARGET_SRCROOT)/../ios/ffmpeg_lib/arm64/lib',
+      '$(PODS_TARGET_SRCROOT)/../ios/ffmpeg_lib/arm64-sim/lib',
+    ].join(' '),
+  }
+
+  s.osx.pod_target_xcconfig = {
+    'HEADER_SEARCH_PATHS' => [
+      '$(inherited)',
+      '$(PODS_TARGET_SRCROOT)/../macos/ffmpeg_lib/arm64/include',
+      '$(PODS_TARGET_SRCROOT)/../macos/ffmpeg_lib/amd64/include',
+    ].join(' '),
+    'LIBRARY_SEARCH_PATHS' => [
+      '$(inherited)',
+      '$(PODS_TARGET_SRCROOT)/../macos/ffmpeg_lib/arm64/lib',
+      '$(PODS_TARGET_SRCROOT)/../macos/ffmpeg_lib/amd64/lib',
     ].join(' '),
   }
 end

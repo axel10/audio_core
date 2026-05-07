@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(any(target_os = "ios", target_os = "macos"))]
 use super::common::ensure_ffmpeg_initialized;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "ios", target_os = "macos"))]
 use super::formats::output_bitrate_mode;
 use super::formats::output_format_key;
 #[cfg(any(target_os = "ios", target_os = "macos"))]

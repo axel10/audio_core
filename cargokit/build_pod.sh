@@ -37,6 +37,21 @@ export CARGOKIT_TOOL_TEMP_DIR=$TARGET_TEMP_DIR/build_tool
 # Directory inside root project. Not necessarily the top level directory of root project.
 export CARGOKIT_ROOT_PROJECT_DIR=$SRCROOT
 
+# Give ffmpeg-sys-next a concrete prebuilt FFmpeg root so it does not fall back
+# to pkg-config during iOS cross-compilation.
+case "$PLATFORM_NAME" in
+  iphoneos)
+    export FFMPEG_DIR="$BASEDIR/../ios/ffmpeg_lib/arm64"
+    ;;
+  iphonesimulator)
+    if echo "${ARCHS:-}" | grep -qw x86_64; then
+      export FFMPEG_DIR="$BASEDIR/../ios/ffmpeg_lib/x86_64"
+    else
+      export FFMPEG_DIR="$BASEDIR/../ios/ffmpeg_lib/arm64-sim"
+    fi
+    ;;
+esac
+
 FLUTTER_EXPORT_BUILD_ENVIRONMENT=(
   "$PODS_ROOT/../Flutter/ephemeral/flutter_export_environment.sh" # macOS
   "$PODS_ROOT/../Flutter/flutter_export_environment.sh" # iOS

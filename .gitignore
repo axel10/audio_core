@@ -40,3 +40,4 @@ ffmpeg-8.*
 lame-*
 opus-*
 ffmpeg_lib
+FFmpeg.xcframework

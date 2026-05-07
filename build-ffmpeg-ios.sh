@@ -211,6 +211,70 @@ for arch in "${ARCHS[@]}"; do
   "$ffmpeg_root/configure" --pkg-config-flags="--static" "${configure_args[@]}"
   make -j"$jobs"
   make install
+
+  # 4. 合并所有静态库为一个 libffmpeg.a
+  log "Merging all static libraries into libffmpeg.a for $arch..."
+  # 获取所有 .a 文件，排除可能已经存在的 libffmpeg.a (如果是重复运行且没 clean)
+  # 虽然脚本开头有 rm -rf，但显式排除更安全
+  libs=$(find "$install_root/lib" -name "*.a" ! -name "libffmpeg.a")
+  libtool -static -o "$install_root/lib/libffmpeg.a" $libs
+
   log "Build finished for $arch. Output: $install_root"
+  log "Single static library created at: $install_root/lib/libffmpeg.a"
 done
-log "All iOS builds finished. Libraries are in $repo_root/ios/ffmpeg_lib"
+
+# 5. 生成 XCFramework
+log "Generating XCFramework..."
+
+xcframework_path="$repo_root/ios/FFmpeg.xcframework"
+rm -rf "$xcframework_path"
+
+# 定义真机路径
+ios_lib="$repo_root/ios/ffmpeg_lib/arm64/lib/libffmpeg.a"
+ios_headers="$repo_root/ios/ffmpeg_lib/arm64/include"
+
+# 处理模拟器库 (可能包含 arm64-sim 和 x86_64)
+sim_libs=()
+[[ -f "$repo_root/ios/ffmpeg_lib/arm64-sim/lib/libffmpeg.a" ]] && sim_libs+=("$repo_root/ios/ffmpeg_lib/arm64-sim/lib/libffmpeg.a")
+[[ -f "$repo_root/ios/ffmpeg_lib/x86_64/lib/libffmpeg.a" ]] && sim_libs+=("$repo_root/ios/ffmpeg_lib/x86_64/lib/libffmpeg.a")
+
+sim_final_lib=""
+sim_headers=""
+
+if [ ${#sim_libs[@]} -gt 0 ]; then
+    sim_out_dir="$repo_root/build/simulator_fat"
+    mkdir -p "$sim_out_dir"
+    sim_final_lib="$sim_out_dir/libffmpeg.a"
+    
+    # 获取模拟器头文件路径 (取第一个可用的模拟器架构)
+    sim_headers="$(dirname "$(dirname "${sim_libs[0]}")")/include"
+
+    if [ ${#sim_libs[@]} -eq 1 ]; then
+        cp "${sim_libs[0]}" "$sim_final_lib"
+    else
+        log "Merging simulator architectures (${#sim_libs[@]}) using lipo..."
+        lipo -create "${sim_libs[@]}" -output "$sim_final_lib"
+    fi
+fi
+
+# 构建命令行
+cmd=(xcodebuild -create-xcframework)
+if [[ -f "$ios_lib" ]]; then
+    cmd+=(-library "$ios_lib" -headers "$ios_headers")
+fi
+if [[ -n "$sim_final_lib" && -f "$sim_final_lib" ]]; then
+    cmd+=(-library "$sim_final_lib" -headers "$sim_headers")
+fi
+cmd+=(-output "$xcframework_path")
+
+# 执行构建
+if [[ ${#cmd[@]} -gt 3 ]]; then
+    log "Running: ${cmd[*]}"
+    "${cmd[@]}"
+    log "SUCCESS: XCFramework created at: $xcframework_path"
+else
+    log "ERROR: Not enough libraries built to create XCFramework. (Expected at least one device or simulator build)"
+    exit 1
+fi
+
+log "All iOS builds finished. Output directory: $repo_root/ios"
