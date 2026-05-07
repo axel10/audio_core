@@ -78,12 +78,14 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
 
   @override
   Future<void> stop() async {
-    await _fftSubscription?.cancel();
-    _fftSubscription = null;
     _latestFftCache = const <double>[];
     _lastLoggedFftFrame = const <double>[];
     _lastFftEventAtMs = null;
     _fftEventCount = 0;
+    // Keep the FFT event stream subscription alive across soft resets.
+    // `Reset Player State` uses `stop()`, and canceling here prevents future
+    // loads from receiving FFT frames unless the whole controller is
+    // re-initialized.
     await _channel.invokeMethod('dispose');
     _currentPath = null;
     _preparedWritePaths.clear();
