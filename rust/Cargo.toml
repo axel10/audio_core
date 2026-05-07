@@ -14,6 +14,7 @@ id3 = "1.16.4"
 log = "0.4.29"
 base64 = "0.22.1"
 serde_json = "1.0.145"
+serde = { version = "1", features = ["derive"] }
 chrono = "0.4"
 zune-core = "0.5.1"
 zune-image = { version = "0.5.0", default-features = false, features = ["jpeg", "png"] }
@@ -21,6 +22,7 @@ zune-imageprocs = { version = "0.5.1", default-features = false }
 palette_core = { path = "palette" }
 fast_image_resize = "6.0.0"
 libblur = "0.23.3"
+ffmpeg_core = { path = "ffmpeg_core" }
 
 
 
@@ -30,7 +32,6 @@ symphonia = { version = "0.5.5", features = ["all"] }
 rodio = { git="https://github.com/axel10/rodio",branch = "master", default-features = true, features = ["symphonia-all"] }
 realfft = "3.5.0"
 fundsp = "0.23.0"
-ffmpeg_core = { path = "../../crates/ffmpeg_core" }
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21.1"

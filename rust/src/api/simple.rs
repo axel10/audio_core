@@ -10,6 +10,8 @@ pub mod fft;
 pub mod metadata;
 pub mod palette;
 
+use super::audio_converter;
+
 #[cfg(any(target_os = "ios", target_os = "macos", target_os = "android"))]
 pub mod audio_fingerprint {
     pub fn get_audio_fingerprint(_path: String) -> anyhow::Result<String> {
@@ -178,6 +180,19 @@ fn playback_state_notify_pair() -> &'static (Mutex<()>, Condvar) {
 #[flutter_rust_bridge::frb(sync)]
 pub fn greet(name: String) -> String {
     format!("Hello, {name}!")
+}
+
+#[flutter_rust_bridge::frb(sync)]
+pub fn get_capabilities() -> String {
+    audio_converter::simple::get_capabilities()
+}
+
+#[flutter_rust_bridge::frb]
+pub fn convert_file_with_progress(
+    request_json: String,
+    progress_sink: StreamSink<String>,
+) {
+    audio_converter::simple::convert_file_with_progress(request_json, progress_sink)
 }
 
 fn push_state() -> PlaybackState {

@@ -3,13 +3,11 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
-  audio_ffmpeg_lib
   dart_chromaprint
   desktop_drop
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST
-  audio_converter
   audio_core
   jni
 )

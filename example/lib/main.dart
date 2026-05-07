@@ -4,7 +4,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:audio_core/audio_core.dart';
-import 'package:audio_converter/audio_converter.dart';
 import 'package:file_picker/file_picker.dart';
 import 'equalizer_panel.dart';
 import 'fade_demo_tab.dart';
@@ -12,6 +11,7 @@ import 'metadata_tab.dart';
 import 'mesh_demo_tab.dart';
 import 'widgets.dart';
 import 'random_lab_tab.dart';
+import 'transcode_tab.dart';
 import 'audio_handler.dart';
 import 'android_media_library_picker.dart';
 import 'apple_directory_tab.dart';
@@ -378,7 +378,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 7,
+      length: 8,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Audio Visualizer Player Plugin Demo'),
@@ -391,6 +391,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
               Tab(icon: Icon(Icons.blur_on), text: 'Mesh'),
               Tab(icon: Icon(Icons.shuffle), text: 'Random Lab'),
               Tab(icon: Icon(Icons.folder_open), text: 'Apple Dir'),
+              Tab(icon: Icon(Icons.transform), text: 'Transcode'),
               Tab(icon: Icon(Icons.equalizer), text: 'Equalizer'),
             ],
           ),
@@ -463,7 +464,9 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
             RandomLabTab(key: _randomLabKey, controller: _controller),
             // 第六页: 苹果目录扫描页
             AppleDirectoryTab(controller: _controller),
-            // 第七页: 均衡器界面
+            // 第七页: 转码演示
+            TranscodeTab(audioConverter: _audioConverter),
+            // 第八页: 均衡器界面
             SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: EqualizerPanel(controller: _controller),

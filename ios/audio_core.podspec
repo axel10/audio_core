@@ -3,7 +3,7 @@
 # Run `pod lib lint audio_core.podspec` to validate before publishing.
 #
 Pod::Spec.new do |s|
-  ffmpeg_lib_root = '$(PODS_ROOT)/../Flutter/ephemeral/.symlinks/plugins/audio_ffmpeg_lib/ios/ffmpeg_lib'
+  ffmpeg_lib_root = '$(PODS_ROOT)/../Flutter/ephemeral/.symlinks/plugins/audio_core/ios/ffmpeg_lib'
   s.name             = 'audio_core'
   s.version          = '0.0.1'
   s.summary          = 'A new Flutter FFI plugin project.'
@@ -17,7 +17,6 @@ A new Flutter FFI plugin project.
   s.source           = { :path => '.' }
   s.source_files = ['../darwin/Classes/**/*']
   s.dependency 'Flutter'
-  s.dependency 'audio_ffmpeg_lib'
   s.platform = :ios, '15.0'
 
   # Flutter.framework does not contain a i386 slice.
@@ -36,8 +35,8 @@ A new Flutter FFI plugin project.
     ].join(' '),
     'OTHER_LDFLAGS' => [
       '-force_load ${BUILT_PRODUCTS_DIR}/libaudio_core.a',
-      '-L$(PODS_ROOT)/../Flutter/ephemeral/.symlinks/plugins/audio_ffmpeg_lib/ios/ffmpeg_lib/arm64/lib',
-      '-L$(PODS_ROOT)/../Flutter/ephemeral/.symlinks/plugins/audio_ffmpeg_lib/ios/ffmpeg_lib/arm64-sim/lib',
+      '-L$(PODS_ROOT)/../Flutter/ephemeral/.symlinks/plugins/audio_core/ios/ffmpeg_lib/arm64/lib',
+      '-L$(PODS_ROOT)/../Flutter/ephemeral/.symlinks/plugins/audio_core/ios/ffmpeg_lib/arm64-sim/lib',
       '-lavformat',
       '-lavcodec',
       '-lavutil',

@@ -6,7 +6,6 @@ import FlutterMacOS
 import Foundation
 
 import audio_core
-import audio_ffmpeg_lib
 import audio_service
 import audio_session
 import dart_chromaprint
@@ -17,7 +16,6 @@ import sqflite_darwin
 
 func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
   AudioCorePlugin.register(with: registry.registrar(forPlugin: "AudioCorePlugin"))
-  AudioFfmpegLibPlugin.register(with: registry.registrar(forPlugin: "AudioFfmpegLibPlugin"))
   AudioServicePlugin.register(with: registry.registrar(forPlugin: "AudioServicePlugin"))
   AudioSessionPlugin.register(with: registry.registrar(forPlugin: "AudioSessionPlugin"))
   DartChromaprintPlugin.register(with: registry.registrar(forPlugin: "DartChromaprintPlugin"))

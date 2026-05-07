@@ -1,10 +1,5 @@
 PODS:
-  - audio_converter (0.0.1):
-    - FlutterMacOS
   - audio_core (0.0.1):
-    - audio_ffmpeg_lib
-    - FlutterMacOS
-  - audio_ffmpeg_lib (0.0.1):
     - FlutterMacOS
   - audio_service (0.0.1):
     - Flutter
@@ -26,9 +21,7 @@ PODS:
     - FlutterMacOS
 
 DEPENDENCIES:
-  - audio_converter (from `Flutter/ephemeral/.symlinks/plugins/audio_converter/macos`)
   - audio_core (from `Flutter/ephemeral/.symlinks/plugins/audio_core/darwin`)
-  - audio_ffmpeg_lib (from `Flutter/ephemeral/.symlinks/plugins/audio_ffmpeg_lib/macos`)
   - audio_service (from `Flutter/ephemeral/.symlinks/plugins/audio_service/darwin`)
   - audio_session (from `Flutter/ephemeral/.symlinks/plugins/audio_session/macos`)
   - dart_chromaprint (from `Flutter/ephemeral/.symlinks/plugins/dart_chromaprint/macos`)
@@ -39,12 +32,8 @@ DEPENDENCIES:
   - sqflite_darwin (from `Flutter/ephemeral/.symlinks/plugins/sqflite_darwin/darwin`)
 
 EXTERNAL SOURCES:
-  audio_converter:
-    :path: Flutter/ephemeral/.symlinks/plugins/audio_converter/macos
   audio_core:
     :path: Flutter/ephemeral/.symlinks/plugins/audio_core/darwin
-  audio_ffmpeg_lib:
-    :path: Flutter/ephemeral/.symlinks/plugins/audio_ffmpeg_lib/macos
   audio_service:
     :path: Flutter/ephemeral/.symlinks/plugins/audio_service/darwin
   audio_session:
@@ -63,9 +52,7 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral/.symlinks/plugins/sqflite_darwin/darwin
 
 SPEC CHECKSUMS:
-  audio_converter: 587086c2e646e0730c8ceb65d809692e9af6e1a1
-  audio_core: 3b1404f5f632699f727d7d8c293e6606fd56391c
-  audio_ffmpeg_lib: 6f3195323e7f2158bc6c33eddaf39279edb05cb7
+  audio_core: f2a01276f768c0adb0c3e344c10e9fd34211dbe9
   audio_service: aa99a6ba2ae7565996015322b0bb024e1d25c6fd
   audio_session: eaca2512cf2b39212d724f35d11f46180ad3a33e
   dart_chromaprint: 7c2501dbb5a6319a0d4b38d447bf4bf483f6b610

@@ -3,7 +3,7 @@
 # Run `pod lib lint audio_core.podspec` to validate before publishing.
 #
 Pod::Spec.new do |s|
-  ffmpeg_lib_root = '$(PODS_ROOT)/../Flutter/ephemeral/.symlinks/plugins/audio_ffmpeg_lib/macos/ffmpeg_lib'
+  ffmpeg_lib_root = '$(PODS_ROOT)/../Flutter/ephemeral/.symlinks/plugins/audio_core/macos/ffmpeg_lib'
   ffmpeg_lib_arm64 = "#{ffmpeg_lib_root}/arm64/lib"
   ffmpeg_lib_x86_64 = "#{ffmpeg_lib_root}/amd64/lib"
   s.name             = 'audio_core'
@@ -18,7 +18,6 @@ A new Flutter FFI plugin project.
 
   s.source           = { :path => '.' }
   s.source_files     = ['Classes/**/*']
-  s.dependency 'audio_ffmpeg_lib'
   s.dependency 'FlutterMacOS'
 
   s.platform = :osx, '11.0'
@@ -54,6 +53,7 @@ A new Flutter FFI plugin project.
     'OTHER_LDFLAGS' => [
       '-lavformat',
       '-lavcodec',
+      '-lavfilter',
       '-lavutil',
       '-lswresample',
       '-lswscale',

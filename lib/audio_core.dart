@@ -1,5 +1,7 @@
 library;
 
+export 'src/audio_converter.dart';
+
 export 'src/rust/api/simple_api.dart'
     hide FadeSettings, FadeMode, TrackMetadataUpdate;
 export 'src/rust/frb_generated.dart' show RustLib;

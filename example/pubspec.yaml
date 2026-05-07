@@ -46,8 +46,6 @@ dependencies:
   desktop_drop: ^0.7.0
   file_picker: ^11.0.2
   audio_service: ^0.18.18
-  audio_converter:
-    path: ../../audio_converter
   media_scanner: ^2.2.1
   mesh_gradient: 
    git:

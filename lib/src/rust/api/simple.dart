@@ -12,5 +12,13 @@ import 'simple/controller.dart';
 String greet({required String name}) =>
     RustLib.instance.api.crateApiSimpleGreet(name: name);
 
+String getCapabilities() =>
+    RustLib.instance.api.crateApiSimpleGetCapabilities();
+
+Stream<String> convertFileWithProgress({required String requestJson}) => RustLib
+    .instance
+    .api
+    .crateApiSimpleConvertFileWithProgress(requestJson: requestJson);
+
 Stream<PlaybackState> subscribePlaybackState() =>
     RustLib.instance.api.crateApiSimpleSubscribePlaybackState();
