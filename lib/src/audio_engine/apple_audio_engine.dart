@@ -670,17 +670,17 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
       final peak = _latestFftCache.fold<double>(0.0, (max, value) {
         return value > max ? value : max;
       });
-      debugPrint(
-        '[AppleAudioEngine] fft received count=$_fftEventCount '
-        'nativeEmitCount=${emitCount?.toString() ?? "nil"} '
-        'values=$valueCount '
-        'deltaMs=${deltaMs?.toString() ?? "nil"} '
-        'bridgeLagMs=${bridgeLagMs?.toString() ?? "nil"} '
-        'frameDelta=${frameDelta.toStringAsFixed(6)} '
-        'peak=${peak.toStringAsFixed(6)} '
-        'receivedAtMs=$receivedAtMs '
-        'nativeEmittedAtMs=${emittedAtMs?.toString() ?? "nil"}',
-      );
+      // debugPrint(
+      //   '[AppleAudioEngine] fft received count=$_fftEventCount '
+      //   'nativeEmitCount=${emitCount?.toString() ?? "nil"} '
+      //   'values=$valueCount '
+      //   'deltaMs=${deltaMs?.toString() ?? "nil"} '
+      //   'bridgeLagMs=${bridgeLagMs?.toString() ?? "nil"} '
+      //   'frameDelta=${frameDelta.toStringAsFixed(6)} '
+      //   'peak=${peak.toStringAsFixed(6)} '
+      //   'receivedAtMs=$receivedAtMs '
+      //   'nativeEmittedAtMs=${emittedAtMs?.toString() ?? "nil"}',
+      // );
       _lastLoggedFftFrame = List<double>.from(_latestFftCache);
     }
   }

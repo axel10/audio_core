@@ -9,7 +9,7 @@ extension AppleAudioEngine {
       "isPlaying=\(publicDeck()?.isPlaying ?? false)"
     )
     let duration = max(0, durationMs)
-    guard currentDeck.isLoaded, currentDeck.isPlaying, duration > 0 else {
+    guard let activeDeck = publicDeck(), activeDeck.isLoaded, activeDeck.isPlaying, duration > 0 else {
       try load(path: path)
       if let positionMs, positionMs > 0 {
         try seek(positionMs: positionMs)
@@ -163,7 +163,8 @@ extension AppleAudioEngine {
       "positionMs=\(positionMs.map(String.init) ?? "nil") current=\(currentDeck.loadedURL?.path ?? "nil") " +
       "incoming=\(incomingDeck.loadedURL?.path ?? "nil")"
     )
-    guard currentDeck.loadedFile != nil || currentDeck.loadedFFmpegStream != nil else {
+    guard let outgoingDeck = publicDeck(),
+          outgoingDeck.loadedFile != nil || outgoingDeck.loadedFFmpegStream != nil else {
       try load(path: path)
       try play(fadeDurationMs: durationMs, targetVolume: latestVolume)
       return
@@ -172,34 +173,36 @@ extension AppleAudioEngine {
     configureEngineIfNeeded()
     applyEqualizerConfig(latestEqualizerConfig)
 
-    if incomingDeck.loadedURL != nil {
-      if let oldIncomingURL = incomingDeck.loadedURL {
+    let stagingDeck = outgoingDeck === currentDeck ? incomingDeck : currentDeck
+
+    if stagingDeck.loadedURL != nil {
+      if let oldIncomingURL = stagingDeck.loadedURL {
         fileAccess.releaseAccess(for: oldIncomingURL)
       }
-      incomingDeck.stopPlaybackNode()
-      drainDeckFfmpegPlaybackState(incomingDeck, releasingFile: true)
-      incomingDeck.clear(releasingFile: true)
+      stagingDeck.stopPlaybackNode()
+      drainDeckFfmpegPlaybackState(stagingDeck, releasingFile: true)
+      stagingDeck.clear(releasingFile: true)
     }
 
     let incomingURL = try fileAccess.acquireAccess(for: path)
-    try loadAsset(into: incomingDeck, from: incomingURL)
+    try loadAsset(into: stagingDeck, from: incomingURL)
     let startFrame: AVAudioFramePosition
     if let positionMs, positionMs > 0 {
-      let targetFrame = framePosition(forMilliseconds: positionMs, sampleRate: incomingDeck.sampleRate)
-      startFrame = max(0, min(targetFrame, incomingDeck.frameCount))
+      let targetFrame = framePosition(forMilliseconds: positionMs, sampleRate: stagingDeck.sampleRate)
+      startFrame = max(0, min(targetFrame, stagingDeck.frameCount))
     } else {
       startFrame = 0
     }
-    incomingDeck.playbackFramePosition = startFrame
-    incomingDeck.gain = 0.0
+    stagingDeck.playbackFramePosition = startFrame
+    stagingDeck.gain = 0.0
 
-    currentDeck.playbackFramePosition = currentDeck.currentPlaybackFramePosition()
-    currentDeck.gain = 1.0
-    currentDeck.playerNode.volume = Float(latestVolume)
+    outgoingDeck.playbackFramePosition = outgoingDeck.currentPlaybackFramePosition()
+    outgoingDeck.gain = 1.0
+    outgoingDeck.playerNode.volume = Float(latestVolume)
 
-    try startPlaybackIfNeeded(on: incomingDeck, from: startFrame, volume: 0.0)
-    incomingDeck.playerNode.volume = 0.0
-    currentDeck.playerNode.volume = Float(latestVolume)
+    try startPlaybackIfNeeded(on: stagingDeck, from: startFrame, volume: 0.0)
+    stagingDeck.playerNode.volume = 0.0
+    outgoingDeck.playerNode.volume = Float(latestVolume)
 
     fadeTimer?.invalidate()
     fadeTimer = nil
@@ -225,84 +228,47 @@ extension AppleAudioEngine {
       let currentGain = 1.0 - progress
       let incomingGain = progress
 
-      self.currentDeck.gain = currentGain
-      self.incomingDeck.gain = incomingGain
-      self.currentDeck.playerNode.volume = Float((self.latestVolume * currentGain).clamped(to: 0.0...1.0))
-      self.incomingDeck.playerNode.volume = Float((self.latestVolume * incomingGain).clamped(to: 0.0...1.0))
+      outgoingDeck.gain = currentGain
+      stagingDeck.gain = incomingGain
+      outgoingDeck.playerNode.volume = Float((self.latestVolume * currentGain).clamped(to: 0.0...1.0))
+      stagingDeck.playerNode.volume = Float((self.latestVolume * incomingGain).clamped(to: 0.0...1.0))
 
       if progress >= 1.0 {
         timer.invalidate()
         self.fadeTimer = nil
-        self.settleCrossfade()
+        self.settleCrossfade(outgoingDeck: outgoingDeck, incomingDeck: stagingDeck)
       }
     }
 
     RunLoop.main.add(fadeTimer!, forMode: .common)
   }
 
-  func settleCrossfade() {
+  func settleCrossfade(outgoingDeck: PlaybackDeck, incomingDeck: PlaybackDeck) {
     debugPrint(
-      "[AppleAudioEngine] settleCrossfade start current=\(currentDeck.loadedURL?.path ?? "nil") " +
+      "[AppleAudioEngine] settleCrossfade start outgoing=\(outgoingDeck.loadedURL?.path ?? "nil") " +
       "incoming=\(incomingDeck.loadedURL?.path ?? "nil")"
     )
     guard incomingDeck.loadedFile != nil || incomingDeck.loadedFFmpegStream != nil else { return }
-    syncOnFfmpegPlaybackQueue {}
 
-    if let oldURL = currentDeck.loadedURL {
+    if let oldURL = outgoingDeck.loadedURL {
       fileAccess.releaseAccess(for: oldURL)
     }
 
-    let shouldRescheduleFFmpegStream = incomingDeck.loadedFFmpegStream != nil
-    let resumedFrame = shouldRescheduleFFmpegStream
-      ? incomingDeck.currentPlaybackFramePosition()
-      : 0
+    outgoingDeck.stopPlaybackNode()
+    drainDeckFfmpegPlaybackState(outgoingDeck, releasingFile: true)
+    outgoingDeck.clear(releasingFile: true)
+    outgoingDeck.playbackFramePosition = 0
 
-    swap(&currentDeck.playerNode, &incomingDeck.playerNode)
-    swap(&currentDeck.loadedURL, &incomingDeck.loadedURL)
-    swap(&currentDeck.loadedFile, &incomingDeck.loadedFile)
-    swap(&currentDeck.loadedFFmpegPCM, &incomingDeck.loadedFFmpegPCM)
-    swap(&currentDeck.loadedFFmpegStream, &incomingDeck.loadedFFmpegStream)
-    swap(&currentDeck.sampleRate, &incomingDeck.sampleRate)
-    swap(&currentDeck.playbackFramePosition, &incomingDeck.playbackFramePosition)
-    swap(&currentDeck.isPlaybackScheduled, &incomingDeck.isPlaybackScheduled)
-    swap(&currentDeck.gain, &incomingDeck.gain)
-    swap(&currentDeck.scheduledPCMBuffers, &incomingDeck.scheduledPCMBuffers)
-
-    currentDeck.gain = 1.0
-    currentDeck.playerNode.volume = Float(latestVolume)
-    currentDeck.playbackFramePosition = currentDeck.currentPlaybackFramePosition()
-
-    if shouldRescheduleFFmpegStream {
-      // FFmpeg stream buffer completion callbacks capture the deck object used
-      // during scheduling. After the deck-role swap above, the newly current
-      // deck must be re-scheduled so future refill callbacks target the active
-      // deck instead of the old incoming one.
-      let clampedResumeFrame = max(0, min(resumedFrame, currentDeck.frameCount))
-      currentDeck.playbackFramePosition = clampedResumeFrame
-      currentDeck.stopPlaybackNode()
-      do {
-        try startPlaybackIfNeeded(
-          on: currentDeck,
-          from: clampedResumeFrame,
-          volume: latestVolume
-        )
-      } catch {
-        debugPrint(
-          "[AppleAudioEngine] settleCrossfade ffmpeg reschedule failed path=\(currentDeck.loadedURL?.path ?? "nil") " +
-          "frame=\(clampedResumeFrame) error=\(error.localizedDescription)"
-        )
-      }
-    }
-
-    incomingDeck.stopPlaybackNode()
-    drainDeckFfmpegPlaybackState(incomingDeck, releasingFile: true)
-    incomingDeck.clear(releasingFile: true)
-    if let currentURL = currentDeck.loadedURL {
+    incomingDeck.gain = 1.0
+    incomingDeck.playerNode.volume = Float(latestVolume)
+    incomingDeck.playbackFramePosition = incomingDeck.currentPlaybackFramePosition()
+    if let currentURL = incomingDeck.loadedURL {
       preparedAccessPaths.remove(currentURL.path)
     }
+
     debugPrint(
-      "[AppleAudioEngine] settleCrossfade done current=\(currentDeck.loadedURL?.path ?? "nil") " +
-      "incoming=\(incomingDeck.loadedURL?.path ?? "nil")"
+      "[AppleAudioEngine] settleCrossfade done outgoing=\(outgoingDeck.loadedURL?.path ?? "nil") " +
+      "current=\(publicURL()?.path ?? "nil")"
     )
   }
 

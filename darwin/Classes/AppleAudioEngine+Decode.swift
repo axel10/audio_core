@@ -359,6 +359,7 @@ extension AppleAudioEngine {
     }
 
     var nextFrameToSchedule = startFrame
+    var scheduledChunkCount = 0
     syncOnFfmpegPlaybackQueue {
       deck.scheduledPCMBuffers.removeAll()
     }
@@ -373,6 +374,7 @@ extension AppleAudioEngine {
         return false
       }
 
+      let decodeStartMs = currentTimestampMs()
       let chunkBuffer: AppleFFmpegDecodedAudio
       do {
         guard let chunk = try stream.nextChunk(maxFrames: ffmpegScheduleChunkFrames) else {
@@ -400,19 +402,39 @@ extension AppleAudioEngine {
         return false
       }
 
+      let chunkIndex = scheduledChunkCount
+      scheduledChunkCount += 1
       nextFrameToSchedule = min(totalFrames, bufferStart + bufferFrameCount)
       let isLastBuffer = nextFrameToSchedule >= totalFrames
+      let bufferedUntilFrame = nextFrameToSchedule
+      let decodeElapsedMs = currentTimestampMs() - decodeStartMs
+      let bufferDurationMs = framePositionToMilliseconds(bufferFrameCount, sampleRate: deck.sampleRate)
       if deck.scheduledPCMBuffers.count >= ffmpegPlaybackLookaheadBuffers {
         deck.scheduledPCMBuffers.removeFirst()
       }
       deck.scheduledPCMBuffers.append(buffer)
+      debugPrint(
+        "[AppleAudioEngine] ffmpeg schedule chunk path=\(deck.loadedURL?.path ?? "nil") " +
+        "index=\(chunkIndex) startFrame=\(bufferStart) frames=\(bufferFrameCount) " +
+        "durationMs=\(bufferDurationMs) bufferedUntilFrame=\(bufferedUntilFrame) " +
+        "decodeElapsedMs=\(String(format: "%.1f", decodeElapsedMs)) queueDepth=\(deck.scheduledPCMBuffers.count)"
+      )
 
       let completion: (AVAudioPCMBuffer) -> Void = { [weak self] _ in
         guard let self = self else { return }
+        let callbackAtMs = self.currentTimestampMs()
         self.ffmpegPlaybackQueue.async {
           guard deck.playbackGeneration == generation, deck.isPlaybackScheduled else {
             return
           }
+          let callbackDeltaMs = self.currentTimestampMs() - callbackAtMs
+          let playbackFrame = deck.currentPlaybackFramePosition()
+          debugPrint(
+            "[AppleAudioEngine] ffmpeg chunk callback path=\(deck.loadedURL?.path ?? "nil") " +
+            "index=\(chunkIndex) kind=\(isLastBuffer ? "playedBack" : "rendered") " +
+            "bufferStart=\(bufferStart) frames=\(bufferFrameCount) playbackFrame=\(playbackFrame) " +
+            "dispatchDelayMs=\(String(format: "%.1f", callbackDeltaMs)) queueDepthBefore=\(deck.scheduledPCMBuffers.count)"
+          )
           if isLastBuffer {
             self.handlePlaybackCompleted(
               deck: deck,
@@ -444,7 +466,7 @@ extension AppleAudioEngine {
           buffer,
           at: nil,
           options: [],
-          completionCallbackType: isLastBuffer ? .dataPlayedBack : .dataConsumed,
+          completionCallbackType: isLastBuffer ? .dataPlayedBack : .dataRendered,
           completionHandler: { _ in
             completion(buffer)
           }

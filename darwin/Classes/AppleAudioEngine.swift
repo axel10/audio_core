@@ -19,9 +19,10 @@ final class AppleAudioEngine {
   // background scheduling. Keep a larger FFmpeg PCM runway than the
   // AVFoundation path needs so playback stays smooth across those transitions.
   let ffmpegScheduleChunkFrames = 16_384
-  let ffmpegPlaybackLookaheadBuffers = 4
+  let ffmpegPlaybackLookaheadBuffers = 6
   let ffmpegPlaybackQueue = DispatchQueue(label: "audio_core.ffmpeg.playback", qos: .userInitiated)
   let ffmpegPlaybackQueueKey = DispatchSpecificKey<Void>()
+  let fftProcessingQueue = DispatchQueue(label: "audio_core.fft.processing", qos: .userInitiated)
   let waveformRmsWindowsPerChunk = 8
   let waveformPrecisionScale = 100.0
   let avFoundationPreferredExtensions: Set<String> = [
@@ -51,6 +52,7 @@ final class AppleAudioEngine {
   var fftTapCount: Int = 0
   var fftLastTapAtMs: Double?
   var isFftTapInstalled = false
+  var fftProcessingGeneration: UInt64 = 0
 
   var onPlayerStateChanged: ((String?, String?) -> Void)?
 

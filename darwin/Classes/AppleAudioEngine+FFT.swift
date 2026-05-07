@@ -113,6 +113,7 @@ extension AppleAudioEngine {
   func resetFftCaptureBuffer() {
     fftCaptureBuffer.clear()
     fftResultLock.lock()
+    fftProcessingGeneration &+= 1
     latestRawFft = rawZeroFrame()
     latestRawTapMagnitudes = Array(repeating: 0.0, count: fftBinCount)
     fftAnalysisRemainder.removeAll(keepingCapacity: true)
@@ -138,7 +139,15 @@ extension AppleAudioEngine {
     fftCaptureBuffer.append(buffer: buffer)
     let monoSamples = monoSamples(from: buffer)
     guard !monoSamples.isEmpty else { return }
-    enqueueTapFftFrames(monoSamples, frameLength: Int(buffer.frameLength))
+    let frameLength = Int(buffer.frameLength)
+    let generation = currentFftProcessingGeneration()
+    fftProcessingQueue.async { [weak self] in
+      self?.enqueueTapFftFrames(
+        monoSamples,
+        frameLength: frameLength,
+        generation: generation
+      )
+    }
   }
 
   func monoSamples(from buffer: AVAudioPCMBuffer) -> [Float] {
@@ -162,12 +171,21 @@ extension AppleAudioEngine {
     return mono
   }
 
-  func enqueueTapFftFrames(_ monoSamples: [Float], frameLength: Int? = nil) {
+  func enqueueTapFftFrames(
+    _ monoSamples: [Float],
+    frameLength: Int? = nil,
+    generation: UInt64
+  ) {
+    guard isCurrentFftProcessingGeneration(generation) else { return }
     var windows: [[Float]] = []
     var previousLatest = rawZeroFrame()
     var previousTapMagnitudes = Array(repeating: 0.0, count: fftBinCount)
 
     fftResultLock.lock()
+    guard fftProcessingGeneration == generation else {
+      fftResultLock.unlock()
+      return
+    }
     previousLatest = latestRawFft
     previousTapMagnitudes = latestRawTapMagnitudes
     fftAnalysisRemainder.append(contentsOf: monoSamples)
@@ -186,6 +204,7 @@ extension AppleAudioEngine {
     }
 
     guard let latestMagnitudes = queuedFrames.last else { return }
+    guard isCurrentFftProcessingGeneration(generation) else { return }
 
     let tapNowMs = currentTimestampMs()
     fftTapCount &+= 1
@@ -196,6 +215,10 @@ extension AppleAudioEngine {
     let magnitudeDelta = meanAbsoluteDelta(latestMagnitudes, comparedTo: previousTapMagnitudes)
 
     fftResultLock.lock()
+    guard fftProcessingGeneration == generation else {
+      fftResultLock.unlock()
+      return
+    }
     pendingFftFrames.append(contentsOf: queuedFrames)
     if pendingFftFrames.count > fftFrameQueueCapacity {
       pendingFftFrames.removeFirst(pendingFftFrames.count - fftFrameQueueCapacity)
@@ -217,6 +240,20 @@ extension AppleAudioEngine {
         "first=\(latestMagnitudes.first.map { String(format: "%.6f", $0) } ?? "nil")"
       )
     }
+  }
+
+  func currentFftProcessingGeneration() -> UInt64 {
+    fftResultLock.lock()
+    let generation = fftProcessingGeneration
+    fftResultLock.unlock()
+    return generation
+  }
+
+  func isCurrentFftProcessingGeneration(_ generation: UInt64) -> Bool {
+    fftResultLock.lock()
+    let isCurrent = fftProcessingGeneration == generation
+    fftResultLock.unlock()
+    return isCurrent
   }
 
   func meanAbsoluteDelta(_ lhs: [Double], comparedTo rhs: [Double]) -> Double {
