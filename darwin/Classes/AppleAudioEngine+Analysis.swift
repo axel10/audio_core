@@ -4,8 +4,7 @@ import Foundation
 extension AppleAudioEngine {
   func getWaveform(path: String, expectedChunks: Int) throws -> [Double] {
     guard expectedChunks > 0 else { return [] }
-    return try fileAccess.withTemporaryAccess(for: path) { url in
-      let source = try decodeAsset(for: url)
+    return try withDecodedAudioSource(path: path) { source in
       return processWaveform(
         samples: try source.monoSamples(),
         expectedChunks: expectedChunks
@@ -14,27 +13,34 @@ extension AppleAudioEngine {
   }
 
   func getAudioPcm(path: String, sampleStride: Int) throws -> [Float] {
-    return try fileAccess.withTemporaryAccess(for: path) { url in
-      let source = try decodeAsset(for: url)
+    return try withDecodedAudioSource(path: path) { source in
       return try source.interleavedSamples(sampleStride: sampleStride)
     }
   }
 
   func getAudioPcmChannelCount(path: String) throws -> Int {
-    try fileAccess.withTemporaryAccess(for: path) { url in
-      let source = try decodeAsset(for: url)
+    try withDecodedAudioSource(path: path) { source in
       return source.channelCount
     }
   }
 
   func getFingerprintPcm(path: String, maxDurationMs: Int) throws -> [String: Any] {
-    try fileAccess.withTemporaryAccess(for: path) { url in
-      let source = try decodeAsset(for: url)
+    try withDecodedAudioSource(path: path) { source in
       return [
         "samples": try source.interleavedSamples(sampleStride: 1, maxDurationMs: maxDurationMs),
         "sampleRate": Int(source.sampleRate.rounded()),
         "channels": source.channelCount,
       ]
+    }
+  }
+
+  func withDecodedAudioSource<T>(
+    path: String,
+    _ work: (AppleAudioSampleSource) throws -> T
+  ) throws -> T {
+    try fileAccess.withTemporaryAccess(for: path) { url in
+      let source = try decodeAsset(for: url)
+      return try work(source)
     }
   }
 

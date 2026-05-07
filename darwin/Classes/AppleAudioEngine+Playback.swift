@@ -164,10 +164,16 @@ extension AppleAudioEngine {
   }
 
   func currentPlaybackState() -> String {
-    guard publicDeck() != nil else {
+    guard let deck = publicDeck() else {
       return "IDLE"
     }
-    return "READY"
+    if deck.isPlaying {
+      return "PLAYING"
+    }
+    if deck.isLoaded {
+      return "READY"
+    }
+    return "IDLE"
   }
 
   func publicDeck() -> PlaybackDeck? {

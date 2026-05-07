@@ -144,24 +144,28 @@ extension AppleAudioEngine {
       let source = try decodeAsset(for: url)
       switch source {
       case .avFoundation(let file):
-        deck.sampleRate = file.processingFormat.sampleRate
-        deck.loadedURL = url
-        deck.loadedFile = file
-        deck.loadedFFmpegPCM = nil
-        deck.loadedFFmpegStream = nil
+        assignLoadedAsset(
+          into: deck,
+          url: url,
+          sampleRate: file.processingFormat.sampleRate,
+          loadedFile: file,
+          loadedFFmpegPCM: nil,
+          loadedFFmpegStream: nil
+        )
       case .ffmpeg(let decoded):
         // Some files can advertise AVFoundation support but still fail on Apple.
         // Keep the legacy fallback for those rare cases.
         let targetSampleRate = playbackSampleRate()
         let playbackPCM = try decoded.resampled(to: targetSampleRate)
-        deck.sampleRate = playbackPCM.sampleRate
-        deck.loadedURL = url
-        deck.loadedFile = nil
-        deck.loadedFFmpegPCM = playbackPCM
-        deck.loadedFFmpegStream = nil
+        assignLoadedAsset(
+          into: deck,
+          url: url,
+          sampleRate: playbackPCM.sampleRate,
+          loadedFile: nil,
+          loadedFFmpegPCM: playbackPCM,
+          loadedFFmpegStream: nil
+        )
       case .ffmpegStream:
-        // Defensive fallback: decodeAsset currently never returns a stream in this branch,
-        // but keep the switch exhaustive and preserve a usable PCM fallback if it ever does.
         throw NSError(
           domain: "AudioCore",
           code: 2,
@@ -179,11 +183,14 @@ extension AppleAudioEngine {
         "[AppleAudioEngine] ffmpeg load prepared path=\(url.path) targetSampleRate=\(targetSampleRate) " +
         "sampleRate=\(playbackStream.sampleRate) frameCount=\(playbackStream.frameCount)"
       )
-      deck.sampleRate = playbackStream.sampleRate
-      deck.loadedURL = url
-      deck.loadedFile = nil
-      deck.loadedFFmpegPCM = nil
-      deck.loadedFFmpegStream = playbackStream
+      assignLoadedAsset(
+        into: deck,
+        url: url,
+        sampleRate: playbackStream.sampleRate,
+        loadedFile: nil,
+        loadedFFmpegPCM: nil,
+        loadedFFmpegStream: playbackStream
+      )
     }
     deck.playbackFramePosition = 0
     deck.isPlaybackScheduled = false
@@ -196,6 +203,21 @@ extension AppleAudioEngine {
       "[AppleAudioEngine] loadAsset done path=\(url.path) source=\(deck.sampleRate) " +
       "elapsedMs=\(String(format: "%.1f", currentTimestampMs() - startMs))"
     )
+  }
+
+  func assignLoadedAsset(
+    into deck: PlaybackDeck,
+    url: URL,
+    sampleRate: Double,
+    loadedFile: AVAudioFile?,
+    loadedFFmpegPCM: AppleFFmpegDecodedAudio?,
+    loadedFFmpegStream: AppleFFmpegStreamAudio?
+  ) {
+    deck.sampleRate = sampleRate
+    deck.loadedURL = url
+    deck.loadedFile = loadedFile
+    deck.loadedFFmpegPCM = loadedFFmpegPCM
+    deck.loadedFFmpegStream = loadedFFmpegStream
   }
 
   func configureEngineIfNeeded() {
