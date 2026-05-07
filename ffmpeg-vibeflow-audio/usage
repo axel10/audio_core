@@ -1,0 +1,28 @@
+ffmpeg provides CMake integration:
+
+  find_package(FFMPEG REQUIRED)
+  target_include_directories(main PRIVATE ${FFMPEG_INCLUDE_DIRS})
+  target_link_directories(main PRIVATE ${FFMPEG_LIBRARY_DIRS})
+  target_link_libraries(main PRIVATE ${FFMPEG_LIBRARIES})
+
+ffmpeg provides pkg-config modules:
+
+  # FFmpeg codec library
+  libavcodec
+
+  # FFmpeg audio filtering library
+  libavfilter
+
+  # FFmpeg container format library
+  libavformat
+
+  # FFmpeg utility library
+  libavutil
+
+  # FFmpeg audio resampling library
+  libswresample
+
+
+This overlay defaults to an audio-focused build. The default package set omits
+device handling and image scaling, and keeps the audio pipeline centered on
+avcodec, avfilter, avformat, avutil, and swresample.

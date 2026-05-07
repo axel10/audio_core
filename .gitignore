@@ -34,3 +34,9 @@ target
 /coverage/
 
 example/macos/build
+
+fdk-aac-*
+ffmpeg-8.*
+lame-*
+opus-*
+ffmpeg_lib
