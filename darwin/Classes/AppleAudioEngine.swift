@@ -1590,6 +1590,11 @@ final class AppleAudioEngine {
       fileAccess.releaseAccess(for: oldURL)
     }
 
+    let shouldRescheduleFFmpegStream = incomingDeck.loadedFFmpegStream != nil
+    let resumedFrame = shouldRescheduleFFmpegStream
+      ? incomingDeck.currentPlaybackFramePosition()
+      : 0
+
     swap(&currentDeck.playerNode, &incomingDeck.playerNode)
     swap(&currentDeck.loadedURL, &incomingDeck.loadedURL)
     swap(&currentDeck.loadedFile, &incomingDeck.loadedFile)
@@ -1604,6 +1609,28 @@ final class AppleAudioEngine {
     currentDeck.gain = 1.0
     currentDeck.playerNode.volume = Float(latestVolume)
     currentDeck.playbackFramePosition = currentDeck.currentPlaybackFramePosition()
+
+    if shouldRescheduleFFmpegStream {
+      // FFmpeg stream buffer completion callbacks capture the deck object used
+      // during scheduling. After the deck-role swap above, the newly current
+      // deck must be re-scheduled so future refill callbacks target the active
+      // deck instead of the old incoming one.
+      let clampedResumeFrame = max(0, min(resumedFrame, currentDeck.frameCount))
+      currentDeck.playbackFramePosition = clampedResumeFrame
+      currentDeck.stopPlaybackNode()
+      do {
+        try startPlaybackIfNeeded(
+          on: currentDeck,
+          from: clampedResumeFrame,
+          volume: latestVolume
+        )
+      } catch {
+        debugPrint(
+          "[AppleAudioEngine] settleCrossfade ffmpeg reschedule failed path=\(currentDeck.loadedURL?.path ?? "nil") " +
+          "frame=\(clampedResumeFrame) error=\(error.localizedDescription)"
+        )
+      }
+    }
 
     incomingDeck.clear(releasingFile: true)
     if let currentURL = currentDeck.loadedURL {
