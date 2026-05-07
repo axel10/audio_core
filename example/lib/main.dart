@@ -118,6 +118,9 @@ class VisualizerDemoPage extends StatefulWidget {
 }
 
 class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
+  static const double _rawSpectrumMinHeight = 220;
+  static const double _spectrumVisualizersMinHeight = 320;
+
   late final AudioCoreController _controller;
   final AudioConverter _audioConverter = AudioConverter();
   AudioLibraryFolder? _mediaLibraryRoot;
@@ -395,9 +398,10 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
         body: TabBarView(
           children: [
             // 第一页: 播放器主界面
-            Padding(
+            SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   AnimatedBuilder(
                     animation: _controller,
@@ -426,10 +430,14 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                     builder: (context, _) => _buildFileAndWaveform(),
                   ),
                   const SizedBox(height: 16),
-                  SizedBox(height: 180, child: _buildRawSpectrumPanel()),
+                  SizedBox(
+                    height: _rawSpectrumMinHeight,
+                    child: _buildRawSpectrumPanel(),
+                  ),
                   const SizedBox(height: 16),
                   // 双频谱可视化展示
-                  Expanded(
+                  SizedBox(
+                    height: _spectrumVisualizersMinHeight,
                     child: AudioDropRegion(
                       controller: _controller,
                       onPathsAccepted: (paths) => _handleImportedPaths(paths),
