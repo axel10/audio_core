@@ -194,6 +194,8 @@ final class AppleAudioEngine {
   private let fftSize = 1024
   private let fftBinCount = 512
   private let fftLog2Size: vDSP_Length = 9
+  private let fftHopSize = 512
+  private let fftFrameQueueCapacity = 24
   private let ffmpegScheduleChunkFrames = 4096
   private let ffmpegPlaybackLookaheadBuffers = 3
   private let ffmpegPlaybackQueue = DispatchQueue(label: "audio_core.ffmpeg.playback", qos: .userInitiated)
@@ -221,6 +223,8 @@ final class AppleAudioEngine {
   private let fftResultLock = NSLock()
   private var latestRawFft: [Double]
   private var latestRawTapMagnitudes: [Double]
+  private var fftAnalysisRemainder: [Float] = []
+  private var pendingFftFrames: [[Double]] = []
   private var fftTapCount: Int = 0
   private var fftLastTapAtMs: Double?
   private var isFftTapInstalled = false
@@ -261,7 +265,6 @@ final class AppleAudioEngine {
       skipHighFrequencyGroups: max(0, skipHighFrequencyGroups),
       aggregationMode: AppleFftAggregationMode(rawValue: aggregationMode) ?? .peak
     )
-    refreshLatestRawFft()
   }
 
   var isPlaying: Bool {
@@ -424,11 +427,14 @@ final class AppleAudioEngine {
   }
 
   func getLatestFft() throws -> [Double] {
-    if let sampledFrame = try sampleFftFrameFromPlaybackPosition() {
-      return sampledFrame
-    }
+    // Keep the visualizer on the real playback tap path. Re-sampling from the
+    // source file on every fetch adds avoidable work and makes the FFT feel
+    // quantized/stale even while the tap is producing newer data.
     fftResultLock.lock()
     defer { fftResultLock.unlock() }
+    if !pendingFftFrames.isEmpty {
+      latestRawFft = pendingFftFrames.removeFirst()
+    }
     return latestRawFft
   }
 
@@ -713,6 +719,8 @@ final class AppleAudioEngine {
     fftResultLock.lock()
     latestRawFft = rawZeroFrame()
     latestRawTapMagnitudes = Array(repeating: 0.0, count: fftBinCount)
+    fftAnalysisRemainder.removeAll(keepingCapacity: true)
+    pendingFftFrames.removeAll(keepingCapacity: true)
     fftResultLock.unlock()
     fftTapCount = 0
     fftLastTapAtMs = nil
@@ -834,6 +842,22 @@ final class AppleAudioEngine {
         targetSampleRate: targetSampleRate,
         startFrame: 0
       )
+      // Keep playback on the stream path, but build a random-access PCM source
+      // for FFT so visual sampling stays aligned with the playback position.
+      var analysisPCM: AppleFFmpegDecodedAudio?
+      do {
+        let decoded = try AppleFFmpegDecoder.decode(path: url.path)
+        analysisPCM = try decoded.resampled(to: targetSampleRate)
+        debugPrint(
+          "[AppleAudioEngine] ffmpeg analysis pcm prepared path=\(url.path) " +
+          "sampleRate=\(analysisPCM?.sampleRate ?? 0)"
+        )
+      } catch {
+        debugPrint(
+          "[AppleAudioEngine] ffmpeg analysis pcm unavailable path=\(url.path) " +
+          "error=\(error.localizedDescription)"
+        )
+      }
       debugPrint(
         "[AppleAudioEngine] ffmpeg load prepared path=\(url.path) targetSampleRate=\(targetSampleRate) " +
         "sampleRate=\(playbackStream.sampleRate) frameCount=\(playbackStream.frameCount)"
@@ -842,7 +866,7 @@ final class AppleAudioEngine {
       deck.loadedURL = url
       deck.loadedFile = nil
       deck.analysisFile = nil
-      deck.loadedFFmpegPCM = nil
+      deck.loadedFFmpegPCM = analysisPCM
       deck.loadedFFmpegStream = playbackStream
     }
     deck.playbackFramePosition = 0
@@ -884,35 +908,85 @@ final class AppleAudioEngine {
   }
 
   private func handleFftTapBuffer(_ buffer: AVAudioPCMBuffer) {
-    fftCaptureBuffer.append(buffer: buffer)
-    refreshLatestRawFft(frameLength: Int(buffer.frameLength))
+    let monoSamples = monoSamples(from: buffer)
+    guard !monoSamples.isEmpty else { return }
+    enqueueTapFftFrames(monoSamples, frameLength: Int(buffer.frameLength))
   }
 
-  private func refreshLatestRawFft(frameLength: Int? = nil) {
-    let monoSamples = fftCaptureBuffer.snapshot(lastFrames: fftSize)
-    let magnitudes = computeMagnitudes(from: monoSamples)
+  private func monoSamples(from buffer: AVAudioPCMBuffer) -> [Float] {
+    let frameLength = Int(buffer.frameLength)
+    guard frameLength > 0 else { return [] }
+    guard let channelData = buffer.floatChannelData else { return [] }
+
+    let channelCount = max(Int(buffer.format.channelCount), 1)
+    if channelCount == 1 {
+      return Array(UnsafeBufferPointer(start: channelData[0], count: frameLength))
+    }
+
+    var mono = Array(repeating: Float(0), count: frameLength)
+    for frame in 0..<frameLength {
+      var sum: Float = 0
+      for channel in 0..<channelCount {
+        sum += channelData[channel][frame]
+      }
+      mono[frame] = sum / Float(channelCount)
+    }
+    return mono
+  }
+
+  private func enqueueTapFftFrames(_ monoSamples: [Float], frameLength: Int? = nil) {
+    var windows: [[Float]] = []
+    var previousLatest = rawZeroFrame()
+    var previousTapMagnitudes = Array(repeating: 0.0, count: fftBinCount)
+
+    fftResultLock.lock()
+    previousLatest = latestRawFft
+    previousTapMagnitudes = latestRawTapMagnitudes
+    fftAnalysisRemainder.append(contentsOf: monoSamples)
+    while fftAnalysisRemainder.count >= fftSize {
+      windows.append(Array(fftAnalysisRemainder.prefix(fftSize)))
+      fftAnalysisRemainder.removeFirst(fftHopSize)
+    }
+    fftResultLock.unlock()
+
+    guard !windows.isEmpty else { return }
+
+    var queuedFrames: [[Double]] = []
+    queuedFrames.reserveCapacity(windows.count)
+    for window in windows {
+      queuedFrames.append(computeMagnitudes(from: window))
+    }
+
+    guard let latestMagnitudes = queuedFrames.last else { return }
 
     let tapNowMs = currentTimestampMs()
     fftTapCount &+= 1
     let tapDeltaMs = fftLastTapAtMs.map { tapNowMs - $0 }
     fftLastTapAtMs = tapNowMs
 
-    let rawDelta = meanAbsoluteDelta(magnitudes, comparedTo: latestRawFft)
-    let magnitudeDelta = meanAbsoluteDelta(magnitudes, comparedTo: latestRawTapMagnitudes)
+    let rawDelta = meanAbsoluteDelta(latestMagnitudes, comparedTo: previousLatest)
+    let magnitudeDelta = meanAbsoluteDelta(latestMagnitudes, comparedTo: previousTapMagnitudes)
 
     fftResultLock.lock()
-    latestRawFft = magnitudes
-    latestRawTapMagnitudes = magnitudes
+    pendingFftFrames.append(contentsOf: queuedFrames)
+    if pendingFftFrames.count > fftFrameQueueCapacity {
+      pendingFftFrames.removeFirst(pendingFftFrames.count - fftFrameQueueCapacity)
+    }
+    latestRawFft = latestMagnitudes
+    latestRawTapMagnitudes = latestMagnitudes
+    let queueDepth = pendingFftFrames.count
     fftResultLock.unlock()
 
     if fftTapCount <= 5 || fftTapCount % 30 == 0 {
       debugPrint(
         "[AppleAudioEngine] fft tap count=\(fftTapCount) " +
         "frameLength=\(frameLength.map(String.init) ?? "nil") " +
+        "producedFrames=\(queuedFrames.count) " +
+        "queueDepth=\(queueDepth) " +
         "deltaMs=\(tapDeltaMs.map { String(format: "%.1f", $0) } ?? "nil") " +
         "rawDelta=\(String(format: "%.6f", rawDelta)) " +
         "magnitudeDelta=\(String(format: "%.6f", magnitudeDelta)) " +
-        "first=\(magnitudes.first.map { String(format: "%.6f", $0) } ?? "nil")"
+        "first=\(latestMagnitudes.first.map { String(format: "%.6f", $0) } ?? "nil")"
       )
     }
   }

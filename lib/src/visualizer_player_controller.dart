@@ -737,12 +737,12 @@ class AudioCoreController extends ChangeNotifier
     try {
       final startedAtMs = DateTime.now().millisecondsSinceEpoch;
       _latestFftCache = await _engine.getLatestFft();
-      if (kDebugMode) {
-        debugPrint(
-          '[VisualizerController] fft fetch values=${_latestFftCache.length} '
-          'fetchStartedAtMs=$startedAtMs fetchedAtMs=${DateTime.now().millisecondsSinceEpoch}',
-        );
-      }
+      // if (kDebugMode) {
+      //   debugPrint(
+      //     '[VisualizerController] fft fetch values=${_latestFftCache.length} '
+      //     'fetchStartedAtMs=$startedAtMs fetchedAtMs=${DateTime.now().millisecondsSinceEpoch}',
+      //   );
+      // }
     } catch (e) {
       player.setError('FFT fetch failed: $e');
       _latestFftCache = const [];
