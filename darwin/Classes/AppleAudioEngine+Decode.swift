@@ -188,7 +188,9 @@ extension AppleAudioEngine {
     deck.playbackFramePosition = 0
     deck.isPlaybackScheduled = false
     deck.gain = 1.0
-    deck.scheduledPCMBuffers.removeAll()
+    syncOnFfmpegPlaybackQueue {
+      deck.scheduledPCMBuffers.removeAll()
+    }
     resetFftCaptureBuffer()
     debugPrint(
       "[AppleAudioEngine] loadAsset done path=\(url.path) source=\(deck.sampleRate) " +
@@ -245,6 +247,7 @@ extension AppleAudioEngine {
     }
 
     deck.stopPlaybackNode()
+    drainDeckFfmpegPlaybackState(deck, releasingFile: false)
     let generation = deck.playbackGeneration
     let scheduledPath = deck.loadedURL?.path
     if let stream = deck.loadedFFmpegStream {
@@ -356,7 +359,9 @@ extension AppleAudioEngine {
     }
 
     var nextFrameToSchedule = startFrame
-    deck.scheduledPCMBuffers.removeAll()
+    syncOnFfmpegPlaybackQueue {
+      deck.scheduledPCMBuffers.removeAll()
+    }
 
     debugPrint(
       "[AppleAudioEngine] ffmpeg schedule start path=\(deck.loadedURL?.path ?? "nil") " +
@@ -403,8 +408,8 @@ extension AppleAudioEngine {
       deck.scheduledPCMBuffers.append(buffer)
 
       let completion: (AVAudioPCMBuffer) -> Void = { [weak self] _ in
-        DispatchQueue.main.async {
-          guard let self = self else { return }
+        guard let self = self else { return }
+        self.ffmpegPlaybackQueue.async {
           guard deck.playbackGeneration == generation, deck.isPlaybackScheduled else {
             return
           }
@@ -417,23 +422,19 @@ extension AppleAudioEngine {
             return
           }
 
-          self.ffmpegPlaybackQueue.async {
-            if !deck.scheduledPCMBuffers.isEmpty {
-              deck.scheduledPCMBuffers.removeFirst()
-            }
-            if !scheduleNextBuffer() {
-              debugPrint(
-                "[AppleAudioEngine] ffmpeg schedule refill failed path=\(deck.loadedURL?.path ?? "nil") " +
-                "generation=\(generation)"
-              )
-              DispatchQueue.main.async {
-                self.handlePlaybackCompleted(
-                  deck: deck,
-                  generation: generation,
-                  expectedPath: expectedPath
-                )
-              }
-            }
+          if !deck.scheduledPCMBuffers.isEmpty {
+            deck.scheduledPCMBuffers.removeFirst()
+          }
+          if !scheduleNextBuffer() {
+            debugPrint(
+              "[AppleAudioEngine] ffmpeg schedule refill failed path=\(deck.loadedURL?.path ?? "nil") " +
+              "generation=\(generation)"
+            )
+            self.handlePlaybackCompleted(
+              deck: deck,
+              generation: generation,
+              expectedPath: expectedPath
+            )
           }
         }
       }
@@ -471,8 +472,11 @@ extension AppleAudioEngine {
       handlePlaybackCompleted(deck: deck, generation: generation, expectedPath: expectedPath)
       return false
     }
+    let queuedBufferCount = syncOnFfmpegPlaybackQueueValue {
+      deck.scheduledPCMBuffers.count
+    }
     debugPrint(
-      "[AppleAudioEngine] ffmpeg schedule initial queued=\(deck.scheduledPCMBuffers.count) " +
+      "[AppleAudioEngine] ffmpeg schedule initial queued=\(queuedBufferCount) " +
       "elapsedMs=\(String(format: "%.1f", currentTimestampMs() - startMs))"
     )
     return true
@@ -489,7 +493,9 @@ extension AppleAudioEngine {
       startFrame: startingFrame,
       chunkFrames: ffmpegScheduleChunkFrames
     )
-    deck.scheduledPCMBuffers = buffers
+    syncOnFfmpegPlaybackQueue {
+      deck.scheduledPCMBuffers = buffers
+    }
 
     guard !buffers.isEmpty else {
       handlePlaybackCompleted(deck: deck, generation: generation, expectedPath: expectedPath)

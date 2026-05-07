@@ -15,9 +15,13 @@ final class AppleAudioEngine {
   let fftLog2Size: vDSP_Length = 9
   let fftHopSize = 512
   let fftFrameQueueCapacity = 24
-  let ffmpegScheduleChunkFrames = 4096
-  let ffmpegPlaybackLookaheadBuffers = 3
+  // macOS UI handoffs such as NSOpenPanel or app switching can briefly starve
+  // background scheduling. Keep a larger FFmpeg PCM runway than the
+  // AVFoundation path needs so playback stays smooth across those transitions.
+  let ffmpegScheduleChunkFrames = 16_384
+  let ffmpegPlaybackLookaheadBuffers = 4
   let ffmpegPlaybackQueue = DispatchQueue(label: "audio_core.ffmpeg.playback", qos: .userInitiated)
+  let ffmpegPlaybackQueueKey = DispatchSpecificKey<Void>()
   let waveformRmsWindowsPerChunk = 8
   let waveformPrecisionScale = 100.0
   let avFoundationPreferredExtensions: Set<String> = [
@@ -55,6 +59,7 @@ final class AppleAudioEngine {
     self.fftSetup = vDSP_create_fftsetup(fftLog2Size, FFTRadix(kFFTRadix2))
     self.latestRawFft = Array(repeating: 0.0, count: fftBinCount)
     self.latestRawTapMagnitudes = Array(repeating: 0.0, count: fftBinCount)
+    ffmpegPlaybackQueue.setSpecific(key: ffmpegPlaybackQueueKey, value: ())
     configureEngineIfNeeded()
     applyEqualizerConfig(latestEqualizerConfig)
   }
@@ -103,5 +108,32 @@ final class AppleAudioEngine {
 
   func currentTimestampMs() -> Double {
     CFAbsoluteTimeGetCurrent() * 1000.0
+  }
+
+  func syncOnFfmpegPlaybackQueue(_ work: () -> Void) {
+    if DispatchQueue.getSpecific(key: ffmpegPlaybackQueueKey) != nil {
+      work()
+      return
+    }
+    ffmpegPlaybackQueue.sync(execute: work)
+  }
+
+  func syncOnFfmpegPlaybackQueueValue<T>(_ work: () -> T) -> T {
+    if DispatchQueue.getSpecific(key: ffmpegPlaybackQueueKey) != nil {
+      return work()
+    }
+    return ffmpegPlaybackQueue.sync(execute: work)
+  }
+
+  func drainDeckFfmpegPlaybackState(_ deck: PlaybackDeck, releasingFile: Bool) {
+    syncOnFfmpegPlaybackQueue {
+      deck.scheduledPCMBuffers.removeAll()
+      if releasingFile {
+        deck.loadedFFmpegStream?.close()
+        deck.loadedFFmpegStream = nil
+      } else {
+        deck.loadedFFmpegStream?.close()
+      }
+    }
   }
 }

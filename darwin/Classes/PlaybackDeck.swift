@@ -73,7 +73,6 @@ final class PlaybackDeck {
 
   func invalidatePendingPlaybackCallbacks() {
     playbackGeneration &+= 1
-    scheduledPCMBuffers.removeAll()
   }
 
   func stopPlaybackNode() {
@@ -83,13 +82,10 @@ final class PlaybackDeck {
   }
 
   func clear(releasingFile: Bool) {
-    stopPlaybackNode()
     if releasingFile {
       loadedURL = nil
       loadedFile = nil
       loadedFFmpegPCM = nil
-      loadedFFmpegStream?.close()
-      loadedFFmpegStream = nil
     }
   }
 }

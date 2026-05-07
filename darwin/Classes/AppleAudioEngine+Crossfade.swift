@@ -64,8 +64,7 @@ extension AppleAudioEngine {
       // reliably treat this as a completed track and advance the queue.
       deck.stopPlaybackNode()
       deck.isPlaybackScheduled = false
-      deck.scheduledPCMBuffers.removeAll()
-      deck.loadedFFmpegStream?.close()
+      self.drainDeckFfmpegPlaybackState(deck, releasingFile: false)
       self.emitPlayerState(playbackState: "ENDED")
     }
   }
@@ -94,15 +93,14 @@ extension AppleAudioEngine {
       }
     }
 
+    currentDeck.stopPlaybackNode()
+    incomingDeck.stopPlaybackNode()
+    drainDeckFfmpegPlaybackState(currentDeck, releasingFile: releasingFile)
+    drainDeckFfmpegPlaybackState(incomingDeck, releasingFile: releasingFile)
     currentDeck.clear(releasingFile: releasingFile)
     incomingDeck.clear(releasingFile: releasingFile)
     if releasingFile {
       resetFftCaptureBuffer()
-    }
-
-    if !releasingFile {
-      currentDeck.loadedFFmpegStream?.close()
-      incomingDeck.loadedFFmpegStream?.close()
     }
 
     if releasingFile {
@@ -131,15 +129,13 @@ extension AppleAudioEngine {
 
     if currentDeck.isLoaded {
       currentDeck.playerNode.pause()
-      currentDeck.scheduledPCMBuffers.removeAll()
     }
     if incomingDeck.isLoaded {
       incomingDeck.playerNode.pause()
-      incomingDeck.scheduledPCMBuffers.removeAll()
     }
 
-    currentDeck.loadedFFmpegStream?.close()
-    incomingDeck.loadedFFmpegStream?.close()
+    drainDeckFfmpegPlaybackState(currentDeck, releasingFile: false)
+    drainDeckFfmpegPlaybackState(incomingDeck, releasingFile: false)
 
     // Emit the settled paused state only after the node has actually paused,
     // so the Dart layer does not keep animating against a stale playing state.
@@ -180,6 +176,8 @@ extension AppleAudioEngine {
       if let oldIncomingURL = incomingDeck.loadedURL {
         fileAccess.releaseAccess(for: oldIncomingURL)
       }
+      incomingDeck.stopPlaybackNode()
+      drainDeckFfmpegPlaybackState(incomingDeck, releasingFile: true)
       incomingDeck.clear(releasingFile: true)
     }
 
@@ -248,6 +246,7 @@ extension AppleAudioEngine {
       "incoming=\(incomingDeck.loadedURL?.path ?? "nil")"
     )
     guard incomingDeck.loadedFile != nil || incomingDeck.loadedFFmpegStream != nil else { return }
+    syncOnFfmpegPlaybackQueue {}
 
     if let oldURL = currentDeck.loadedURL {
       fileAccess.releaseAccess(for: oldURL)
@@ -295,6 +294,8 @@ extension AppleAudioEngine {
       }
     }
 
+    incomingDeck.stopPlaybackNode()
+    drainDeckFfmpegPlaybackState(incomingDeck, releasingFile: true)
     incomingDeck.clear(releasingFile: true)
     if let currentURL = currentDeck.loadedURL {
       preparedAccessPaths.remove(currentURL.path)
