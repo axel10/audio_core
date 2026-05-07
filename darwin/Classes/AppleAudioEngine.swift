@@ -706,14 +706,6 @@ final class AppleAudioEngine {
     publicDeck()?.loadedFile
   }
 
-  private func publicAnalysisFile() -> AVAudioFile? {
-    publicDeck()?.analysisFile
-  }
-
-  private func publicFFmpegPCM() -> AppleFFmpegDecodedAudio? {
-    publicDeck()?.ffmpegPCM
-  }
-
   private func resetFftCaptureBuffer() {
     fftCaptureBuffer.clear()
     fftResultLock.lock()
@@ -724,21 +716,6 @@ final class AppleAudioEngine {
     fftResultLock.unlock()
     fftTapCount = 0
     fftLastTapAtMs = nil
-  }
-
-  private func publicSampleSource() -> AppleAudioSampleSource? {
-    if let url = publicURL(), publicFile() != nil {
-      if let freshFile = try? AVAudioFile(forReading: url) {
-        return .avFoundation(freshFile)
-      }
-    }
-    if let decoded = publicFFmpegPCM() {
-      return .ffmpeg(decoded)
-    }
-    if let stream = publicDeck()?.loadedFFmpegStream {
-      return .ffmpegStream(stream)
-    }
-    return nil
   }
 
   private func publicSampleRate() -> Double {
@@ -812,7 +789,6 @@ final class AppleAudioEngine {
         deck.sampleRate = file.processingFormat.sampleRate
         deck.loadedURL = url
         deck.loadedFile = file
-        deck.analysisFile = try AVAudioFile(forReading: url)
         deck.loadedFFmpegPCM = nil
         deck.loadedFFmpegStream = nil
       case .ffmpeg(let decoded):
@@ -823,7 +799,6 @@ final class AppleAudioEngine {
         deck.sampleRate = playbackPCM.sampleRate
         deck.loadedURL = url
         deck.loadedFile = nil
-        deck.analysisFile = nil
         deck.loadedFFmpegPCM = playbackPCM
         deck.loadedFFmpegStream = nil
       case .ffmpegStream(let stream):
@@ -842,22 +817,6 @@ final class AppleAudioEngine {
         targetSampleRate: targetSampleRate,
         startFrame: 0
       )
-      // Keep playback on the stream path, but build a random-access PCM source
-      // for FFT so visual sampling stays aligned with the playback position.
-      var analysisPCM: AppleFFmpegDecodedAudio?
-      do {
-        let decoded = try AppleFFmpegDecoder.decode(path: url.path)
-        analysisPCM = try decoded.resampled(to: targetSampleRate)
-        debugPrint(
-          "[AppleAudioEngine] ffmpeg analysis pcm prepared path=\(url.path) " +
-          "sampleRate=\(analysisPCM?.sampleRate ?? 0)"
-        )
-      } catch {
-        debugPrint(
-          "[AppleAudioEngine] ffmpeg analysis pcm unavailable path=\(url.path) " +
-          "error=\(error.localizedDescription)"
-        )
-      }
       debugPrint(
         "[AppleAudioEngine] ffmpeg load prepared path=\(url.path) targetSampleRate=\(targetSampleRate) " +
         "sampleRate=\(playbackStream.sampleRate) frameCount=\(playbackStream.frameCount)"
@@ -865,8 +824,7 @@ final class AppleAudioEngine {
       deck.sampleRate = playbackStream.sampleRate
       deck.loadedURL = url
       deck.loadedFile = nil
-      deck.analysisFile = nil
-      deck.loadedFFmpegPCM = analysisPCM
+      deck.loadedFFmpegPCM = nil
       deck.loadedFFmpegStream = playbackStream
     }
     deck.playbackFramePosition = 0
@@ -999,40 +957,6 @@ final class AppleAudioEngine {
       total += abs(lhs[index] - rhs[index])
     }
     return total / Double(count)
-  }
-
-  private func sampleFftFrameFromPlaybackPosition() throws -> [Double]? {
-    guard let deck = publicDeck(), deck.isLoaded else { return nil }
-
-    let totalFrameCount = deck.frameCount
-    guard totalFrameCount > 0 else { return rawZeroFrame() }
-
-    let centerFrame = deck.currentPlaybackFramePosition()
-    let halfWindow = AVAudioFramePosition(fftSize / 2)
-    let desiredStart = max(0, centerFrame - halfWindow)
-    let maxStart = max(0, totalFrameCount - AVAudioFramePosition(fftSize))
-    let startFrame = min(desiredStart, maxStart)
-
-    let monoSamples: [Float]
-    if let analysisFile = publicAnalysisFile() {
-      monoSamples = try Self.readMonoWindow(
-        file: analysisFile,
-        startFrame: startFrame,
-        frameCount: fftSize
-      )
-    } else if let decoded = publicFFmpegPCM() {
-      monoSamples = decoded
-        .monoSamples(startFrame: startFrame, frameCount: fftSize)
-        .map(Float.init)
-    } else {
-      return nil
-    }
-
-    let rawMagnitudes = computeMagnitudes(from: monoSamples)
-    fftResultLock.lock()
-    latestRawFft = rawMagnitudes
-    fftResultLock.unlock()
-    return rawMagnitudes
   }
 
   private func applyEqualizerConfig(_ config: AppleEqualizerConfig) {
@@ -1669,7 +1593,6 @@ final class AppleAudioEngine {
     swap(&currentDeck.playerNode, &incomingDeck.playerNode)
     swap(&currentDeck.loadedURL, &incomingDeck.loadedURL)
     swap(&currentDeck.loadedFile, &incomingDeck.loadedFile)
-    swap(&currentDeck.analysisFile, &incomingDeck.analysisFile)
     swap(&currentDeck.loadedFFmpegPCM, &incomingDeck.loadedFFmpegPCM)
     swap(&currentDeck.loadedFFmpegStream, &incomingDeck.loadedFFmpegStream)
     swap(&currentDeck.sampleRate, &incomingDeck.sampleRate)
