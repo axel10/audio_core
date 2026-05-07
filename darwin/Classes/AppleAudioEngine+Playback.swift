@@ -170,10 +170,14 @@ extension AppleAudioEngine {
     if deck.isPlaying {
       return "PLAYING"
     }
-    if deck.isLoaded {
-      return "READY"
+
+    if deck.frameCount > 0, deck.currentPlaybackFramePosition() >= deck.frameCount {
+      return "ENDED"
     }
-    return "IDLE"
+    if deck.currentPlaybackFramePosition() > 0 {
+      return "PAUSED"
+    }
+    return deck.isLoaded ? "READY" : "IDLE"
   }
 
   func publicDeck() -> PlaybackDeck? {

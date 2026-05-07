@@ -431,9 +431,6 @@ extension AppleAudioEngine {
       let bufferedUntilFrame = nextFrameToSchedule
       let decodeElapsedMs = currentTimestampMs() - decodeStartMs
       let bufferDurationMs = framePositionToMilliseconds(bufferFrameCount, sampleRate: deck.sampleRate)
-      if deck.scheduledPCMBuffers.count >= ffmpegPlaybackLookaheadBuffers {
-        deck.scheduledPCMBuffers.removeFirst()
-      }
       deck.scheduledPCMBuffers.append(buffer)
       debugPrint(
         "[AppleAudioEngine] ffmpeg schedule chunk path=\(deck.loadedURL?.path ?? "nil") " +
