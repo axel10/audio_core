@@ -840,6 +840,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
       stream: _controller.visualizer.rawStream,
       builder: (context, snapshot) {
         final bands = snapshot.data?.values ?? const <double>[];
+        // print('[AudioCore][Example] Raw FFT frame received with ${bands.toString()} bands');
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

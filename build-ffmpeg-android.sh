@@ -75,7 +75,7 @@ fi
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$script_dir"
-ffmpeg_root="$repo_root/FFmpeg"
+ffmpeg_root="$repo_root/ffmpeg-8.1"
 if [[ ! -d "$ffmpeg_root" && -d "$repo_root/ffmpeg" ]]; then
   ffmpeg_root="$repo_root/ffmpeg"
 fi
@@ -302,7 +302,7 @@ configure_args=(
   --enable-filter=aresample
   --enable-filter=aformat
   --enable-small
-  --enable-gpl
+  --disable-gpl
   --enable-pic
   --enable-shared
   --disable-static

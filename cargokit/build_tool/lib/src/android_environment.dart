@@ -150,6 +150,9 @@ class AndroidEnvironment {
     final toolTempDir =
         Platform.environment['CARGOKIT_TOOL_TEMP_DIR'] ?? targetTempDir;
 
+    final rootDir = path.dirname(path.dirname(selfPath));
+    final ffmpegDir = path.join(rootDir, 'android', 'ffmpeg_lib', target.android);
+
     return {
       arKey: arValue,
       ccKey: ccValue,
@@ -163,6 +166,7 @@ class AndroidEnvironment {
       '_CARGOKIT_NDK_LINK_TARGET': targetArg,
       '_CARGOKIT_NDK_LINK_CLANG': ccValue,
       'CARGOKIT_TOOL_TEMP_DIR': toolTempDir,
+      if (Directory(ffmpegDir).existsSync()) 'FFMPEG_DIR': ffmpegDir,
     };
   }
 

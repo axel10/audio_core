@@ -134,11 +134,10 @@ class CargoKitPlugin implements Plugin<Project> {
 
             def platforms = com.flutter.gradle.FlutterPluginUtils.getTargetPlatforms(project).collect()
             platforms.remove("android-x86")
+            platforms.remove("android-x64")
 
-            // Same thing addFlutterDependencies does in flutter.gradle
-            if (buildType == "debug") {
-                platforms.add("android-x64")
-            }
+            // 这个项目在 Android 侧只提供 arm 架构的 FFmpeg 动态库。
+            // x86 / x86_64 不参与原生库构建，避免触发无必要的交叉编译失败。
 
             // The task name depends on plugin properties, which are not available
             // at this point

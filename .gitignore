@@ -41,3 +41,5 @@ lame-*
 opus-*
 ffmpeg_lib
 FFmpeg.xcframework
+jniLibs/
+
