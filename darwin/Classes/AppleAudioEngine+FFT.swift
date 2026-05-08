@@ -1,6 +1,7 @@
 import Accelerate
 import AVFoundation
 import Foundation
+import os
 
 enum AppleFftAggregationMode: String {
   case peak
@@ -14,34 +15,66 @@ struct AppleFftGroupingConfig {
   var aggregationMode: AppleFftAggregationMode = .peak
 }
 
-final class AppleFftCaptureBuffer {
+final class AppleFftWorkspace {
+  let fftSize: Int
+  let fftBinCount: Int
+  
+  var window: [Float]
+  var windowed: [Float]
+  var real: [Float]
+  var imag: [Float]
+  var windowSum: Double = 0
+  
+  init(fftSize: Int) {
+    self.fftSize = fftSize
+    self.fftBinCount = fftSize / 2
+    
+    self.window = Array(repeating: 0, count: fftSize)
+    self.windowed = Array(repeating: 0, count: fftSize)
+    self.real = Array(repeating: 0, count: fftBinCount)
+    self.imag = Array(repeating: 0, count: fftBinCount)
+    
+    // Create Hann window
+    vDSP_hann_window(&window, vDSP_Length(fftSize), Int32(vDSP_HANN_NORM))
+    
+    // Calculate the actual sum of the window for accurate normalization later
+    var sum: Float = 0
+    vDSP_sve(window, 1, &sum, vDSP_Length(fftSize))
+    self.windowSum = max(Double(sum), 1e-9)
+  }
+}
+
+final class AppleFftRingBuffer {
   private let capacity: Int
-  private var samples: [Float]
+  private var samples: UnsafeMutablePointer<Float>
   private var writeIndex: Int = 0
-  private var storedCount: Int = 0
-  private let lock = NSLock()
+  private var available: Int = 0
+  private var lock = os_unfair_lock_s()
 
   init(capacity: Int) {
     self.capacity = max(1, capacity)
-    self.samples = Array(repeating: 0, count: self.capacity)
+    self.samples = .allocate(capacity: self.capacity)
+    self.samples.initialize(repeating: 0, count: self.capacity)
+  }
+  
+  deinit {
+    self.samples.deallocate()
   }
 
   func clear() {
-    lock.lock()
+    os_unfair_lock_lock(&lock)
     writeIndex = 0
-    storedCount = 0
-    lock.unlock()
+    available = 0
+    os_unfair_lock_unlock(&lock)
   }
 
-  func append(buffer: AVAudioPCMBuffer) {
+  func pushMono(from buffer: AVAudioPCMBuffer) {
     let frameLength = Int(buffer.frameLength)
-    guard frameLength > 0 else { return }
-    guard let channelData = buffer.floatChannelData else { return }
+    guard frameLength > 0, let channelData = buffer.floatChannelData else { return }
+    let channelCount = Int(buffer.format.channelCount)
 
-    let channelCount = max(Int(buffer.format.channelCount), 1)
-
-    lock.lock()
-    defer { lock.unlock() }
+    os_unfair_lock_lock(&lock)
+    defer { os_unfair_lock_unlock(&lock) }
 
     for frame in 0..<frameLength {
       var sum: Float = 0
@@ -50,38 +83,28 @@ final class AppleFftCaptureBuffer {
       }
       samples[writeIndex] = sum / Float(channelCount)
       writeIndex += 1
-      if writeIndex >= capacity {
-        writeIndex = 0
-      }
-      if storedCount < capacity {
-        storedCount += 1
-      }
+      if writeIndex >= capacity { writeIndex = 0 }
+      if available < capacity { available += 1 }
     }
   }
 
-  func snapshot(lastFrames: Int) -> [Float] {
-    guard lastFrames > 0 else { return [] }
+  func pullAll() -> [Float] {
+    os_unfair_lock_lock(&lock)
+    defer { os_unfair_lock_unlock(&lock) }
 
-    lock.lock()
-    defer { lock.unlock() }
+    guard available > 0 else { return [] }
 
-    let count = min(lastFrames, storedCount)
-    guard count > 0 else { return [] }
+    var result = Array(repeating: Float(0), count: available)
+    var readIndex = writeIndex - available
+    if readIndex < 0 { readIndex += capacity }
 
-    var output = Array(repeating: Float(0), count: count)
-    let startIndex = writeIndex - count
-    if startIndex >= 0 {
-      output.replaceSubrange(0..<count, with: samples[startIndex..<(startIndex + count)])
-      return output
+    for i in 0..<available {
+      result[i] = samples[readIndex]
+      readIndex += 1
+      if readIndex >= capacity { readIndex = 0 }
     }
-
-    let leadingCount = -startIndex
-    let trailingCount = count - leadingCount
-    output.replaceSubrange(0..<leadingCount, with: samples[(capacity - leadingCount)..<capacity])
-    if trailingCount > 0 {
-      output.replaceSubrange(leadingCount..<count, with: samples[0..<trailingCount])
-    }
-    return output
+    available = 0
+    return result
   }
 }
 
@@ -136,39 +159,26 @@ extension AppleAudioEngine {
   }
 
   func handleFftTapBuffer(_ buffer: AVAudioPCMBuffer) {
-    fftCaptureBuffer.append(buffer: buffer)
-    let monoSamples = monoSamples(from: buffer)
-    guard !monoSamples.isEmpty else { return }
-    let frameLength = Int(buffer.frameLength)
+    // 1. Thread-safe push without allocating memory on Real-time audio thread
+    fftCaptureBuffer.pushMono(from: buffer)
+    
     let generation = currentFftProcessingGeneration()
+    let frameLength = Int(buffer.frameLength)
+    
+    // 2. Dispatch FFT processing to background queue.
+    // By passing only generation and frameLength, we avoid capturing arrays in the dispatch closure
     fftProcessingQueue.async { [weak self] in
-      self?.enqueueTapFftFrames(
-        monoSamples,
-        frameLength: frameLength,
-        generation: generation
-      )
+      self?.processFftRingBuffer(frameLength: frameLength, generation: generation)
     }
   }
 
-  func monoSamples(from buffer: AVAudioPCMBuffer) -> [Float] {
-    let frameLength = Int(buffer.frameLength)
-    guard frameLength > 0 else { return [] }
-    guard let channelData = buffer.floatChannelData else { return [] }
-
-    let channelCount = max(Int(buffer.format.channelCount), 1)
-    if channelCount == 1 {
-      return Array(UnsafeBufferPointer(start: channelData[0], count: frameLength))
-    }
-
-    var mono = Array(repeating: Float(0), count: frameLength)
-    for frame in 0..<frameLength {
-      var sum: Float = 0
-      for channel in 0..<channelCount {
-        sum += channelData[channel][frame]
-      }
-      mono[frame] = sum / Float(channelCount)
-    }
-    return mono
+  func processFftRingBuffer(frameLength: Int, generation: UInt64) {
+    guard isCurrentFftProcessingGeneration(generation) else { return }
+    
+    let monoSamples = fftCaptureBuffer.pullAll()
+    guard !monoSamples.isEmpty else { return }
+    
+    enqueueTapFftFrames(monoSamples, frameLength: frameLength, generation: generation)
   }
 
   func enqueueTapFftFrames(
@@ -272,51 +282,48 @@ extension AppleAudioEngine {
 
   func computeMagnitudes(from samples: [Float]) -> [Double] {
     let count = min(samples.count, fftSize)
-    guard count > 0 else {
-      return Array(repeating: 0.0, count: fftBinCount)
+    guard count > 0, let fftSetup = fftSetup else {
+      return rawZeroFrame()
     }
 
-    var windowed = Array(repeating: Float(0), count: fftSize)
-    let denominator = max(Float(count - 1), 1.0)
-    var windowSum = 0.0
-    for index in 0..<count {
-      let phase = (2.0 * Double.pi * Double(index)) / Double(denominator)
-      let weight = Float(0.5 - 0.5 * cos(phase))
-      windowed[index] = samples[index] * weight
-      windowSum += Double(weight)
-    }
-    let safeWindowSum = max(windowSum, 1e-9)
-
-    guard let fftSetup else {
-      return Array(repeating: 0.0, count: fftBinCount)
-    }
-
-    var real = Array(repeating: Float(0), count: fftBinCount)
-    var imag = Array(repeating: Float(0), count: fftBinCount)
-    for index in 0..<fftBinCount {
-      real[index] = windowed[index * 2]
-      imag[index] = windowed[(index * 2) + 1]
-    }
-
-    return real.withUnsafeMutableBufferPointer { realBuffer in
-      imag.withUnsafeMutableBufferPointer { imagBuffer in
-        var splitComplex = DSPSplitComplex(
-          realp: realBuffer.baseAddress!,
-          imagp: imagBuffer.baseAddress!
-        )
-        vDSP_fft_zrip(fftSetup, &splitComplex, 1, fftLog2Size, FFTDirection(FFT_FORWARD))
-
-        var magnitudes = Array(repeating: 0.0, count: fftBinCount)
-        magnitudes[0] = Double(abs(splitComplex.realp[0])) / safeWindowSum
-        if fftBinCount > 1 {
-          for bin in 1..<fftBinCount {
-            let realValue = Double(splitComplex.realp[bin])
-            let imagValue = Double(splitComplex.imagp[bin])
-            magnitudes[bin] = (sqrt((realValue * realValue) + (imagValue * imagValue)) * 2.0) / safeWindowSum
-          }
+    // 1. Apply precomputed Hann Window using vDSP
+    if count < fftSize {
+        fftWorkspace.windowed.withUnsafeMutableBufferPointer { ptr in
+            ptr.initialize(repeating: 0)
         }
-        return magnitudes
-      }
     }
+    vDSP_vmul(samples, 1, fftWorkspace.window, 1, &fftWorkspace.windowed, 1, vDSP_Length(count))
+    
+    var magnitudes = Array(repeating: 0.0, count: fftBinCount)
+
+    // 2. Extract real and imaginary parts using existing memory buffers
+    for index in 0..<fftBinCount {
+        fftWorkspace.real[index] = fftWorkspace.windowed[index * 2]
+        fftWorkspace.imag[index] = fftWorkspace.windowed[(index * 2) + 1]
+    }
+    
+    fftWorkspace.real.withUnsafeMutableBufferPointer { realBuffer in
+        fftWorkspace.imag.withUnsafeMutableBufferPointer { imagBuffer in
+            var splitComplex = DSPSplitComplex(
+                realp: realBuffer.baseAddress!,
+                imagp: imagBuffer.baseAddress!
+            )
+            
+            // 3. Perform Forward FFT
+            vDSP_fft_zrip(fftSetup, &splitComplex, 1, fftLog2Size, FFTDirection(FFT_FORWARD))
+            
+            // 4. Compute Magnitudes
+            let safeWindowSum = fftWorkspace.windowSum
+            magnitudes[0] = Double(abs(splitComplex.realp[0])) / safeWindowSum
+            if fftBinCount > 1 {
+                for bin in 1..<fftBinCount {
+                    let realValue = Double(splitComplex.realp[bin])
+                    let imagValue = Double(splitComplex.imagp[bin])
+                    magnitudes[bin] = (sqrt((realValue * realValue) + (imagValue * imagValue)) * 2.0) / safeWindowSum
+                }
+            }
+        }
+    }
+    return magnitudes
   }
 }

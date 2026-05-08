@@ -43,7 +43,8 @@ final class AppleAudioEngine {
   var isEngineConfigured = false
   var fftGroupingConfig = AppleFftGroupingConfig()
   let fftSetup: FFTSetup?
-  let fftCaptureBuffer = AppleFftCaptureBuffer(capacity: 16_384)
+  let fftWorkspace: AppleFftWorkspace
+  let fftCaptureBuffer = AppleFftRingBuffer(capacity: 16_384)
   let fftResultLock = NSLock()
   var latestRawFft: [Double]
   var latestRawTapMagnitudes: [Double]
@@ -59,6 +60,7 @@ final class AppleAudioEngine {
   init(fileAccess: SecurityScopedFileAccessCoordinator) {
     self.fileAccess = fileAccess
     self.fftSetup = vDSP_create_fftsetup(fftLog2Size, FFTRadix(kFFTRadix2))
+    self.fftWorkspace = AppleFftWorkspace(fftSize: 1024)
     self.latestRawFft = Array(repeating: 0.0, count: fftBinCount)
     self.latestRawTapMagnitudes = Array(repeating: 0.0, count: fftBinCount)
     ffmpegPlaybackQueue.setSpecific(key: ffmpegPlaybackQueueKey, value: ())
