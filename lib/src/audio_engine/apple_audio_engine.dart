@@ -8,6 +8,7 @@ import 'package:dart_chromaprint/dart_chromaprint.dart';
 import '../fft_processor.dart';
 import '../rust/api/simple/equalizer.dart';
 import '../rust/api/simple_api.dart' as rust;
+import '../track_artwork.dart';
 import '../track_metadata.dart';
 import '../track_metadata_update.dart';
 import 'audio_engine_interface.dart';
@@ -25,8 +26,6 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   EqualizerConfig? _lastConfig;
   final Set<String> _preparedWritePaths = <String>{};
   List<double> _latestFftCache = const <double>[];
-  List<double> _lastLoggedFftFrame = const <double>[];
-  int? _lastFftEventAtMs;
   int _fftEventCount = 0;
 
   @override
@@ -79,8 +78,6 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   @override
   Future<void> stop() async {
     _latestFftCache = const <double>[];
-    _lastLoggedFftFrame = const <double>[];
-    _lastFftEventAtMs = null;
     _fftEventCount = 0;
     // Keep the FFT event stream subscription alive across soft resets.
     // `Reset Player State` uses `stop()`, and canceling here prevents future
@@ -96,8 +93,6 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     await _fftSubscription?.cancel();
     _fftSubscription = null;
     _latestFftCache = const <double>[];
-    _lastLoggedFftFrame = const <double>[];
-    _lastFftEventAtMs = null;
     _fftEventCount = 0;
     await _statusController.close();
     await _channel.invokeMethod('dispose');
@@ -109,8 +104,6 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     _currentPath = path;
     _preparedWritePaths.clear();
     _latestFftCache = const <double>[];
-    _lastLoggedFftFrame = const <double>[];
-    _lastFftEventAtMs = null;
     _fftEventCount = 0;
     await _channel.invokeMethod('load', <String, Object?>{
       'url': path,
@@ -126,8 +119,6 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   }) async {
     _currentPath = path;
     _latestFftCache = const <double>[];
-    _lastLoggedFftFrame = const <double>[];
-    _lastFftEventAtMs = null;
     _fftEventCount = 0;
     await _channel.invokeMethod('crossfade', <String, Object?>{
       'path': path,
@@ -155,8 +146,6 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
 
     _currentVolume = resolvedTargetVolume;
     _latestFftCache = const <double>[];
-    _lastLoggedFftFrame = const <double>[];
-    _lastFftEventAtMs = null;
     _fftEventCount = 0;
     await setVolume(resolvedTargetVolume);
     await load(path);
@@ -515,7 +504,9 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
       final targetPath = _normalizePath(request.targetPath);
       results.add(
         await _withAppleFileWriteAccess(targetPath, () async {
-          final metadata = await rust.getTrackMetadata(path: sourcePath);
+          final metadata = await _withAppleFileReadAccess(sourcePath, () async {
+            return rust.getTrackMetadata(path: sourcePath);
+          });
           await rust.removeAllTags(path: targetPath);
           await rust.updateTrackMetadata(path: targetPath, metadata: metadata);
           return true;
@@ -531,8 +522,38 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     String? fallbackMediaUri,
   }) async {
     final targetPath = _normalizePath(path);
-    final metadata = await rust.getTrackMetadata(path: targetPath);
+    final metadata = await _withAppleFileReadAccess(targetPath, () async {
+      return rust.getTrackMetadata(path: targetPath);
+    });
     return trackMetadataFromRust(metadata);
+  }
+
+  @override
+  Future<GeneratedTrackArtwork> generateTrackArtwork({
+    required String path,
+    required String cacheRootPath,
+    required bool saveLargeArtwork,
+    TrackArtworkOptions options = const TrackArtworkOptions(),
+  }) async {
+    final targetPath = _normalizePath(path);
+    final normalizedCacheRootPath = _normalizePath(cacheRootPath);
+    final result = await _withAppleFileReadAccess(targetPath, () async {
+      return rust.generateTrackArtwork(
+        path: targetPath,
+        cacheRootPath: normalizedCacheRootPath,
+        saveLargeArtwork: saveLargeArtwork,
+        thumbnailSize: options.thumbnailSize,
+        meshStylePreset: options.meshStylePreset.index,
+        hueCohesion: options.hueCohesion,
+        paletteBlurRadius: options.paletteBlurRadius,
+        meshMuddyPenaltyMultiplier: options.meshMuddyPenaltyMultiplier,
+        meshPopulationStrength: options.meshPopulationStrength,
+        meshContrastStrength: options.meshContrastStrength,
+        meshHarmonyStrength: options.meshHarmonyStrength,
+        meshVibrancyStrength: options.meshVibrancyStrength,
+      );
+    });
+    return GeneratedTrackArtwork.fromRust(result);
   }
 
   @override
@@ -654,45 +675,15 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   }) {
     if (!kDebugMode) return;
 
-    final deltaMs = _lastFftEventAtMs == null
-        ? null
-        : receivedAtMs - _lastFftEventAtMs!;
-    _lastFftEventAtMs = receivedAtMs;
-
     if (_fftEventCount <= 5 || _fftEventCount % 30 == 0) {
-      final bridgeLagMs = emittedAtMs == null
-          ? null
-          : receivedAtMs - emittedAtMs;
-      final frameDelta = _meanAbsoluteDelta(
-        _latestFftCache,
-        _lastLoggedFftFrame,
-      );
-      final peak = _latestFftCache.fold<double>(0.0, (max, value) {
-        return value > max ? value : max;
-      });
       // debugPrint(
       //   '[AppleAudioEngine] fft received count=$_fftEventCount '
       //   'nativeEmitCount=${emitCount?.toString() ?? "nil"} '
       //   'values=$valueCount '
-      //   'deltaMs=${deltaMs?.toString() ?? "nil"} '
-      //   'bridgeLagMs=${bridgeLagMs?.toString() ?? "nil"} '
-      //   'frameDelta=${frameDelta.toStringAsFixed(6)} '
-      //   'peak=${peak.toStringAsFixed(6)} '
       //   'receivedAtMs=$receivedAtMs '
       //   'nativeEmittedAtMs=${emittedAtMs?.toString() ?? "nil"}',
       // );
-      _lastLoggedFftFrame = List<double>.from(_latestFftCache);
     }
-  }
-
-  double _meanAbsoluteDelta(List<double> lhs, List<double> rhs) {
-    final count = lhs.length < rhs.length ? lhs.length : rhs.length;
-    if (count == 0) return 0.0;
-    var total = 0.0;
-    for (var i = 0; i < count; i++) {
-      total += (lhs[i] - rhs[i]).abs();
-    }
-    return total / count;
   }
 
   Future<T> _withAppleFileWriteAccess<T>(
@@ -715,6 +706,21 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     } finally {
       await _channel.invokeMethod('finishFileWrite', arguments);
       _preparedWritePaths.remove(path);
+    }
+  }
+
+  Future<T> _withAppleFileReadAccess<T>(
+    String path,
+    Future<T> Function() action,
+  ) async {
+    final normalizedPath = _normalizePath(path);
+    final beganScopedAccess = await beginScopedAccess(normalizedPath);
+    try {
+      return await action();
+    } finally {
+      if (beganScopedAccess) {
+        await endScopedAccess(normalizedPath);
+      }
     }
   }
 

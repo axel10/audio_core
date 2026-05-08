@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:audio_core/audio_core.dart';
@@ -109,6 +110,7 @@ class _AppleDirectoryTabState extends State<AppleDirectoryTab> {
   DateTime? _lastScannedAt;
   AppleMusicDirectoryNode? _directoryTree;
   String? _currentPlayingPath;
+  String? _scopedDirectoryPath;
 
   bool get _isApplePlatform => Platform.isIOS || Platform.isMacOS;
 
@@ -133,6 +135,16 @@ class _AppleDirectoryTabState extends State<AppleDirectoryTab> {
       return;
     }
     if (!mounted || selected == null || selected.isEmpty) {
+      return;
+    }
+
+    final scopeReady = await _beginScopedDirectoryAccess(selected);
+    if (!scopeReady) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage =
+            'macOS could not open a security-scoped session for this folder.';
+      });
       return;
     }
 
@@ -270,6 +282,42 @@ class _AppleDirectoryTabState extends State<AppleDirectoryTab> {
         _errorMessage = 'Playback failed: $e';
       });
     }
+  }
+
+  Future<bool> _beginScopedDirectoryAccess(String directoryPath) async {
+    final normalizedPath = _normalizeDirectoryPath(directoryPath);
+    if (_scopedDirectoryPath == normalizedPath) {
+      return true;
+    }
+
+    await _endScopedDirectoryAccess();
+
+    final began = await widget.controller.beginScopedAccess(
+      path: normalizedPath,
+    );
+    if (!began) {
+      return false;
+    }
+
+    _scopedDirectoryPath = normalizedPath;
+    await widget.controller.registerPersistentAccess(path: normalizedPath);
+    return true;
+  }
+
+  Future<void> _endScopedDirectoryAccess() async {
+    final scopedPath = _scopedDirectoryPath;
+    if (scopedPath == null) {
+      return;
+    }
+
+    _scopedDirectoryPath = null;
+    await widget.controller.endScopedAccess(path: scopedPath);
+  }
+
+  @override
+  void dispose() {
+    unawaited(_endScopedDirectoryAccess());
+    super.dispose();
   }
 
   @override
