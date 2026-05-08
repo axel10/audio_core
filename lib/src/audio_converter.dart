@@ -7,44 +7,29 @@ import 'package:path/path.dart' as p;
 
 import 'rust/api/simple.dart' as rust_api;
 
-enum AudioFormat {
-  aac,
-  alac,
-  aiff,
-  caf,
-  flac,
-  m4a,
-  m4b,
-  mp3,
-  ogg,
-  opus,
-  wav,
-}
+enum AudioFormat { aac, alac, aiff, caf, flac, m4a, m4b, mp3, ogg, opus, wav }
 
 extension AudioFormatX on AudioFormat {
   String get value => switch (this) {
-        AudioFormat.aac => 'aac',
-        AudioFormat.alac => 'alac',
-        AudioFormat.aiff => 'aiff',
-        AudioFormat.caf => 'caf',
-        AudioFormat.flac => 'flac',
-        AudioFormat.m4a => 'm4a',
-        AudioFormat.m4b => 'm4b',
-        AudioFormat.mp3 => 'mp3',
-        AudioFormat.ogg => 'ogg',
-        AudioFormat.opus => 'opus',
-        AudioFormat.wav => 'wav',
-      };
+    AudioFormat.aac => 'aac',
+    AudioFormat.alac => 'alac',
+    AudioFormat.aiff => 'aiff',
+    AudioFormat.caf => 'caf',
+    AudioFormat.flac => 'flac',
+    AudioFormat.m4a => 'm4a',
+    AudioFormat.m4b => 'm4b',
+    AudioFormat.mp3 => 'mp3',
+    AudioFormat.ogg => 'ogg',
+    AudioFormat.opus => 'opus',
+    AudioFormat.wav => 'wav',
+  };
 }
 
 AudioFormat audioFormatFromValue(String value) {
   return AudioFormat.values.firstWhere(
     (format) => format.value == value,
-    orElse: () => throw ArgumentError.value(
-      value,
-      'value',
-      'Unsupported audio format',
-    ),
+    orElse: () =>
+        throw ArgumentError.value(value, 'value', 'Unsupported audio format'),
   );
 }
 
@@ -52,24 +37,21 @@ enum AacEncoder { builtinAac, fdkaac }
 
 extension AacEncoderX on AacEncoder {
   String get value => switch (this) {
-        AacEncoder.builtinAac => 'builtinAac',
-        AacEncoder.fdkaac => 'fdkaac',
-      };
+    AacEncoder.builtinAac => 'builtinAac',
+    AacEncoder.fdkaac => 'fdkaac',
+  };
 
   String get label => switch (this) {
-        AacEncoder.builtinAac => 'Built-in AAC',
-        AacEncoder.fdkaac => 'FDK-AAC',
-      };
+    AacEncoder.builtinAac => 'Built-in AAC',
+    AacEncoder.fdkaac => 'FDK-AAC',
+  };
 }
 
 AacEncoder aacEncoderFromValue(String value) {
   return AacEncoder.values.firstWhere(
     (encoder) => encoder.value == value,
-    orElse: () => throw ArgumentError.value(
-      value,
-      'value',
-      'Unsupported AAC encoder',
-    ),
+    orElse: () =>
+        throw ArgumentError.value(value, 'value', 'Unsupported AAC encoder'),
   );
 }
 
@@ -77,19 +59,16 @@ enum BitRateMode { cbr, vbr }
 
 extension BitRateModeX on BitRateMode {
   String get value => switch (this) {
-        BitRateMode.cbr => 'cbr',
-        BitRateMode.vbr => 'vbr',
-      };
+    BitRateMode.cbr => 'cbr',
+    BitRateMode.vbr => 'vbr',
+  };
 }
 
 BitRateMode bitRateModeFromValue(String value) {
   return BitRateMode.values.firstWhere(
     (mode) => mode.value == value,
-    orElse: () => throw ArgumentError.value(
-      value,
-      'value',
-      'Unsupported bit rate mode',
-    ),
+    orElse: () =>
+        throw ArgumentError.value(value, 'value', 'Unsupported bit rate mode'),
   );
 }
 
@@ -374,6 +353,9 @@ class AudioConverter {
   static const MethodChannel _androidSafChannel = MethodChannel(
     'com.example.audio_converter/saf',
   );
+  static const MethodChannel _appleFileAccessChannel = MethodChannel(
+    'audio_core.player',
+  );
 
   Future<ConverterCapabilities> getCapabilities() async {
     final raw = rust_api.getCapabilities();
@@ -405,17 +387,18 @@ class AudioConverter {
             ConversionProgress(
               completedFiles:
                   (event['completedFiles'] ?? event['completed_files'])
-                          as int? ??
-                      0,
+                      as int? ??
+                  0,
               totalFiles:
                   (event['totalFiles'] ?? event['total_files']) as int? ?? 1,
               currentFilePath:
                   (event['currentFilePath'] ?? event['current_file_path'])
-                          as String? ??
-                      request.inputPath,
+                      as String? ??
+                  request.inputPath,
               currentFileProgress:
                   ((event['currentFileProgress'] ??
-                              event['current_file_progress']) as num?)
+                              event['current_file_progress'])
+                          as num?)
                       ?.toDouble(),
               currentPosition: currentPositionUs is num
                   ? Duration(microseconds: currentPositionUs.toInt())
@@ -472,7 +455,24 @@ class AudioConverter {
       extraOptions: extraOptions,
       customArgs: customArgs,
     );
-    return convertFile(request, onProgress: onProgress);
+
+    if (!Platform.isIOS) {
+      return convertFile(request, onProgress: onProgress);
+    }
+
+    final scopedOutputDirectory = outputDirectory.trim();
+    if (scopedOutputDirectory.isEmpty) {
+      return convertFile(request, onProgress: onProgress);
+    }
+
+    final beganScopedAccess = await _beginScopedAccess(scopedOutputDirectory);
+    try {
+      return await convertFile(request, onProgress: onProgress);
+    } finally {
+      if (beganScopedAccess) {
+        await _endScopedAccess(scopedOutputDirectory);
+      }
+    }
   }
 
   Future<List<ConvertResult>> convertFiles(
@@ -482,10 +482,7 @@ class AudioConverter {
     final results = <ConvertResult>[];
     for (var index = 0; index < requests.length; index++) {
       final request = requests[index];
-      final result = await convertFile(
-        request,
-        onProgress: onProgress,
-      );
+      final result = await convertFile(request, onProgress: onProgress);
       results.add(result);
     }
     return results;
@@ -517,6 +514,37 @@ class AudioConverter {
 
   Future<String?> pickOutputDirectory() async {
     return FilePicker.getDirectoryPath();
+  }
+
+  Future<bool> _beginScopedAccess(String path) async {
+    if (!Platform.isIOS) {
+      return true;
+    }
+
+    try {
+      final bool? result = await _appleFileAccessChannel.invokeMethod<bool>(
+        'beginScopedAccess',
+        <String, Object?>{'path': path},
+      );
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _endScopedAccess(String path) async {
+    if (!Platform.isIOS) {
+      return;
+    }
+
+    try {
+      await _appleFileAccessChannel.invokeMethod(
+        'endScopedAccess',
+        <String, Object?>{'path': path},
+      );
+    } catch (_) {
+      // Best-effort cleanup.
+    }
   }
 
   Future<AndroidOutputDirectory?> pickAndroidOutputDirectory() async {

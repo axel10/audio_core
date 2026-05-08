@@ -142,14 +142,14 @@ class VisualizerOutputStream {
     // Emit frame
     _emitFftFrame();
 
-    if (kDebugMode && (_renderTickCount <= 5 || _renderTickCount % 30 == 0)) {
-      debugPrint(
-        '[VisualizerOutputStream] id=$id renderTick=$_renderTickCount '
-        'rawBins=${rawBins.length} '
-        'renderDeltaMs=${renderDeltaMicros == null ? "nil" : (renderDeltaMicros / 1000.0).toStringAsFixed(1)} '
-        'targetFrameRate=${_config.targetFrameRate.toStringAsFixed(1)}',
-      );
-    }
+    // if (kDebugMode && (_renderTickCount <= 5 || _renderTickCount % 30 == 0)) {
+    //   debugPrint(
+    //     '[VisualizerOutputStream] id=$id renderTick=$_renderTickCount '
+    //     'rawBins=${rawBins.length} '
+    //     'renderDeltaMs=${renderDeltaMicros == null ? "nil" : (renderDeltaMicros / 1000.0).toStringAsFixed(1)} '
+    //     'targetFrameRate=${_config.targetFrameRate.toStringAsFixed(1)}',
+    //   );
+    // }
   }
 
   int get _renderIntervalMicros {

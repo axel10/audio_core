@@ -21,24 +21,26 @@ fn main() {
         let project_root = manifest_dir.parent().unwrap(); // audio_core 根目录
 
         // 根据编译目标三元组 (Target Triple) 映射到你的构建目录名
-        let arch_dir = if target.contains("aarch64-apple-ios-sim") {
-            "arm64-sim"
+        let (platform_dir, arch_dir) = if target.contains("aarch64-apple-ios-sim") {
+            ("ios", "arm64-sim")
         } else if target.contains("aarch64-apple-ios") {
-            "arm64"
+            ("ios", "arm64")
         } else if target.contains("x86_64-apple-ios") {
-            "x86_64"
+            ("ios", "x86_64")
         } else if target.contains("aarch64-apple-darwin") {
-            "arm64" // macOS 环境
+            ("macos", "arm64")
+        } else if target.contains("x86_64-apple-darwin") {
+            ("macos", "amd64")
         } else {
-            ""
+            ("", "")
         };
 
-        if arch_dir.is_empty() {
+        if platform_dir.is_empty() || arch_dir.is_empty() {
             return None;
         }
 
-        // 拼接路径：audio_core/ios/ffmpeg_lib/$arch
-        let path = project_root.join("ios/ffmpeg_lib").join(arch_dir);
+        // 拼接路径：audio_core/$platform/ffmpeg_lib/$arch
+        let path = project_root.join(platform_dir).join("ffmpeg_lib").join(arch_dir);
         if path.exists() {
             Some(path)
         } else {
