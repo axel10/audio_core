@@ -502,12 +502,13 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       let emittedAtMs = Date().timeIntervalSince1970 * 1000.0
       let deltaMs = fftLastEmitAtMs.map { emittedAtMs - $0 }
       fftLastEmitAtMs = emittedAtMs
-      // if fft.isEmpty || emitCount % 30 == 0 {
+      // if engine.isPlaying {
+      //   let preview = Array(fft.prefix(10))
       //   debugPrint(
-      //     "[AudioCorePlugin] fft emit count=\(emitCount) values=\(fft.count) " +
+      //     "[AudioCorePlugin] fft emit count=\(emitCount) " +
       //     "deltaMs=\(deltaMs.map { String(format: "%.1f", $0) } ?? "nil") " +
       //     "emittedAtMs=\(String(format: "%.1f", emittedAtMs)) " +
-      //     "first=\(fft.first.map { String(format: "%.6f", $0) } ?? "nil")"
+      //     "values=\(preview)"
       //   )
       // }
       DispatchQueue.main.async {

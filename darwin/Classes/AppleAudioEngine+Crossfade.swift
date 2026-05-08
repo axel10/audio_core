@@ -99,9 +99,8 @@ extension AppleAudioEngine {
     drainDeckFfmpegPlaybackState(incomingDeck, releasingFile: releasingFile)
     currentDeck.clear(releasingFile: releasingFile)
     incomingDeck.clear(releasingFile: releasingFile)
-    if releasingFile {
-      resetFftCaptureBuffer()
-    }
+    
+    resetFftCaptureBuffer()
 
     if releasingFile {
       currentDeck.playbackFramePosition = 0
@@ -133,6 +132,8 @@ extension AppleAudioEngine {
     if incomingDeck.isLoaded {
       incomingDeck.playerNode.pause()
     }
+
+    resetFftCaptureBuffer()
 
     drainDeckFfmpegPlaybackState(currentDeck, releasingFile: false)
     drainDeckFfmpegPlaybackState(incomingDeck, releasingFile: false)

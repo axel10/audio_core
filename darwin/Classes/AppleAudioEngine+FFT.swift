@@ -159,6 +159,8 @@ extension AppleAudioEngine {
   }
 
   func handleFftTapBuffer(_ buffer: AVAudioPCMBuffer) {
+    guard isPlaying else { return }
+    
     // 1. Thread-safe push without allocating memory on Real-time audio thread
     fftCaptureBuffer.pushMono(from: buffer)
     
