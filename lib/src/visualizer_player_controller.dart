@@ -1105,6 +1105,7 @@ class AudioCoreController extends ChangeNotifier
   /// On Android, and on iOS/macOS for the currently playing file, the engine
   /// pauses and reloads the track around the write so playback resumes from
   /// the preserved position after the tag update.
+  /// Batch copy operations use the same sync behavior.
   ///
   Future<bool> updateMetadata(
     AudioTrack track, {
@@ -1293,14 +1294,7 @@ class AudioCoreController extends ChangeNotifier
     List<TrackMetadataCopyRequest> requests,
   ) async {
     final needsSync = requests.any((request) {
-      if (player.currentPath != request.targetPath) {
-        return false;
-      }
-      if (Platform.isAndroid) {
-        return true;
-      }
-      final file = File(request.targetPath);
-      return file.existsSync() && file.lengthSync() >= 60 * 1024 * 1024;
+      return _needsMetadataWriteSyncForPath(request.targetPath.trim());
     });
 
     var preparedForWrite = false;
