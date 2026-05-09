@@ -1102,9 +1102,10 @@ class AudioCoreController extends ChangeNotifier
   /// Updates the metadata of a given track.
   ///
   /// Pass [metadata] to write the supplied fields to the track.
+  /// On Android, and on iOS/macOS for the currently playing file, the engine
+  /// pauses and reloads the track around the write so playback resumes from
+  /// the preserved position after the tag update.
   ///
-  /// If the track is currently playing, it will call the engine's synchronization
-  /// methods to release file handles before writing.
   Future<bool> updateMetadata(
     AudioTrack track, {
     required TrackMetadataUpdate metadata,
@@ -1127,6 +1128,13 @@ class AudioCoreController extends ChangeNotifier
     if (Platform.isAndroid) {
       return true;
     }
+    // Apple platforms need the playback file to be paused and reloaded before
+    // any current-track tag write, even for small files, so the file handle
+    // does not stay live while metadata is rewritten.
+    if (Platform.isIOS || Platform.isMacOS) {
+      return true;
+    }
+
     final file = path.startsWith('content://') ? null : File(path);
     return file != null &&
         file.existsSync() &&

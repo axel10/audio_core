@@ -155,6 +155,113 @@ class _MetadataTabState extends State<MetadataTab> {
     }
   }
 
+  Future<void> _editTrackInfo() async {
+    final track = widget.controller.playlist.currentTrack;
+    if (track == null) return;
+
+    final metadata = await (_metadataFuture ?? _loadMetadata());
+    if (!mounted) return;
+
+    final titleController = TextEditingController(
+      text: metadata.title ?? track.title ?? '',
+    );
+    final artistController = TextEditingController(
+      text: metadata.artist ?? track.artist ?? '',
+    );
+
+    try {
+      final result = await showDialog<_TrackInfoEditResult>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('Edit Track Info'),
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: titleController,
+                      textInputAction: TextInputAction.next,
+                      decoration: const InputDecoration(
+                        labelText: 'Title',
+                        hintText: 'Enter track title',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: artistController,
+                      textInputAction: TextInputAction.done,
+                      decoration: const InputDecoration(
+                        labelText: 'Artist',
+                        hintText: 'Enter artist name',
+                      ),
+                      onSubmitted: (_) {
+                        Navigator.of(
+                          dialogContext,
+                        ).pop(_TrackInfoEditResult.save);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () =>
+                    Navigator.of(dialogContext).pop(_TrackInfoEditResult.save),
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (result != _TrackInfoEditResult.save) {
+        return;
+      }
+
+      final title = titleController.text.trim();
+      final artist = artistController.text.trim();
+      final success = await widget.controller.updateMetadata(
+        track,
+        metadata: TrackMetadataUpdate(title: title, artist: artist),
+      );
+
+      if (!mounted) return;
+
+      if (success) {
+        _showSnackBar(
+          'Track info updated successfully.',
+          backgroundColor: Colors.green,
+        );
+        await _refresh();
+      } else {
+        final message = _metadataFailureMessage('Failed to update track info');
+        _logMetadataFailure(message, track: track);
+        _showSnackBar(message, backgroundColor: Colors.red);
+      }
+    } catch (e, stackTrace) {
+      final message = 'Failed to update track info: $e';
+      debugPrint('[MetadataTab] $message');
+      debugPrintStack(
+        label: '[MetadataTab] track info update stack',
+        stackTrace: stackTrace,
+      );
+
+      if (!mounted) return;
+      _showSnackBar(message, backgroundColor: Colors.red);
+    } finally {
+      titleController.dispose();
+      artistController.dispose();
+    }
+  }
+
   String _metadataFailureMessage(String fallback) {
     final error = widget.controller.player.error?.trim();
     if (error == null || error.isEmpty) {
@@ -563,6 +670,11 @@ class _MetadataTabState extends State<MetadataTab> {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               ElevatedButton.icon(
+                onPressed: track == null ? null : _editTrackInfo,
+                icon: const Icon(Icons.drive_file_rename_outline),
+                label: const Text('Edit Title / Artist'),
+              ),
+              ElevatedButton.icon(
                 onPressed: track == null ? null : _changeCover,
                 icon: const Icon(Icons.edit_note),
                 label: const Text('Change Cover'),
@@ -781,3 +893,5 @@ class _MetadataTabState extends State<MetadataTab> {
     );
   }
 }
+
+enum _TrackInfoEditResult { save }
