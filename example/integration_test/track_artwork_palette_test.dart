@@ -135,7 +135,7 @@ Map<String, int> _themeColorsFromPalette(
 
   void addColor(String key, original_palette.PaletteColor? color) {
     if (color != null) {
-      themeColors[key] = color.color.value;
+      themeColors[key] = color.color.toARGB32();
     }
   }
 

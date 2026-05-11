@@ -44,6 +44,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   cross_file: ^0.3.5+2
   desktop_drop: ^0.7.0
+  collection: ^1.19.1
   file_picker: ^11.0.2
   audio_service: ^0.18.18
   media_scanner: ^2.2.1

@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:audio_core/audio_core.dart';
@@ -85,10 +84,8 @@ void main() {
           autoPlayFirst: false,
         );
 
-        final queueTracks = _buildQueueTracks(queueFiles);
-        await controller.playlist.updatePlaylistTracks(
-          controller.playlist.queuePlaylistId,
-          queueTracks,
+        final queueTracks = controller.resolveAudioTracks(
+          queueFiles.map((file) => file.path).toList(growable: false),
         );
         await controller.playlist.setActivePlaylist(
           controller.playlist.queuePlaylistId,
@@ -231,22 +228,6 @@ List<File> _pickQueueFiles(List<File> files, {required int count}) {
   }
 
   return files.take(count).toList(growable: false);
-}
-
-List<AudioTrack> _buildQueueTracks(List<File> files) {
-  return List<AudioTrack>.generate(files.length, (index) {
-    final file = files[index];
-    final absolutePath = file.absolute.path;
-    final baseName = file.uri.pathSegments.isNotEmpty
-        ? file.uri.pathSegments.last
-        : absolutePath;
-
-    return AudioTrack(
-      id: '$absolutePath#$index',
-      uri: absolutePath,
-      title: baseName,
-    );
-  }, growable: false);
 }
 
 Future<void> _waitFor({

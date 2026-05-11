@@ -15,6 +15,12 @@ import 'package:collection/collection.dart'
     show HeapPriorityQueue, PriorityQueue;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
+extension _ColorComponentAccessors on Color {
+  int get alpha8 => (a * 255.0).round();
+  int get red8 => (r * 255.0).round();
+  int get green8 => (g * 255.0).round();
+  int get blue8 => (b * 255.0).round();
+}
 
 /// A description of an encoded image.
 ///
@@ -758,9 +764,9 @@ class PaletteColor with Diagnosticable {
   ///
   /// Formula defined [here](http://www.w3.org/TR/2008/REC-WCAG20-20081211/#contrast-ratiodef).
   static double _calculateContrast(Color foreground, Color background) {
-    assert(background.alpha == 0xff,
+    assert(background.alpha8 == 0xff,
         'background can not be translucent: $background.');
-    if (foreground.alpha < 0xff) {
+    if (foreground.alpha8 < 0xff) {
       // If the foreground is translucent, composite the foreground over the
       // background
       foreground = Color.alphaBlend(foreground, background);
@@ -780,7 +786,7 @@ class PaletteColor with Diagnosticable {
   // calculated.
   static int? _calculateMinimumAlpha(
       Color foreground, Color background, double minContrastRatio) {
-    assert(background.alpha == 0xff,
+    assert(background.alpha8 == 0xff,
         'The background cannot be translucent: $background.');
     double contrastCalculator(Color fg, Color bg, int alpha) {
       final Color testForeground = fg.withAlpha(alpha);
@@ -810,7 +816,7 @@ class PaletteColor with Diagnosticable {
     double minContrastRatio,
     _ContrastCalculator calculator,
   ) {
-    assert(background.alpha == 0xff,
+    assert(background.alpha8 == 0xff,
         'The background cannot be translucent: $background.');
     const int minAlphaSearchMaxIterations = 10;
     const int minAlphaSearchPrecision = 1;
@@ -958,23 +964,23 @@ class _ColorVolumeBox {
     for (int i = _lowerIndex; i <= _upperIndex; i++) {
       final Color color = colors[i];
       count += histogram[color]!.value;
-      if (color.red > maxRed) {
-        maxRed = color.red;
+      if (color.red8 > maxRed) {
+        maxRed = color.red8;
       }
-      if (color.red < minRed) {
-        minRed = color.red;
+      if (color.red8 < minRed) {
+        minRed = color.red8;
       }
-      if (color.green > maxGreen) {
-        maxGreen = color.green;
+      if (color.green8 > maxGreen) {
+        maxGreen = color.green8;
       }
-      if (color.green < minGreen) {
-        minGreen = color.green;
+      if (color.green8 < minGreen) {
+        minGreen = color.green8;
       }
-      if (color.blue > maxBlue) {
-        maxBlue = color.blue;
+      if (color.blue8 > maxBlue) {
+        maxBlue = color.blue8;
       }
-      if (color.blue < minBlue) {
-        minBlue = color.blue;
+      if (color.blue8 < minBlue) {
+        minBlue = color.blue8;
       }
     }
     _minRed = minRed;
@@ -1032,16 +1038,16 @@ class _ColorVolumeBox {
 
       switch (longestDimension) {
         case _ColorComponent.red:
-          final int aValue = makeValue(a.red, a.green, a.blue);
-          final int bValue = makeValue(b.red, b.green, b.blue);
+          final int aValue = makeValue(a.red8, a.green8, a.blue8);
+          final int bValue = makeValue(b.red8, b.green8, b.blue8);
           return aValue.compareTo(bValue);
         case _ColorComponent.green:
-          final int aValue = makeValue(a.green, a.red, a.blue);
-          final int bValue = makeValue(b.green, b.red, b.blue);
+          final int aValue = makeValue(a.green8, a.red8, a.blue8);
+          final int bValue = makeValue(b.green8, b.red8, b.blue8);
           return aValue.compareTo(bValue);
         case _ColorComponent.blue:
-          final int aValue = makeValue(a.blue, a.green, a.red);
-          final int bValue = makeValue(b.blue, b.green, b.red);
+          final int aValue = makeValue(a.blue8, a.green8, a.red8);
+          final int bValue = makeValue(b.blue8, b.green8, b.red8);
           return aValue.compareTo(bValue);
       }
     }
@@ -1073,9 +1079,9 @@ class _ColorVolumeBox {
       final Color color = colors[i];
       final int colorPopulation = histogram[color]!.value;
       totalPopulation += colorPopulation;
-      redSum += colorPopulation * color.red;
-      greenSum += colorPopulation * color.green;
-      blueSum += colorPopulation * color.blue;
+      redSum += colorPopulation * color.red8;
+      greenSum += colorPopulation * color.green8;
+      blueSum += colorPopulation * color.blue8;
     }
     final int redMean = (redSum / totalPopulation).round();
     final int greenMean = (greenSum / totalPopulation).round();
@@ -1100,21 +1106,21 @@ class _ColorHistogram {
   final DoubleLinkedQueue<Color> _keys = DoubleLinkedQueue<Color>();
 
   _ColorCount? operator [](Color color) {
-    final Map<int, Map<int, _ColorCount>>? redMap = _hist[color.red];
+    final Map<int, Map<int, _ColorCount>>? redMap = _hist[color.red8];
     if (redMap == null) {
       return null;
     }
-    final Map<int, _ColorCount>? blueMap = redMap[color.blue];
+    final Map<int, _ColorCount>? blueMap = redMap[color.blue8];
     if (blueMap == null) {
       return null;
     }
-    return blueMap[color.green];
+    return blueMap[color.green8];
   }
 
   void operator []=(Color key, _ColorCount value) {
-    final int red = key.red;
-    final int blue = key.blue;
-    final int green = key.green;
+    final int red = key.red8;
+    final int blue = key.blue8;
+    final int green = key.green8;
 
     bool newColor = false;
 
@@ -1143,7 +1149,7 @@ class _ColorHistogram {
   void removeWhere(bool Function(Color key) predicate) {
     for (final Color key in _keys) {
       if (predicate(key)) {
-        _hist[key.red]?[key.blue]?.remove(key.green);
+        _hist[key.red8]?[key.blue8]?.remove(key.green8);
       }
     }
     _keys.removeWhere((Color color) => predicate(color));
@@ -1237,10 +1243,10 @@ class _ColorCutQuantizer {
 
     Color quantizeColor(Color color) {
       return Color.fromARGB(
-        color.alpha,
-        color.red & quantizeWordMask,
-        color.green & quantizeWordMask,
-        color.blue & quantizeWordMask,
+        color.alpha8,
+        color.red8 & quantizeWordMask,
+        color.green8 & quantizeWordMask,
+        color.blue8 & quantizeWordMask,
       );
     }
 
@@ -1262,7 +1268,7 @@ class _ColorCutQuantizer {
       final Color quantizedColor = quantizeColor(pixel);
       final Color colorKey = quantizedColor.withAlpha(0xff);
       // Skip pixels that are entirely transparent.
-      if (quantizedColor.alpha == 0x0) {
+      if (quantizedColor.alpha8 == 0x0) {
         continue;
       }
       if (currentColor != colorKey) {

@@ -735,12 +735,11 @@ class AudioCoreController extends ChangeNotifier
 
   Future<void> _refreshLatestFftCache() async {
     try {
-      final startedAtMs = DateTime.now().millisecondsSinceEpoch;
       _latestFftCache = await _engine.getLatestFft();
       // if (kDebugMode) {
       //   debugPrint(
       //     '[VisualizerController] fft fetch values=${_latestFftCache.length} '
-      //     'fetchStartedAtMs=$startedAtMs fetchedAtMs=${DateTime.now().millisecondsSinceEpoch}',
+      //     'fetchedAtMs=${DateTime.now().millisecondsSinceEpoch}',
       //   );
       // }
     } catch (e) {
