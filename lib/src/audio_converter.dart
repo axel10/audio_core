@@ -501,6 +501,7 @@ class AudioConverter {
             'flac',
             'm4a',
             'm4b',
+            'mp4',
             'mp3',
             'ogg',
             'opus',

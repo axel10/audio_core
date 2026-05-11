@@ -10,7 +10,7 @@ class AudioDropRegion extends StatefulWidget {
     super.key,
     required this.controller,
     required this.child,
-    this.overlayText = 'Drag an audio file here',
+    this.overlayText = 'Drag an audio file or MP4 here',
     this.onPathsAccepted,
   });
 

@@ -29,6 +29,7 @@ const List<String> _audioFileExtensions = <String>[
   'm4a',
   'm4b',
   'm4p',
+  'mp4',
   'mid',
   'midi',
   'mp3',

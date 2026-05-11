@@ -95,6 +95,7 @@ class _AppleDirectoryTabState extends State<AppleDirectoryTab> {
     'm4a',
     'm4b',
     'm4p',
+    'mp4',
     'mid',
     'midi',
     'mp3',
