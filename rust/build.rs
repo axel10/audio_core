@@ -30,7 +30,7 @@ fn main() {
         } else if target.contains("aarch64-apple-darwin") {
             ("macos", "arm64")
         } else if target.contains("x86_64-apple-darwin") {
-            ("macos", "amd64")
+            ("macos", "x86_64")
         } else {
             ("", "")
         };
@@ -57,6 +57,9 @@ fn main() {
             
             // 设置环境变量，供当前 crate 及其可能的子过程使用
             println!("cargo:rustc-env=FFMPEG_DIR={}", dir.display());
+
+            // 设置 rpath，方便开发阶段直接运行程序
+            println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_dir.display());
 
             // 链接 LAME 动态库
             if lib_dir.join("libmp3lame.dylib").exists() {

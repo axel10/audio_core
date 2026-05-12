@@ -107,7 +107,7 @@ for arch in "${ARCHS[@]}"; do
     lame_host="x86_64-apple-darwin"
     opus_host="x86_64-apple-darwin"
     extra_flags="-mmacosx-version-min=$DEPLOYMENT_TARGET"
-    install_arch="amd64"
+    install_arch="x86_64"
   else
     echo "Unsupported architecture: $arch" >&2
     exit 1
@@ -230,6 +230,25 @@ for arch in "${ARCHS[@]}"; do
 
   log "Starting make install"
   make install
+
+  log "Fixing install names for $arch..."
+  cd "$install_root/lib"
+  # Set IDs and fix references to @rpath for portability
+  for dylib in *.dylib; do
+    if [ -L "$dylib" ]; then continue; fi
+    
+    # Change the library's own ID to @rpath
+    install_name_tool -id "@rpath/$dylib" "$dylib"
+    
+    # Update references to other libraries within our build tree
+    # We use otool -L to find current dependencies that point to our local build paths
+    otool -L "$dylib" | awk '/\t.* (compatibility|current)/ {print $1}' | while read -r dep; do
+      if [[ "$dep" == *"$repo_root"* ]]; then
+        dep_base=$(basename "$dep")
+        install_name_tool -change "$dep" "@rpath/$dep_base" "$dylib"
+      fi
+    done
+  done
 
   log "Build finished for $arch. Installation at: $install_root"
 done
