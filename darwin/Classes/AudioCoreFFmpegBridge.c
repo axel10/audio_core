@@ -32,6 +32,19 @@ static void set_av_error(char **out_error_message, int error_code, const char *c
   set_error(out_error_message, "%s: %s", context, error_buffer);
 }
 
+static bool is_ignorable_decode_error(int error_code) {
+  return error_code == AVERROR_INVALIDDATA;
+}
+
+static void recover_from_decode_error(AVCodecContext *codec_context, AVFrame *frame) {
+  if (codec_context != NULL) {
+    avcodec_flush_buffers(codec_context);
+  }
+  if (frame != NULL) {
+    av_frame_unref(frame);
+  }
+}
+
 static void free_pcm(AudioCoreFFmpegDecodedPCM *pcm) {
   if (pcm == NULL) {
     return;
@@ -216,6 +229,7 @@ static bool open_stream_decoder(
     set_av_error(out_error_message, result, "failed to open input");
     goto cleanup;
   }
+  format_context->flags |= AVFMT_FLAG_DISCARD_CORRUPT;
 
   result = avformat_find_stream_info(format_context, NULL);
   if (result < 0) {
@@ -459,6 +473,10 @@ bool audio_core_ffmpeg_decode_stream_chunk(
       break;
     }
     if (result < 0) {
+      if (is_ignorable_decode_error(result)) {
+        av_packet_unref(decoder->packet);
+        continue;
+      }
       set_av_error(out_error_message, result, "failed to read packet");
       goto cleanup;
     }
@@ -471,6 +489,10 @@ bool audio_core_ffmpeg_decode_stream_chunk(
     result = avcodec_send_packet(decoder->codec_context, decoder->packet);
     av_packet_unref(decoder->packet);
     if (result < 0) {
+      if (is_ignorable_decode_error(result)) {
+        recover_from_decode_error(decoder->codec_context, decoder->frame);
+        continue;
+      }
       set_av_error(out_error_message, result, "failed to send packet to decoder");
       goto cleanup;
     }
@@ -481,6 +503,10 @@ bool audio_core_ffmpeg_decode_stream_chunk(
         break;
       }
       if (result < 0) {
+        if (is_ignorable_decode_error(result)) {
+          recover_from_decode_error(decoder->codec_context, decoder->frame);
+          break;
+        }
         set_av_error(out_error_message, result, "failed to receive decoded frame");
         goto cleanup;
       }
@@ -506,8 +532,10 @@ bool audio_core_ffmpeg_decode_stream_chunk(
   if (reached_input_eof) {
     result = avcodec_send_packet(decoder->codec_context, NULL);
     if (result < 0 && result != AVERROR_EOF) {
-      set_av_error(out_error_message, result, "failed to flush decoder");
-      goto cleanup;
+      if (!is_ignorable_decode_error(result)) {
+        set_av_error(out_error_message, result, "failed to flush decoder");
+        goto cleanup;
+      }
     }
 
     for (;;) {
@@ -519,6 +547,10 @@ bool audio_core_ffmpeg_decode_stream_chunk(
         break;
       }
       if (result < 0) {
+        if (is_ignorable_decode_error(result)) {
+          recover_from_decode_error(decoder->codec_context, decoder->frame);
+          break;
+        }
         set_av_error(out_error_message, result, "failed to receive flushed frame");
         goto cleanup;
       }
@@ -596,6 +628,7 @@ bool audio_core_ffmpeg_decode_pcm(
     set_av_error(out_error_message, result, "failed to open input");
     goto cleanup;
   }
+  format_context->flags |= AVFMT_FLAG_DISCARD_CORRUPT;
 
   result = avformat_find_stream_info(format_context, NULL);
   if (result < 0) {
@@ -705,6 +738,10 @@ bool audio_core_ffmpeg_decode_pcm(
       break;
     }
     if (result < 0) {
+      if (is_ignorable_decode_error(result)) {
+        av_packet_unref(packet);
+        continue;
+      }
       set_av_error(out_error_message, result, "failed to read packet");
       goto cleanup;
     }
@@ -717,6 +754,10 @@ bool audio_core_ffmpeg_decode_pcm(
     result = avcodec_send_packet(codec_context, packet);
     av_packet_unref(packet);
     if (result < 0) {
+      if (is_ignorable_decode_error(result)) {
+        recover_from_decode_error(codec_context, frame);
+        continue;
+      }
       set_av_error(out_error_message, result, "failed to send packet to decoder");
       goto cleanup;
     }
@@ -727,6 +768,10 @@ bool audio_core_ffmpeg_decode_pcm(
         break;
       }
       if (result < 0) {
+        if (is_ignorable_decode_error(result)) {
+          recover_from_decode_error(codec_context, frame);
+          break;
+        }
         set_av_error(out_error_message, result, "failed to receive decoded frame");
         goto cleanup;
       }
@@ -799,8 +844,10 @@ bool audio_core_ffmpeg_decode_pcm(
 
   result = avcodec_send_packet(codec_context, NULL);
   if (result < 0 && result != AVERROR_EOF) {
-    set_av_error(out_error_message, result, "failed to flush decoder");
-    goto cleanup;
+    if (!is_ignorable_decode_error(result)) {
+      set_av_error(out_error_message, result, "failed to flush decoder");
+      goto cleanup;
+    }
   }
 
   for (;;) {
@@ -809,6 +856,10 @@ bool audio_core_ffmpeg_decode_pcm(
       break;
     }
     if (result < 0) {
+      if (is_ignorable_decode_error(result)) {
+        recover_from_decode_error(codec_context, frame);
+        break;
+      }
       set_av_error(out_error_message, result, "failed to receive flushed frame");
       goto cleanup;
     }
