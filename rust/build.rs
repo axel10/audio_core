@@ -58,14 +58,14 @@ fn main() {
             // 设置环境变量，供当前 crate 及其可能的子过程使用
             println!("cargo:rustc-env=FFMPEG_DIR={}", dir.display());
 
-            // 链接 LAME 静态库
-            if lib_dir.join("libmp3lame.a").exists() {
-                println!("cargo:rustc-link-lib=static=mp3lame");
+            // 链接 LAME 动态库
+            if lib_dir.join("libmp3lame.dylib").exists() {
+                println!("cargo:rustc-link-lib=dylib=mp3lame");
             }
 
-            // 链接 Opus 静态库
-            if lib_dir.join("libopus.a").exists() {
-                println!("cargo:rustc-link-lib=static=opus");
+            // 链接 Opus 动态库
+            if lib_dir.join("libopus.dylib").exists() {
+                println!("cargo:rustc-link-lib=dylib=opus");
             }
         }
     }

@@ -127,7 +127,7 @@ for arch in "${ARCHS[@]}"; do
   opus_build_root="$repo_root/build/opus-macos-$arch"
   opus_install_root="$opus_build_root/install"
 
-  if ! $clean && [[ -f "$install_root/lib/libavformat.a" && -f "$install_root/lib/libmp3lame.a" && -f "$install_root/lib/libopus.a" ]]; then
+  if ! $clean && [[ -f "$install_root/lib/libavformat.dylib" && -f "$install_root/lib/libmp3lame.dylib" && -f "$install_root/lib/libopus.dylib" ]]; then
     log "Skipping $arch because $install_root already looks built"
     continue
   fi
@@ -142,8 +142,8 @@ for arch in "${ARCHS[@]}"; do
   "$lame_root/configure" \
     --prefix="$lame_install_root" \
     --host="$lame_host" \
-    --disable-shared \
-    --enable-static \
+    --enable-shared \
+    --disable-static \
     --disable-frontend \
     CC="$cc" \
     CFLAGS="$extra_flags -isysroot $sdk_path -fPIC" \
@@ -154,7 +154,7 @@ for arch in "${ARCHS[@]}"; do
   make install
 
   mkdir -p "$install_root/lib"
-  cp -f "$lame_install_root/lib/libmp3lame.a" "$install_root/lib/libmp3lame.a"
+  cp -af "$lame_install_root/lib/"libmp3lame*.dylib "$install_root/lib/"
 
   log "Building Opus for $arch..."
   mkdir -p "$opus_build_root"
@@ -162,8 +162,8 @@ for arch in "${ARCHS[@]}"; do
   "$opus_root/configure" \
     --prefix="$opus_install_root" \
     --host="$opus_host" \
-    --disable-shared \
-    --enable-static \
+    --enable-shared \
+    --disable-static \
     --disable-extra-programs \
     --disable-doc \
     CC="$cc" \
@@ -173,7 +173,7 @@ for arch in "${ARCHS[@]}"; do
     RANLIB="$ranlib"
   make -j"$jobs"
   make install
-  cp -f "$opus_install_root/lib/libopus.a" "$install_root/lib/libopus.a"
+  cp -af "$opus_install_root/lib/"libopus*.dylib "$install_root/lib/"
 
   log "Configuring FFmpeg for $arch..."
   mkdir -p "$build_root"
@@ -207,8 +207,8 @@ for arch in "${ARCHS[@]}"; do
     --enable-small
     --disable-gpl
     --enable-pic
-    --disable-shared
-    --enable-static
+    --enable-shared
+    --disable-static
     --enable-libmp3lame
     --enable-libopus
 
@@ -223,7 +223,7 @@ for arch in "${ARCHS[@]}"; do
 
   log "Starting FFmpeg configure for macOS $arch"
   export PKG_CONFIG_PATH="$opus_install_root/lib/pkgconfig:$lame_install_root/lib/pkgconfig"
-  "$ffmpeg_root/configure" --pkg-config-flags="--static" "${configure_args[@]}"
+  "$ffmpeg_root/configure" "${configure_args[@]}"
 
   log "Starting make -j${jobs}"
   make -j"$jobs"
