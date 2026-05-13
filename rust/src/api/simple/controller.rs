@@ -188,7 +188,7 @@ fn controller() -> &'static Mutex<PlayerController> {
     PLAYER_CONTROLLER.get_or_init(|| Mutex::new(PlayerController::new()))
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PlaybackState {
     pub playback_state: Option<String>,
     pub position_ms: i64,
@@ -797,7 +797,7 @@ fn start_default_output_monitor() {
     });
 }
 
-pub(super) fn snapshot_playback_state() -> PlaybackState {
+pub(crate) fn snapshot_playback_state() -> PlaybackState {
     controller()
         .lock()
         .map(|c| c.playback_state_snapshot())

@@ -269,3 +269,23 @@ impl AudioSource {
         Ok(!self.pending_samples.is_empty())
     }
 }
+
+impl Iterator for AudioSource {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pending_samples.is_empty() {
+            let has_more = self.refill().ok()?;
+            if !has_more {
+                return None;
+            }
+        }
+
+        self.pending_samples.pop_front()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.pending_samples.len();
+        (len, Some(len))
+    }
+}
