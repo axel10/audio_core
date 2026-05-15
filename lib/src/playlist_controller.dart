@@ -56,6 +56,9 @@ class PlaylistController extends ChangeNotifier {
   int? get historyCursor => _randomManager.historyCursor;
   List<String> get currentDeck => _randomManager.currentDeck;
   int? get deckCursor => _randomManager.deckCursor;
+  String? get deckSignature => _randomManager.deckSignature;
+  String? get stashedNextTrackId => _randomManager.stashedNextTrackId;
+  String? get stashedForTrackId => _randomManager.stashedForTrackId;
 
   /// Whether there is a next track available.
   bool get hasNext => nextTrack != null;
@@ -497,6 +500,29 @@ class PlaylistController extends ChangeNotifier {
   void setRandomPolicy(RandomPolicy? policy) {
     _randomManager.setPolicy(policy);
     _reconcileRandom();
+    notifyListeners();
+  }
+
+  void restoreRandomPlaybackState({
+    required RandomPolicy? policy,
+    List<RandomHistoryEntry> history = const <RandomHistoryEntry>[],
+    int? historyCursor,
+    List<String> deck = const <String>[],
+    int? deckCursor,
+    String? deckSignature,
+    String? stashedNextTrackId,
+    String? stashedForTrackId,
+  }) {
+    _randomManager.restoreState(
+      policy: policy,
+      history: history,
+      historyCursor: historyCursor,
+      deck: deck,
+      deckCursor: deckCursor,
+      deckSignature: deckSignature,
+      stashedNextTrackId: stashedNextTrackId,
+      stashedForTrackId: stashedForTrackId,
+    );
     notifyListeners();
   }
 

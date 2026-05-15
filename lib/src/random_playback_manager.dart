@@ -39,6 +39,9 @@ class RandomPlaybackManager {
   int? get historyCursor => _historyCursor;
   List<String> get currentDeck => List.unmodifiable(_deck);
   int? get deckCursor => _deckCursor;
+  String? get stashedNextTrackId => _stashedNextTrackId;
+  String? get stashedForTrackId => _stashedForTrackId;
+  String? get deckSignature => _deckSignature;
 
   // --- Calculated Getters ---
 
@@ -87,6 +90,35 @@ class RandomPlaybackManager {
   void clearHistory() {
     _history.clear();
     _historyCursor = null;
+  }
+
+  /// Restores random playback internals from a previously captured snapshot.
+  void restoreState({
+    required RandomPolicy? policy,
+    List<RandomHistoryEntry> history = const <RandomHistoryEntry>[],
+    int? historyCursor,
+    List<String> deck = const <String>[],
+    int? deckCursor,
+    String? deckSignature,
+    String? stashedNextTrackId,
+    String? stashedForTrackId,
+  }) {
+    _policy = policy;
+    final seed = policy?.seed;
+    _random = seed == null ? math.Random() : math.Random(seed);
+
+    _history
+      ..clear()
+      ..addAll(history);
+    _historyCursor = historyCursor;
+
+    _deck
+      ..clear()
+      ..addAll(deck);
+    _deckCursor = deckCursor;
+    _deckSignature = deckSignature;
+    _stashedNextTrackId = stashedNextTrackId;
+    _stashedForTrackId = stashedForTrackId;
   }
 
   /// Clears everything.

@@ -448,12 +448,12 @@ extension AppleAudioEngine {
           }
           let callbackDeltaMs = self.currentTimestampMs() - callbackAtMs
           let playbackFrame = deck.currentPlaybackFramePosition()
-          debugPrint(
-            "[AppleAudioEngine] ffmpeg chunk callback path=\(deck.loadedURL?.path ?? "nil") " +
-            "index=\(chunkIndex) kind=\(isLastBuffer ? "playedBack" : "rendered") " +
-            "bufferStart=\(bufferStart) frames=\(bufferFrameCount) playbackFrame=\(playbackFrame) " +
-            "dispatchDelayMs=\(String(format: "%.1f", callbackDeltaMs)) queueDepthBefore=\(deck.scheduledPCMBuffers.count)"
-          )
+//           debugPrint(
+//             "[AppleAudioEngine] ffmpeg chunk callback path=\(deck.loadedURL?.path ?? "nil") " +
+//             "index=\(chunkIndex) kind=\(isLastBuffer ? "playedBack" : "rendered") " +
+//             "bufferStart=\(bufferStart) frames=\(bufferFrameCount) playbackFrame=\(playbackFrame) " +
+//             "dispatchDelayMs=\(String(format: "%.1f", callbackDeltaMs)) queueDepthBefore=\(deck.scheduledPCMBuffers.count)"
+//           )
           if isLastBuffer {
             self.handlePlaybackCompleted(
               deck: deck,
