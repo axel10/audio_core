@@ -12,6 +12,8 @@
 #include <stdarg.h>
 #include <math.h>
 
+#define AUDIO_CORE_MAX_CHANNELS 64
+
 static void set_error(char **out_error_message, const char *fmt, ...) {
   if (out_error_message == NULL) {
     return;
@@ -69,13 +71,22 @@ static bool append_samples(
     return true;
   }
 
+  if (*sample_count < 0 || *capacity < 0 || source_count > INT64_MAX - *sample_count) {
+    return false;
+  }
   int64_t needed = *sample_count + source_count;
   if (needed > *capacity) {
     int64_t next_capacity = *capacity > 0 ? *capacity : 16384;
     while (next_capacity < needed) {
+      if (next_capacity > INT64_MAX / 2) {
+        return false;
+      }
       next_capacity *= 2;
     }
 
+    if ((uint64_t)next_capacity > SIZE_MAX / sizeof(float)) {
+      return false;
+    }
     float *next_samples = realloc(*samples, (size_t)next_capacity * sizeof(float));
     if (next_samples == NULL) {
       return false;
@@ -103,6 +114,11 @@ struct AudioCoreFFmpegStreamDecoder {
   int channels;
   int target_sample_rate;
   int64_t frame_count;
+  int64_t seek_target_frame;
+  bool input_eof;
+  bool decoder_flushing;
+  bool resampler_flushing;
+  bool drain_pending;
   bool finished;
 };
 
@@ -122,6 +138,11 @@ static void close_stream_decoder(AudioCoreFFmpegStreamDecoder *decoder) {
   avformat_close_input(&decoder->format_context);
   free(decoder);
 }
+
+static int64_t frame_start_in_target_rate(
+  const AudioCoreFFmpegStreamDecoder *decoder,
+  const AVFrame *frame
+);
 
 static bool append_decoded_frame(
   AudioCoreFFmpegStreamDecoder *decoder,
@@ -175,6 +196,117 @@ static bool append_decoded_frame(
     return false;
   }
 
+  int64_t skip_frames = 0;
+  if (decoder->seek_target_frame >= 0) {
+    int64_t frame_start = frame_start_in_target_rate(decoder, frame);
+    if (frame_start >= 0) {
+      int64_t frame_end = frame_start + converted_frames;
+      if (frame_end <= decoder->seek_target_frame) {
+        av_freep(&converted_data[0]);
+        av_freep(&converted_data);
+        return true;
+      }
+      if (frame_start < decoder->seek_target_frame) {
+        skip_frames = decoder->seek_target_frame - frame_start;
+      }
+      decoder->seek_target_frame = -1;
+    }
+  }
+
+  if (skip_frames >= converted_frames) {
+    av_freep(&converted_data[0]);
+    av_freep(&converted_data);
+    return true;
+  }
+
+  int64_t produced_frames = converted_frames - skip_frames;
+  int64_t produced_samples = produced_frames * decoder->channels;
+  const float *sample_start = (const float *)converted_data[0] + (skip_frames * decoder->channels);
+  if (!append_samples(
+        samples,
+        sample_count,
+        sample_capacity,
+        sample_start,
+        produced_samples
+      )) {
+    set_error(out_error_message, "failed to append decoded samples");
+    av_freep(&converted_data[0]);
+    av_freep(&converted_data);
+    return false;
+  }
+
+  av_freep(&converted_data[0]);
+  av_freep(&converted_data);
+  return true;
+}
+
+static int64_t frame_start_in_target_rate(
+  const AudioCoreFFmpegStreamDecoder *decoder,
+  const AVFrame *frame
+) {
+  if (decoder == NULL || frame == NULL || frame->best_effort_timestamp == AV_NOPTS_VALUE) {
+    return -1;
+  }
+
+  AVStream *stream = decoder->format_context->streams[decoder->stream_index];
+  return av_rescale_q(
+    frame->best_effort_timestamp,
+    stream->time_base,
+    (AVRational){1, decoder->target_sample_rate}
+  );
+}
+
+static bool append_swr_flush(
+  AudioCoreFFmpegStreamDecoder *decoder,
+  float **samples,
+  int64_t *sample_count,
+  int64_t *sample_capacity,
+  char **out_error_message
+) {
+  int64_t delay = swr_get_delay(decoder->swr_context, decoder->source_sample_rate);
+  int dst_nb_samples = (int)av_rescale_rnd(
+    delay,
+    decoder->target_sample_rate,
+    decoder->source_sample_rate,
+    AV_ROUND_UP
+  );
+  if (dst_nb_samples <= 0) {
+    return true;
+  }
+
+  uint8_t **converted_data = NULL;
+  int converted_linesize = 0;
+  int result = av_samples_alloc_array_and_samples(
+    &converted_data,
+    &converted_linesize,
+    decoder->channels,
+    dst_nb_samples,
+    AV_SAMPLE_FMT_FLT,
+    0
+  );
+  if (result < 0 || converted_data == NULL) {
+    set_av_error(out_error_message, result, "failed to allocate resample flush buffer");
+    if (converted_data != NULL) {
+      av_freep(&converted_data[0]);
+      av_freep(&converted_data);
+    }
+    return false;
+  }
+
+  int converted_frames = swr_convert(
+    decoder->swr_context,
+    converted_data,
+    dst_nb_samples,
+    NULL,
+    0
+  );
+  if (converted_frames < 0) {
+    set_av_error(out_error_message, converted_frames, "failed to flush resampler");
+    av_freep(&converted_data[0]);
+    av_freep(&converted_data);
+    return false;
+  }
+
   int64_t produced_samples = (int64_t)converted_frames * decoder->channels;
   if (!append_samples(
         samples,
@@ -183,7 +315,7 @@ static bool append_decoded_frame(
         (const float *)converted_data[0],
         produced_samples
       )) {
-    set_error(out_error_message, "failed to append decoded samples");
+    set_error(out_error_message, "failed to append flushed resample samples");
     av_freep(&converted_data[0]);
     av_freep(&converted_data);
     return false;
@@ -288,6 +420,10 @@ static bool open_stream_decoder(
   if (channels <= 0) {
     channels = 2;
   }
+  if (channels > AUDIO_CORE_MAX_CHANNELS) {
+    set_error(out_error_message, "unsupported audio channel count: %d", channels);
+    goto cleanup;
+  }
 
   int target_rate = (int)lrint(target_sample_rate > 0 ? target_sample_rate : source_sample_rate);
   if (target_rate <= 0) {
@@ -385,6 +521,11 @@ static bool open_stream_decoder(
   decoder->channels = channels;
   decoder->target_sample_rate = target_rate;
   decoder->frame_count = total_frame_count;
+  decoder->seek_target_frame = start_frame > 0 ? start_frame : -1;
+  decoder->input_eof = false;
+  decoder->decoder_flushing = false;
+  decoder->resampler_flushing = false;
+  decoder->drain_pending = false;
   decoder->finished = false;
   format_context = NULL;
   codec_context = NULL;
@@ -430,6 +571,86 @@ bool audio_core_ffmpeg_open_stream(
   );
 }
 
+static bool flush_stream_resampler(
+  AudioCoreFFmpegStreamDecoder *decoder,
+  int64_t max_frames,
+  float **samples,
+  int64_t *sample_count,
+  int64_t *sample_capacity,
+  char **out_error_message
+) {
+  decoder->resampler_flushing = true;
+  while (*sample_count / decoder->channels < max_frames) {
+    int64_t before = *sample_count;
+    if (!append_swr_flush(decoder, samples, sample_count, sample_capacity, out_error_message)) {
+      return false;
+    }
+    if (*sample_count == before) {
+      decoder->resampler_flushing = false;
+      decoder->finished = true;
+      return true;
+    }
+  }
+  return true;
+}
+
+static bool receive_stream_frames(
+  AudioCoreFFmpegStreamDecoder *decoder,
+  int64_t max_frames,
+  float **samples,
+  int64_t *sample_count,
+  int64_t *sample_capacity,
+  char **out_error_message
+) {
+  for (;;) {
+    if (*sample_count / decoder->channels >= max_frames) {
+      decoder->drain_pending = true;
+      return true;
+    }
+
+    int result = avcodec_receive_frame(decoder->codec_context, decoder->frame);
+    if (result == AVERROR(EAGAIN)) {
+      decoder->drain_pending = false;
+      return true;
+    }
+    if (result == AVERROR_EOF) {
+      decoder->drain_pending = false;
+      decoder->decoder_flushing = false;
+      return flush_stream_resampler(
+        decoder,
+        max_frames,
+        samples,
+        sample_count,
+        sample_capacity,
+        out_error_message
+      );
+    }
+    if (result < 0) {
+      if (is_ignorable_decode_error(result)) {
+        recover_from_decode_error(decoder->codec_context, decoder->frame);
+        decoder->drain_pending = false;
+        return true;
+      }
+      set_av_error(out_error_message, result, "failed to receive decoded frame");
+      return false;
+    }
+
+    if (!append_decoded_frame(
+          decoder,
+          decoder->frame,
+          samples,
+          sample_count,
+          sample_capacity,
+          out_error_message
+        )) {
+      av_frame_unref(decoder->frame);
+      return false;
+    }
+
+    av_frame_unref(decoder->frame);
+  }
+}
+
 bool audio_core_ffmpeg_decode_stream_chunk(
   void *decoder_ptr,
   int64_t max_frames,
@@ -460,16 +681,59 @@ bool audio_core_ffmpeg_decode_stream_chunk(
   int64_t sample_capacity = 0;
   int result = 0;
   bool success = false;
-  bool reached_input_eof = false;
+
+  if (decoder->resampler_flushing) {
+    if (!flush_stream_resampler(
+          decoder,
+          max_frames,
+          &samples,
+          &sample_count,
+          &sample_capacity,
+          out_error_message
+        )) {
+      goto cleanup;
+    }
+  }
+
+  if (!decoder->finished && (decoder->drain_pending || decoder->decoder_flushing)) {
+    if (!receive_stream_frames(
+          decoder,
+          max_frames,
+          &samples,
+          &sample_count,
+          &sample_capacity,
+          out_error_message
+        )) {
+      goto cleanup;
+    }
+  }
 
   for (;;) {
-    if (sample_count / decoder->channels >= max_frames) {
+    if (decoder->finished || sample_count / decoder->channels >= max_frames) {
       break;
     }
 
     result = av_read_frame(decoder->format_context, decoder->packet);
     if (result == AVERROR_EOF) {
-      reached_input_eof = true;
+      decoder->input_eof = true;
+      decoder->decoder_flushing = true;
+      result = avcodec_send_packet(decoder->codec_context, NULL);
+      if (result < 0 && result != AVERROR_EOF) {
+        if (!is_ignorable_decode_error(result)) {
+          set_av_error(out_error_message, result, "failed to flush decoder");
+          goto cleanup;
+        }
+      }
+      if (!receive_stream_frames(
+            decoder,
+            max_frames,
+            &samples,
+            &sample_count,
+            &sample_capacity,
+            out_error_message
+          )) {
+        goto cleanup;
+      }
       break;
     }
     if (result < 0) {
@@ -497,79 +761,15 @@ bool audio_core_ffmpeg_decode_stream_chunk(
       goto cleanup;
     }
 
-    for (;;) {
-      result = avcodec_receive_frame(decoder->codec_context, decoder->frame);
-      if (result == AVERROR(EAGAIN) || result == AVERROR_EOF) {
-        break;
-      }
-      if (result < 0) {
-        if (is_ignorable_decode_error(result)) {
-          recover_from_decode_error(decoder->codec_context, decoder->frame);
-          break;
-        }
-        set_av_error(out_error_message, result, "failed to receive decoded frame");
-        goto cleanup;
-      }
-
-      if (!append_decoded_frame(
-            decoder,
-            decoder->frame,
-            &samples,
-            &sample_count,
-            &sample_capacity,
-            out_error_message
-          )) {
-        goto cleanup;
-      }
-
-      av_frame_unref(decoder->frame);
-      if (sample_count / decoder->channels >= max_frames) {
-        break;
-      }
-    }
-  }
-
-  if (reached_input_eof) {
-    result = avcodec_send_packet(decoder->codec_context, NULL);
-    if (result < 0 && result != AVERROR_EOF) {
-      if (!is_ignorable_decode_error(result)) {
-        set_av_error(out_error_message, result, "failed to flush decoder");
-        goto cleanup;
-      }
-    }
-
-    for (;;) {
-      result = avcodec_receive_frame(decoder->codec_context, decoder->frame);
-      if (result == AVERROR_EOF || result == AVERROR(EAGAIN)) {
-        if (result == AVERROR_EOF) {
-          decoder->finished = true;
-        }
-        break;
-      }
-      if (result < 0) {
-        if (is_ignorable_decode_error(result)) {
-          recover_from_decode_error(decoder->codec_context, decoder->frame);
-          break;
-        }
-        set_av_error(out_error_message, result, "failed to receive flushed frame");
-        goto cleanup;
-      }
-
-      if (!append_decoded_frame(
-            decoder,
-            decoder->frame,
-            &samples,
-            &sample_count,
-            &sample_capacity,
-            out_error_message
-          )) {
-        goto cleanup;
-      }
-
-      av_frame_unref(decoder->frame);
-      if (sample_count / decoder->channels >= max_frames) {
-        break;
-      }
+    if (!receive_stream_frames(
+          decoder,
+          max_frames,
+          &samples,
+          &sample_count,
+          &sample_capacity,
+          out_error_message
+        )) {
+      goto cleanup;
     }
   }
 
@@ -686,6 +886,10 @@ bool audio_core_ffmpeg_decode_pcm(
     : audio_stream->codecpar->ch_layout.nb_channels;
   if (channels <= 0) {
     channels = 2;
+  }
+  if (channels > AUDIO_CORE_MAX_CHANNELS) {
+    set_error(out_error_message, "unsupported audio channel count: %d", channels);
+    goto cleanup;
   }
 
   if (codec_context->ch_layout.nb_channels > 0) {
@@ -926,6 +1130,27 @@ bool audio_core_ffmpeg_decode_pcm(
     av_freep(&converted_data[0]);
     av_freep(&converted_data);
     av_frame_unref(frame);
+  }
+
+  AudioCoreFFmpegStreamDecoder flush_decoder = {0};
+  flush_decoder.swr_context = swr_context;
+  flush_decoder.source_sample_rate = sample_rate;
+  flush_decoder.target_sample_rate = sample_rate;
+  flush_decoder.channels = channels;
+  for (;;) {
+    int64_t before = sample_count;
+    if (!append_swr_flush(
+          &flush_decoder,
+          &samples,
+          &sample_count,
+          &sample_capacity,
+          out_error_message
+        )) {
+      goto cleanup;
+    }
+    if (sample_count == before) {
+      break;
+    }
   }
 
   out_pcm->samples = samples;
