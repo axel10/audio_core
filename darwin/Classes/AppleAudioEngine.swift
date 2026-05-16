@@ -52,6 +52,7 @@ final class AppleAudioEngine {
   var pendingFftFrames: [[Double]] = []
   var fftTapCount: Int = 0
   var fftLastTapAtMs: Double?
+  var fftLastFetchAtMs: Double?
   var isFftTapInstalled = false
   var fftProcessingGeneration: UInt64 = 0
 

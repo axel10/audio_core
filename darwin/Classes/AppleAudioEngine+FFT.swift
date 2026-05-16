@@ -127,9 +127,30 @@ extension AppleAudioEngine {
     // quantized/stale even while the tap is producing newer data.
     fftResultLock.lock()
     defer { fftResultLock.unlock() }
-    if !pendingFftFrames.isEmpty {
-      latestRawFft = pendingFftFrames.removeFirst()
+    
+    let now = currentTimestampMs()
+    let frameDurationMs = (Double(fftHopSize) / playbackSampleRate()) * 1000.0
+    
+    if let lastFetch = fftLastFetchAtMs, now - lastFetch < 500 {
+      let elapsed = now - lastFetch
+      let framesToConsume = Int(elapsed / frameDurationMs)
+      
+      if framesToConsume > 0 {
+        let toRemove = min(framesToConsume, pendingFftFrames.count)
+        if toRemove > 0 {
+          latestRawFft = pendingFftFrames[toRemove - 1]
+          pendingFftFrames.removeFirst(toRemove)
+        }
+        // Advance time by the exact discrete amount represented by consumed frames
+        fftLastFetchAtMs = lastFetch + (Double(framesToConsume) * frameDurationMs)
+      }
+    } else {
+      if !pendingFftFrames.isEmpty {
+        latestRawFft = pendingFftFrames.removeFirst()
+      }
+      fftLastFetchAtMs = now
     }
+    
     return latestRawFft
   }
 
@@ -141,6 +162,7 @@ extension AppleAudioEngine {
     latestRawTapMagnitudes = Array(repeating: 0.0, count: fftBinCount)
     fftAnalysisRemainder.removeAll(keepingCapacity: true)
     pendingFftFrames.removeAll(keepingCapacity: true)
+    fftLastFetchAtMs = nil
     fftResultLock.unlock()
     fftTapCount = 0
     fftLastTapAtMs = nil
