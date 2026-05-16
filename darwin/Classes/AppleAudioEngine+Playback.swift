@@ -20,7 +20,7 @@ extension AppleAudioEngine {
       "[AppleAudioEngine] load access ready path=\(path) elapsedMs=\(String(format: "%.1f", acquireDoneMs - startMs))"
     )
     try loadAsset(into: currentDeck, from: url)
-    preparedAccessPaths.remove(url.path)
+    removePreparedAccessPath(url.path)
     debugPrint(
       "[AppleAudioEngine] load done path=\(path) sampleRate=\(currentDeck.sampleRate) " +
       "length=\(currentDeck.frameCount) elapsedMs=\(String(format: "%.1f", currentTimestampMs() - startMs)) " +

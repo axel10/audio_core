@@ -263,6 +263,11 @@ struct AppleFFmpegDecodedAudio {
   }
 }
 
+struct AppleFFmpegStreamChunk {
+  let audio: AppleFFmpegDecodedAudio
+  let isEOF: Bool
+}
+
 final class AppleFFmpegStreamAudio {
   private let path: String
   var sourcePath: String { path }
@@ -320,7 +325,7 @@ final class AppleFFmpegStreamAudio {
     return chunk
   }
 
-  func nextChunk(maxFrames: Int) throws -> AppleFFmpegDecodedAudio? {
+  func nextChunkInfo(maxFrames: Int) throws -> AppleFFmpegStreamChunk? {
     guard let decoder else { return nil }
 
     var decodedPCM = AudioCoreFFmpegDecodedPCM(
@@ -353,9 +358,6 @@ final class AppleFFmpegStreamAudio {
     }
 
     guard let samples = decodedPCM.samples else {
-      if isEOF {
-        return nil
-      }
       return nil
     }
 
@@ -370,7 +372,12 @@ final class AppleFFmpegStreamAudio {
     if chunk.frameCount == 0 && isEOF {
       return nil
     }
-    return chunk
+
+    return AppleFFmpegStreamChunk(audio: chunk, isEOF: isEOF)
+  }
+
+  func nextChunk(maxFrames: Int) throws -> AppleFFmpegDecodedAudio? {
+    return try nextChunkInfo(maxFrames: maxFrames)?.audio
   }
 
   private func open(targetSampleRate: Double, startFrame: AVAudioFramePosition) throws {

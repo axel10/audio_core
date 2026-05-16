@@ -3,6 +3,7 @@ import Foundation
 final class SecurityScopedBookmarkStore {
   private let storageKey = "audio_core.securityScopedBookmarks"
   private var bookmarks: [String: Data]
+  private let stateQueue = DispatchQueue(label: "audio_core.security_scoped_bookmark_store")
 
   init() {
     if let stored = UserDefaults.standard.dictionary(forKey: storageKey) as? [String: Data] {
@@ -16,36 +17,86 @@ final class SecurityScopedBookmarkStore {
     let candidateURL = Self.url(from: path)
     let key = Self.bookmarkKey(for: candidateURL)
 
-    guard let bookmarkData = bookmarks[key] else {
-      return candidateURL
+    return try stateQueue.sync {
+      guard let bookmarkData = bookmarks[key] else {
+        return candidateURL
+      }
+
+      var isStale = false
+      #if os(macOS)
+      let resolvedURL = try URL(
+        resolvingBookmarkData: bookmarkData,
+        options: [.withSecurityScope],
+        relativeTo: nil,
+        bookmarkDataIsStale: &isStale
+      )
+      #else
+      let resolvedURL = try URL(
+        resolvingBookmarkData: bookmarkData,
+        options: [],
+        relativeTo: nil,
+        bookmarkDataIsStale: &isStale
+      )
+      #endif
+
+      if isStale {
+        _ = rememberLocked(url: resolvedURL)
+      }
+
+      return resolvedURL
     }
-
-    var isStale = false
-    #if os(macOS)
-    let resolvedURL = try URL(
-      resolvingBookmarkData: bookmarkData,
-      options: [.withSecurityScope],
-      relativeTo: nil,
-      bookmarkDataIsStale: &isStale
-    )
-    #else
-    let resolvedURL = try URL(
-      resolvingBookmarkData: bookmarkData,
-      options: [],
-      relativeTo: nil,
-      bookmarkDataIsStale: &isStale
-    )
-    #endif
-
-    if isStale {
-      remember(url: resolvedURL)
-    }
-
-    return resolvedURL
   }
 
   @discardableResult
   func remember(url: URL) -> Bool {
+    guard url.isFileURL else { return false }
+
+    return stateQueue.sync {
+      do {
+      #if os(macOS)
+      let bookmarkData = try url.bookmarkData(
+        options: [.withSecurityScope],
+        includingResourceValuesForKeys: nil,
+        relativeTo: nil
+      )
+      #else
+      let bookmarkData = try url.bookmarkData(
+        options: [],
+        includingResourceValuesForKeys: nil,
+        relativeTo: nil
+      )
+      #endif
+        bookmarks[Self.bookmarkKey(for: url)] = bookmarkData
+        UserDefaults.standard.set(bookmarks, forKey: storageKey)
+        return true
+      } catch {
+        return false
+      }
+    }
+  }
+
+  func hasBookmark(for path: String) -> Bool {
+    let url = Self.url(from: path)
+    return stateQueue.sync {
+      bookmarks[Self.bookmarkKey(for: url)] != nil
+    }
+  }
+
+  func storedPaths() -> [String] {
+    stateQueue.sync {
+      bookmarks.keys.sorted()
+    }
+  }
+
+  func forget(path: String) {
+    let key = Self.bookmarkKey(for: Self.url(from: path))
+    stateQueue.sync {
+      bookmarks.removeValue(forKey: key)
+      UserDefaults.standard.set(bookmarks, forKey: storageKey)
+    }
+  }
+
+  private func rememberLocked(url: URL) -> Bool {
     guard url.isFileURL else { return false }
 
     do {
@@ -70,21 +121,6 @@ final class SecurityScopedBookmarkStore {
     }
   }
 
-  func hasBookmark(for path: String) -> Bool {
-    let url = Self.url(from: path)
-    return bookmarks[Self.bookmarkKey(for: url)] != nil
-  }
-
-  func storedPaths() -> [String] {
-    bookmarks.keys.sorted()
-  }
-
-  func forget(path: String) {
-    let key = Self.bookmarkKey(for: Self.url(from: path))
-    bookmarks.removeValue(forKey: key)
-    UserDefaults.standard.set(bookmarks, forKey: storageKey)
-  }
-
   private static func url(from path: String) -> URL {
     let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmed.hasPrefix("file://"), let url = URL(string: trimmed) {
@@ -103,6 +139,7 @@ final class SecurityScopedFileAccessCoordinator {
   private var activeAccessCounts: [String: Int] = [:]
   private var activeAccessURLs: [String: URL] = [:]
   private var startedSecurityScope: [String: Bool] = [:]
+  private let stateQueue = DispatchQueue(label: "audio_core.security_scoped_file_access")
 
   func resolveURL(for path: String) throws -> URL {
     try bookmarkStore.resolveURL(for: path)
@@ -112,13 +149,16 @@ final class SecurityScopedFileAccessCoordinator {
     let url = try resolveURL(for: path)
     let key = Self.key(for: url)
 
-    if activeAccessCounts[key] == nil {
-      activeAccessCounts[key] = 0
-      activeAccessURLs[key] = url
-      startedSecurityScope[key] = url.startAccessingSecurityScopedResource()
+    stateQueue.sync {
+      if activeAccessCounts[key] == nil {
+        activeAccessCounts[key] = 0
+        activeAccessURLs[key] = url
+        startedSecurityScope[key] = url.startAccessingSecurityScopedResource()
+      }
+
+      activeAccessCounts[key, default: 0] += 1
     }
 
-    activeAccessCounts[key, default: 0] += 1
     _ = bookmarkStore.remember(url: url)
     return url
   }
@@ -135,7 +175,9 @@ final class SecurityScopedFileAccessCoordinator {
 
   func forgetPersistentAccess(for path: String) {
     let key = Self.key(forPath: path)
-    releaseAllAccess(forKey: key)
+    stateQueue.sync {
+      releaseAllAccessLocked(forKey: key)
+    }
     bookmarkStore.forget(path: path)
   }
 
@@ -149,17 +191,24 @@ final class SecurityScopedFileAccessCoordinator {
 
   func releaseAccess(for path: String) {
     let key = Self.key(forPath: path)
-    releaseAccess(forKey: key)
+    stateQueue.sync {
+      releaseAccessLocked(forKey: key)
+    }
   }
 
   func releaseAccess(for url: URL) {
-    releaseAccess(forKey: Self.key(for: url))
+    let key = Self.key(for: url)
+    stateQueue.sync {
+      releaseAccessLocked(forKey: key)
+    }
   }
 
   func releaseAllAccess() {
-    let keys = Array(activeAccessCounts.keys)
-    for key in keys {
-      releaseAllAccess(forKey: key)
+    stateQueue.sync {
+      let keys = Array(activeAccessCounts.keys)
+      for key in keys {
+        releaseAllAccessLocked(forKey: key)
+      }
     }
   }
 
@@ -169,7 +218,7 @@ final class SecurityScopedFileAccessCoordinator {
     return try body(url)
   }
 
-  private func releaseAccess(forKey key: String) {
+  private func releaseAccessLocked(forKey key: String) {
     guard let count = activeAccessCounts[key] else { return }
 
     let nextCount = count - 1
@@ -178,10 +227,10 @@ final class SecurityScopedFileAccessCoordinator {
       return
     }
 
-    releaseAllAccess(forKey: key)
+    releaseAllAccessLocked(forKey: key)
   }
 
-  private func releaseAllAccess(forKey key: String) {
+  private func releaseAllAccessLocked(forKey key: String) {
     if startedSecurityScope[key] == true, let url = activeAccessURLs[key] {
       url.stopAccessingSecurityScopedResource()
     }

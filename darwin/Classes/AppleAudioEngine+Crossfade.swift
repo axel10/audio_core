@@ -264,7 +264,7 @@ extension AppleAudioEngine {
     incomingDeck.playerNode.volume = Float(latestVolume)
     incomingDeck.playbackFramePosition = incomingDeck.currentPlaybackFramePosition()
     if let currentURL = incomingDeck.loadedURL {
-      preparedAccessPaths.remove(currentURL.path)
+      removePreparedAccessPath(currentURL.path)
     }
 
     debugPrint(

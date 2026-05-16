@@ -40,6 +40,7 @@ final class AppleAudioEngine {
   var fadeTimer: Timer?
   var fadeGeneration: UInt64 = 0
   var preparedAccessPaths = Set<String>()
+  private let preparedAccessPathsLock = NSLock()
   var isEngineConfigured = false
   var fftGroupingConfig = AppleFftGroupingConfig()
   let fftSetup: FFTSetup?
@@ -140,5 +141,29 @@ final class AppleAudioEngine {
         deck.loadedFFmpegStream?.close()
       }
     }
+  }
+
+  func isPreparedAccessPath(_ path: String) -> Bool {
+    preparedAccessPathsLock.lock()
+    defer { preparedAccessPathsLock.unlock() }
+    return preparedAccessPaths.contains(path)
+  }
+
+  func insertPreparedAccessPath(_ path: String) {
+    preparedAccessPathsLock.lock()
+    preparedAccessPaths.insert(path)
+    preparedAccessPathsLock.unlock()
+  }
+
+  func removePreparedAccessPath(_ path: String) {
+    preparedAccessPathsLock.lock()
+    preparedAccessPaths.remove(path)
+    preparedAccessPathsLock.unlock()
+  }
+
+  func clearPreparedAccessPaths() {
+    preparedAccessPathsLock.lock()
+    preparedAccessPaths.removeAll()
+    preparedAccessPathsLock.unlock()
   }
 }

@@ -4,19 +4,19 @@ extension AppleAudioEngine {
   func prepareForFileWrite(path: String? = nil) throws {
     if let path {
       let normalizedPath = normalizedFilePath(path)
-      if preparedAccessPaths.contains(normalizedPath) {
+      if isPreparedAccessPath(normalizedPath) {
         return
       }
 
       if currentDeck.loadedURL?.path != normalizedPath {
         _ = try fileAccess.acquireAccess(for: normalizedPath)
-        preparedAccessPaths.insert(normalizedPath)
+        insertPreparedAccessPath(normalizedPath)
         return
       }
     }
 
     guard let path = currentDeck.loadedURL?.path else { return }
-    if preparedAccessPaths.contains(path) {
+    if isPreparedAccessPath(path) {
       return
     }
 
@@ -31,7 +31,7 @@ extension AppleAudioEngine {
     )
     stopPlayback(releasingFile: true, preservePosition: true)
     _ = try fileAccess.acquireAccess(for: path)
-    preparedAccessPaths.insert(path)
+    insertPreparedAccessPath(path)
   }
 
   func prepareForFileWrite(paths: [String]) throws {
@@ -50,7 +50,7 @@ extension AppleAudioEngine {
       let normalizedPath = normalizedFilePath(path)
       if currentDeck.loadedURL?.path != normalizedPath {
         fileAccess.releaseAccess(for: normalizedPath)
-        preparedAccessPaths.remove(normalizedPath)
+        removePreparedAccessPath(normalizedPath)
         return
       }
     }
@@ -63,7 +63,7 @@ extension AppleAudioEngine {
       try play(fadeDurationMs: 0, targetVolume: pendingEdit.volume)
     }
     self.pendingEdit = nil
-    preparedAccessPaths.remove(pendingEdit.path)
+    removePreparedAccessPath(pendingEdit.path)
   }
 
   func finishFileWrite(paths: [String]) throws {
@@ -110,7 +110,7 @@ extension AppleAudioEngine {
     fadeTimer?.invalidate()
     fadeTimer = nil
     pendingEdit = nil
-    preparedAccessPaths.removeAll()
+    clearPreparedAccessPaths()
     stopPlayback(releasingFile: true, preservePosition: false)
     fileAccess.releaseAllAccess()
     currentDeck.loadedURL = nil
