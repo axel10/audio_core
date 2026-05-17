@@ -137,15 +137,12 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     case "seek":
       let positionMs = Self.readInt(call.arguments, key: "position") ?? 0
       debugPrint("[AudioCorePlugin] method=seek positionMs=\(positionMs)")
-      do {
-        try engine.seek(positionMs: positionMs)
-        sendPlayerState()
-        emitLatestFftSnapshot()
-        result(nil)
-      } catch {
-        sendPlayerState(error: error.localizedDescription)
-        result(FlutterError(code: "SEEK_FAILED", message: error.localizedDescription, details: nil))
+      guard engine.publicDeck() != nil else {
+        result(FlutterError(code: "SEEK_FAILED", message: "audio is not loaded", details: nil))
+        return
       }
+      engine.requestSeek(positionMs: positionMs)
+      result(nil)
 
     case "setVolume":
       let volume = Self.readDouble(call.arguments, key: "volume") ?? 1.0

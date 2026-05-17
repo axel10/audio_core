@@ -22,6 +22,9 @@ final class AppleAudioEngine {
   let ffmpegPlaybackLookaheadBuffers = 6
   let ffmpegPlaybackQueue = DispatchQueue(label: "audio_core.ffmpeg.playback", qos: .userInitiated)
   let ffmpegPlaybackQueueKey = DispatchSpecificKey<Void>()
+  let playbackControlQueue = DispatchQueue(label: "audio_core.playback.control", qos: .userInitiated)
+  let playbackControlQueueKey = DispatchSpecificKey<Void>()
+  let seekStateLock = NSLock()
   let fftProcessingQueue = DispatchQueue(label: "audio_core.fft.processing", qos: .userInitiated)
   let waveformRmsWindowsPerChunk = 8
   let waveformPrecisionScale = 100.0
@@ -37,6 +40,8 @@ final class AppleAudioEngine {
   var latestVolume: Double = 1.0
   var latestEqualizerConfig = AppleEqualizerCodec.defaultConfig()
   var pendingEdit: PendingEdit?
+  var pendingSeekPositionMs: Int?
+  var isSeekProcessing = false
   var fadeTimer: Timer?
   var fadeGeneration: UInt64 = 0
   var preparedAccessPaths = Set<String>()
@@ -66,6 +71,7 @@ final class AppleAudioEngine {
     self.latestRawFft = Array(repeating: 0.0, count: fftBinCount)
     self.latestRawTapMagnitudes = Array(repeating: 0.0, count: fftBinCount)
     ffmpegPlaybackQueue.setSpecific(key: ffmpegPlaybackQueueKey, value: ())
+    playbackControlQueue.setSpecific(key: playbackControlQueueKey, value: ())
     configureEngineIfNeeded()
     applyEqualizerConfig(latestEqualizerConfig)
   }
@@ -129,6 +135,18 @@ final class AppleAudioEngine {
       return work()
     }
     return ffmpegPlaybackQueue.sync(execute: work)
+  }
+
+  func syncOnPlaybackControlQueue(_ work: () -> Void) {
+    if DispatchQueue.getSpecific(key: playbackControlQueueKey) != nil {
+      work()
+      return
+    }
+    playbackControlQueue.sync(execute: work)
+  }
+
+  func asyncOnPlaybackControlQueue(_ work: @escaping () -> Void) {
+    playbackControlQueue.async(execute: work)
   }
 
   func drainDeckFfmpegPlaybackState(_ deck: PlaybackDeck, releasingFile: Bool) {

@@ -97,6 +97,74 @@ extension AppleAudioEngine {
       "[AppleAudioEngine] seek request positionMs=\(positionMs) " +
       "public=\(publicURL()?.path ?? "nil")"
     )
+    try performSeek(positionMs: positionMs)
+    DispatchQueue.main.async { [weak self] in
+      self?.emitPlayerState()
+    }
+    debugPrint(
+      "[AppleAudioEngine] seek applied positionMs=\(positionMs) " +
+      "public=\(publicURL()?.path ?? "nil")"
+    )
+  }
+
+  func requestSeek(positionMs: Int) {
+    // Keep only the newest requested position. The worker runs off the main
+    // thread so rapid scrubbing does not block the Flutter channel callback.
+    var shouldScheduleWorker = false
+    seekStateLock.lock()
+    pendingSeekPositionMs = positionMs
+    if !isSeekProcessing {
+      isSeekProcessing = true
+      shouldScheduleWorker = true
+    }
+    seekStateLock.unlock()
+
+    guard shouldScheduleWorker else { return }
+    asyncOnPlaybackControlQueue { [weak self] in
+      self?.drainPendingSeekRequests()
+    }
+  }
+
+  private func drainPendingSeekRequests() {
+    while true {
+      let nextPositionMs: Int?
+      seekStateLock.lock()
+      nextPositionMs = pendingSeekPositionMs
+      pendingSeekPositionMs = nil
+      seekStateLock.unlock()
+
+      guard let nextPositionMs else { break }
+      do {
+        try performSeek(positionMs: nextPositionMs)
+        DispatchQueue.main.async { [weak self] in
+          self?.emitPlayerState()
+        }
+      } catch {
+        DispatchQueue.main.async { [weak self] in
+          self?.emitPlayerState(error: error.localizedDescription)
+        }
+      }
+    }
+
+    var shouldReschedule = false
+    seekStateLock.lock()
+    shouldReschedule = pendingSeekPositionMs != nil
+    if !shouldReschedule {
+      isSeekProcessing = false
+    }
+    seekStateLock.unlock()
+
+    guard shouldReschedule else { return }
+    asyncOnPlaybackControlQueue { [weak self] in
+      self?.drainPendingSeekRequests()
+    }
+  }
+
+  private func performSeek(positionMs: Int) throws {
+    debugPrint(
+      "[AppleAudioEngine] performSeek start positionMs=\(positionMs) " +
+      "public=\(publicURL()?.path ?? "nil")"
+    )
     guard let currentDeck = publicDeck() else {
       throw NSError(
         domain: "AudioCore",
@@ -115,7 +183,7 @@ extension AppleAudioEngine {
       try startPlaybackIfNeeded(on: currentDeck, from: clampedFrame, volume: latestVolume)
     }
     debugPrint(
-      "[AppleAudioEngine] seek applied positionMs=\(positionMs) frame=\(clampedFrame) " +
+      "[AppleAudioEngine] performSeek done positionMs=\(positionMs) frame=\(clampedFrame) " +
       "wasPlaying=\(wasPlaying)"
     )
   }
