@@ -97,7 +97,7 @@ extension AppleAudioEngine {
       "[AppleAudioEngine] seek request positionMs=\(positionMs) " +
       "public=\(publicURL()?.path ?? "nil")"
     )
-    try performSeek(positionMs: positionMs)
+    try executeSeek(positionMs: positionMs)
     DispatchQueue.main.async { [weak self] in
       self?.emitPlayerState()
     }
@@ -135,7 +135,7 @@ extension AppleAudioEngine {
 
       guard let nextPositionMs else { break }
       do {
-        try performSeek(positionMs: nextPositionMs)
+        try executeSeek(positionMs: nextPositionMs)
         DispatchQueue.main.async { [weak self] in
           self?.emitPlayerState()
         }
@@ -158,6 +158,32 @@ extension AppleAudioEngine {
     asyncOnPlaybackControlQueue { [weak self] in
       self?.drainPendingSeekRequests()
     }
+  }
+
+  private func executeSeek(positionMs: Int) throws {
+    #if os(iOS)
+    if Thread.isMainThread {
+      debugPrint("[AppleAudioEngine] executeSeek thread=main")
+      try performSeek(positionMs: positionMs)
+      return
+    }
+
+    debugPrint("[AppleAudioEngine] executeSeek thread=background->main")
+    var capturedError: Error?
+    DispatchQueue.main.sync {
+      do {
+        try performSeek(positionMs: positionMs)
+      } catch {
+        capturedError = error
+      }
+    }
+    if let capturedError {
+      throw capturedError
+    }
+    #else
+    debugPrint("[AppleAudioEngine] executeSeek thread=\(Thread.isMainThread ? "main" : "background")")
+    try performSeek(positionMs: positionMs)
+    #endif
   }
 
   private func performSeek(positionMs: Int) throws {

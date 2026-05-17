@@ -22,6 +22,11 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
   private var fftEmitCount = 0
   private var fftLastEmitAtMs: Double?
   private let loadQueue = DispatchQueue(label: "audio_core.plugin.load", qos: .userInitiated)
+  private let seekDebounceQueue = DispatchQueue(label: "audio_core.plugin.seek.debounce", qos: .userInitiated)
+  private let seekDebounceLock = NSLock()
+  private var seekDebounceWorkItem: DispatchWorkItem?
+  private var pendingSeekPositionMs: Int?
+  private let seekDebounceDelay: DispatchTimeInterval = .milliseconds(100)
 
   public override init() {
     self.engine = AppleAudioEngine(fileAccess: fileAccess)
@@ -61,6 +66,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       result(nil)
 
     case "load":
+      cancelPendingSeekDebounce()
       guard let args = call.arguments as? [String: Any],
             let path = args["url"] as? String else {
         result(FlutterError(code: "INVALID_ARGUMENT", message: "URL is null", details: nil))
@@ -84,6 +90,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       }
 
     case "crossfade":
+      cancelPendingSeekDebounce()
       guard let args = call.arguments as? [String: Any],
             let path = args["path"] as? String else {
         result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
@@ -141,7 +148,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         result(FlutterError(code: "SEEK_FAILED", message: "audio is not loaded", details: nil))
         return
       }
-      engine.requestSeek(positionMs: positionMs)
+      scheduleSeekDebounce(positionMs: positionMs)
       result(nil)
 
     case "setVolume":
@@ -395,6 +402,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       result(nil)
 
     case "dispose":
+      cancelPendingSeekDebounce()
       engine.dispose()
       result(nil)
 
@@ -430,6 +438,39 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       "onPlayerStateChanged",
       arguments: engine.statusPayload(playbackState: playbackState, error: error)
     )
+  }
+
+  private func scheduleSeekDebounce(positionMs: Int) {
+    var workItem: DispatchWorkItem?
+    seekDebounceLock.lock()
+    pendingSeekPositionMs = positionMs
+    seekDebounceWorkItem?.cancel()
+
+    workItem = DispatchWorkItem { [weak self] in
+      guard let self = self else { return }
+      let latestPositionMs: Int?
+      self.seekDebounceLock.lock()
+      latestPositionMs = self.pendingSeekPositionMs
+      self.pendingSeekPositionMs = nil
+      self.seekDebounceWorkItem = nil
+      self.seekDebounceLock.unlock()
+
+      guard let latestPositionMs else { return }
+      self.engine.requestSeek(positionMs: latestPositionMs)
+    }
+    seekDebounceWorkItem = workItem
+    seekDebounceLock.unlock()
+
+    guard let workItem else { return }
+    seekDebounceQueue.asyncAfter(deadline: .now() + seekDebounceDelay, execute: workItem)
+  }
+
+  private func cancelPendingSeekDebounce() {
+    seekDebounceLock.lock()
+    seekDebounceWorkItem?.cancel()
+    seekDebounceWorkItem = nil
+    pendingSeekPositionMs = nil
+    seekDebounceLock.unlock()
   }
 
   private func emitLatestFftSnapshot() {
