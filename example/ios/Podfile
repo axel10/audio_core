@@ -83,4 +83,56 @@ post_install do |installer|
       end
     end
   end
+
+  # 3. Add a build phase to the Runner target to embed and sign the SPM frameworks at the app bundle level
+  runner_target = user_project.targets.find { |t| t.name == 'Runner' }
+  if runner_target
+    phase_name = 'Embed and Sign SPM Frameworks'
+    existing_phase = runner_target.shell_script_build_phases.find { |p| p.name == phase_name }
+    
+    script_content = <<-'SH'
+DEST="${BUILT_PRODUCTS_DIR}/${FRAMEWORKS_FOLDER_PATH}"
+echo "Embedding SPM binary frameworks into ${DEST}"
+mkdir -p "${DEST}"
+for fw in lame tta-cpp opus FLAC mpg123 mpc wavpack ogg sndfile vorbis; do
+  SRC_PATH=""
+  if [ -d "${BUILT_PRODUCTS_DIR}/${fw}.framework" ]; then
+    SRC_PATH="${BUILT_PRODUCTS_DIR}/${fw}.framework"
+  elif [ -d "${PODS_CONFIGURATION_BUILD_DIR}/${fw}.framework" ]; then
+    SRC_PATH="${PODS_CONFIGURATION_BUILD_DIR}/${fw}.framework"
+  elif [ -d "${BUILT_PRODUCTS_DIR}/audio_core/${fw}.framework" ]; then
+    SRC_PATH="${BUILT_PRODUCTS_DIR}/audio_core/${fw}.framework"
+  fi
+  
+  if [ -n "${SRC_PATH}" ]; then
+    echo "Copying ${fw}.framework from ${SRC_PATH} to ${DEST}"
+    cp -af "${SRC_PATH}" "${DEST}/"
+    if [ -n "${EXPANDED_CODE_SIGN_IDENTITY}" ]; then
+      echo "Codesigning ${fw}.framework with identity: ${EXPANDED_CODE_SIGN_IDENTITY}"
+      /usr/bin/codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" --timestamp=none --preserve-metadata=identifier,entitlements,flags "${DEST}/${fw}.framework"
+    else
+      echo "Codesigning ${fw}.framework with ad-hoc identity"
+      /usr/bin/codesign --force --sign - --timestamp=none --preserve-metadata=identifier,entitlements,flags "${DEST}/${fw}.framework"
+    fi
+  fi
+done
+SH
+
+    if existing_phase
+      existing_phase.shell_script = script_content
+    else
+      phase = runner_target.new_shell_script_build_phase(phase_name)
+      phase.shell_script = script_content
+      
+      # Move this build phase to run after the "[CP] Embed Pods Frameworks" phase
+      runner_target.build_phases.delete(phase)
+      embed_phase_index = runner_target.build_phases.index { |p| p.respond_to?(:name) && p.name =~ /Embed Pods Frameworks/ }
+      if embed_phase_index
+        runner_target.build_phases.insert(embed_phase_index + 1, phase)
+      else
+        runner_target.build_phases << phase
+      end
+    end
+    user_project.save
+  end
 end

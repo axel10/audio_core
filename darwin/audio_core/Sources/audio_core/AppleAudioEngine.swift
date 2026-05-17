@@ -1209,6 +1209,9 @@ extension AppleAudioEngine {
     let sampleRate = playbackSampleRate()
     let frameDurationMs = (Double(fftHopSize) / sampleRate) * 1000.0
 
+    fftResultLock.lock()
+    defer { fftResultLock.unlock() }
+
     if let lastFetch = fftLastFetchAtMs, now - lastFetch < 500 {
       let elapsed = now - lastFetch
       let framesToConsume = Int(elapsed / frameDurationMs)
@@ -1312,6 +1315,13 @@ extension AppleAudioEngine {
     defer { _ = try? decoder.close() }
 
     _ = try decoder.open()
+    debugPrint(
+      "[AppleAudioEngine] waveform decode start path=\(url.lastPathComponent) " +
+      "sampleRate=\(String(format: "%.1f", decoder.processingFormat.sampleRate)) " +
+      "channels=\(decoder.processingFormat.channelCount) " +
+      "commonFormat=\(decoder.processingFormat.commonFormat.rawValue) " +
+      "interleaved=\(decoder.processingFormat.isInterleaved)"
+    )
 
     let bufferCapacity: AVAudioFrameCount = 4096
     guard let buffer = AVAudioPCMBuffer(
@@ -1324,22 +1334,268 @@ extension AppleAudioEngine {
     var monoSamples: [Double] = []
     while true {
       try decoder.decode(into: buffer, length: bufferCapacity)
-      let frameLength = Int(buffer.frameLength)
-      guard frameLength > 0, let channelData = buffer.floatChannelData else {
+      guard buffer.frameLength > 0 else {
         break
       }
+//       debugPrint(
+//         "[AppleAudioEngine] waveform decode chunk frames=\(buffer.frameLength) " +
+//         "commonFormat=\(buffer.format.commonFormat.rawValue) " +
+//         "interleaved=\(buffer.format.isInterleaved)"
+//       )
+      appendMonoSamples(from: buffer, into: &monoSamples)
+    }
 
-      let channelCount = max(Int(buffer.format.channelCount), 1)
+    debugPrint(
+      "[AppleAudioEngine] waveform decode complete monoSamples=\(monoSamples.count) " +
+      "expectedChunks=\(expectedChunks)"
+    )
+
+    return processWaveform(samples: monoSamples, expectedChunks: expectedChunks)
+  }
+
+  private func appendMonoSamples(
+    from buffer: AVAudioPCMBuffer,
+    into monoSamples: inout [Double]
+  ) {
+    let frameLength = Int(buffer.frameLength)
+    guard frameLength > 0 else { return }
+
+    let channelCount = max(Int(buffer.format.channelCount), 1)
+
+    if buffer.format.commonFormat == .pcmFormatFloat32 {
+      if buffer.format.isInterleaved {
+        guard let rawData = buffer.audioBufferList.pointee.mBuffers.mData else { return }
+        let samples = rawData.assumingMemoryBound(to: Float.self)
+        for frame in 0..<frameLength {
+          var sum = 0.0
+          let baseIndex = frame * channelCount
+          for channel in 0..<channelCount {
+            sum += Double(samples[baseIndex + channel])
+          }
+          monoSamples.append(sum / Double(channelCount))
+        }
+      } else if let channelData = buffer.floatChannelData {
+        for frame in 0..<frameLength {
+          var sum = 0.0
+          for channel in 0..<channelCount {
+            sum += Double(channelData[channel][frame])
+          }
+          monoSamples.append(sum / Double(channelCount))
+        }
+      }
+      return
+    }
+
+    if buffer.format.commonFormat == .pcmFormatInt16 {
+      if buffer.format.isInterleaved {
+        guard let rawData = buffer.audioBufferList.pointee.mBuffers.mData else { return }
+        let samples = rawData.assumingMemoryBound(to: Int16.self)
+        for frame in 0..<frameLength {
+          var sum = 0.0
+          let baseIndex = frame * channelCount
+          for channel in 0..<channelCount {
+            sum += Double(samples[baseIndex + channel]) / Double(Int16.max)
+          }
+          monoSamples.append(sum / Double(channelCount))
+        }
+      } else if let channelData = buffer.int16ChannelData {
+        for frame in 0..<frameLength {
+          var sum = 0.0
+          for channel in 0..<channelCount {
+            sum += Double(channelData[channel][frame]) / Double(Int16.max)
+          }
+          monoSamples.append(sum / Double(channelCount))
+        }
+      }
+      return
+    }
+
+    if buffer.format.commonFormat == .pcmFormatInt32 {
+      if buffer.format.isInterleaved {
+        guard let rawData = buffer.audioBufferList.pointee.mBuffers.mData else { return }
+        let samples = rawData.assumingMemoryBound(to: Int32.self)
+        for frame in 0..<frameLength {
+          var sum = 0.0
+          let baseIndex = frame * channelCount
+          for channel in 0..<channelCount {
+            sum += Double(samples[baseIndex + channel]) / Double(Int32.max)
+          }
+          monoSamples.append(sum / Double(channelCount))
+        }
+      } else if let channelData = buffer.int32ChannelData {
+        for frame in 0..<frameLength {
+          var sum = 0.0
+          for channel in 0..<channelCount {
+            sum += Double(channelData[channel][frame]) / Double(Int32.max)
+          }
+          monoSamples.append(sum / Double(channelCount))
+        }
+      }
+      return
+    }
+
+    appendMonoSamplesFromUnknownPCM(from: buffer, into: &monoSamples)
+  }
+
+  private func appendMonoSamplesFromUnknownPCM(
+    from buffer: AVAudioPCMBuffer,
+    into monoSamples: inout [Double]
+  ) {
+    let frameLength = Int(buffer.frameLength)
+    guard frameLength > 0 else { return }
+
+    let formatDescription = buffer.format.streamDescription.pointee
+
+    let channelCount = max(Int(formatDescription.mChannelsPerFrame), 1)
+    let bitsPerChannel = Int(formatDescription.mBitsPerChannel)
+    let flags = formatDescription.mFormatFlags
+    let isFloat = (flags & kAudioFormatFlagIsFloat) != 0
+    let isSignedInteger = (flags & kAudioFormatFlagIsSignedInteger) != 0
+    let isNonInterleaved = (flags & kAudioFormatFlagIsNonInterleaved) != 0
+
+    if isNonInterleaved {
+      let audioBufferList = UnsafeMutablePointer(mutating: buffer.audioBufferList)
+      let audioBuffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
+      guard audioBuffers.count > 0 else {
+        debugPrint(
+          "[AppleAudioEngine] waveform decode empty noninterleaved buffer " +
+          "commonFormat=\(buffer.format.commonFormat.rawValue) " +
+          "bitsPerChannel=\(bitsPerChannel)"
+        )
+        return
+      }
+
+      if isFloat, bitsPerChannel == 32 {
+        for frame in 0..<frameLength {
+          var sum = 0.0
+          for channelIndex in 0..<min(channelCount, audioBuffers.count) {
+            guard let data = audioBuffers[channelIndex].mData else { return }
+            let samples: UnsafeMutablePointer<Float> = data.assumingMemoryBound(to: Float.self)
+            sum += Double(samples[frame])
+          }
+          monoSamples.append(sum / Double(channelCount))
+        }
+        return
+      }
+
+      if isFloat, bitsPerChannel == 64 {
+        for frame in 0..<frameLength {
+          var sum = 0.0
+          for channelIndex in 0..<min(channelCount, audioBuffers.count) {
+            guard let data = audioBuffers[channelIndex].mData else { return }
+            let samples: UnsafeMutablePointer<Double> = data.assumingMemoryBound(to: Double.self)
+            sum += samples[frame]
+          }
+          monoSamples.append(sum / Double(channelCount))
+        }
+        return
+      }
+
+      if isSignedInteger, bitsPerChannel == 16 {
+        for frame in 0..<frameLength {
+          var sum = 0.0
+          for channelIndex in 0..<min(channelCount, audioBuffers.count) {
+            guard let data = audioBuffers[channelIndex].mData else { return }
+            let samples: UnsafeMutablePointer<Int16> = data.assumingMemoryBound(to: Int16.self)
+            sum += Double(samples[frame]) / Double(Int16.max)
+          }
+          monoSamples.append(sum / Double(channelCount))
+        }
+        return
+      }
+
+      if isSignedInteger, bitsPerChannel == 32 {
+        for frame in 0..<frameLength {
+          var sum = 0.0
+          for channelIndex in 0..<min(channelCount, audioBuffers.count) {
+            guard let data = audioBuffers[channelIndex].mData else { return }
+            let samples: UnsafeMutablePointer<Int32> = data.assumingMemoryBound(to: Int32.self)
+            sum += Double(samples[frame]) / Double(Int32.max)
+          }
+          monoSamples.append(sum / Double(channelCount))
+        }
+        return
+      }
+
+      debugPrint(
+        "[AppleAudioEngine] waveform decode unsupported noninterleaved PCM " +
+        "commonFormat=\(buffer.format.commonFormat.rawValue) " +
+        "bitsPerChannel=\(bitsPerChannel) " +
+        "flags=\(flags)"
+      )
+      return
+    }
+
+    guard let rawData = buffer.audioBufferList.pointee.mBuffers.mData else {
+      debugPrint(
+        "[AppleAudioEngine] waveform decode missing interleaved data " +
+        "commonFormat=\(buffer.format.commonFormat.rawValue)"
+      )
+      return
+    }
+
+    if isFloat, bitsPerChannel == 32 {
+      let samples: UnsafeMutablePointer<Float> = rawData.assumingMemoryBound(to: Float.self)
       for frame in 0..<frameLength {
         var sum = 0.0
-        for channel in 0..<channelCount {
-          sum += Double(channelData[channel][frame])
+        let frameOffset = frame * channelCount
+        for channelIndex in 0..<channelCount {
+          let sampleIndex = frameOffset + channelIndex
+          sum += Double(samples[sampleIndex])
         }
         monoSamples.append(sum / Double(channelCount))
       }
+      return
     }
 
-    return processWaveform(samples: monoSamples, expectedChunks: expectedChunks)
+    if isFloat, bitsPerChannel == 64 {
+      let samples: UnsafeMutablePointer<Double> = rawData.assumingMemoryBound(to: Double.self)
+      for frame in 0..<frameLength {
+        var sum = 0.0
+        let frameOffset = frame * channelCount
+        for channelIndex in 0..<channelCount {
+          let sampleIndex = frameOffset + channelIndex
+          sum += samples[sampleIndex]
+        }
+        monoSamples.append(sum / Double(channelCount))
+      }
+      return
+    }
+
+    if isSignedInteger, bitsPerChannel == 16 {
+      let samples: UnsafeMutablePointer<Int16> = rawData.assumingMemoryBound(to: Int16.self)
+      for frame in 0..<frameLength {
+        var sum = 0.0
+        let frameOffset = frame * channelCount
+        for channelIndex in 0..<channelCount {
+          let sampleIndex = frameOffset + channelIndex
+          sum += Double(samples[sampleIndex]) / Double(Int16.max)
+        }
+        monoSamples.append(sum / Double(channelCount))
+      }
+      return
+    }
+
+    if isSignedInteger, bitsPerChannel == 32 {
+      let samples: UnsafeMutablePointer<Int32> = rawData.assumingMemoryBound(to: Int32.self)
+      for frame in 0..<frameLength {
+        var sum = 0.0
+        let frameOffset = frame * channelCount
+        for channelIndex in 0..<channelCount {
+          let sampleIndex = frameOffset + channelIndex
+          sum += Double(samples[sampleIndex]) / Double(Int32.max)
+        }
+        monoSamples.append(sum / Double(channelCount))
+      }
+      return
+    }
+
+    debugPrint(
+      "[AppleAudioEngine] waveform decode unsupported interleaved PCM " +
+      "commonFormat=\(buffer.format.commonFormat.rawValue) " +
+      "bitsPerChannel=\(bitsPerChannel) " +
+      "flags=\(flags)"
+    )
   }
 
   private func processWaveform(samples: [Double], expectedChunks: Int) -> [Double] {
