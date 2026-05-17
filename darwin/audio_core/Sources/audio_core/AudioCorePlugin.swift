@@ -11,6 +11,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
   private let fileAccess = SecurityScopedFileAccessCoordinator()
   private let engine: AppleAudioEngine
   private var channel: FlutterMethodChannel?
+  private var converterChannel: FlutterMethodChannel?
   private var fftEventChannel: FlutterEventChannel?
   private var fftEventSink: FlutterEventSink?
   private var fftTimer: DispatchSourceTimer?
@@ -22,6 +23,10 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
   private var fftEmitCount = 0
   private var fftLastEmitAtMs: Double?
   private let loadQueue = DispatchQueue(label: "audio_core.plugin.load", qos: .userInitiated)
+  private let conversionQueue = DispatchQueue(
+    label: "audio_core.plugin.convert",
+    qos: .userInitiated
+  )
 
   public override init() {
     self.engine = AppleAudioEngine(fileAccess: fileAccess)
@@ -41,14 +46,20 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       name: "audio_core.player",
       binaryMessenger: messenger
     )
+    let converterChannel = FlutterMethodChannel(
+      name: "audio_core.audio_converter",
+      binaryMessenger: messenger
+    )
     let fftChannel = FlutterEventChannel(
       name: "audio_core.player/fft",
       binaryMessenger: messenger
     )
     let instance = AudioCorePlugin()
     instance.channel = channel
+    instance.converterChannel = converterChannel
     instance.fftEventChannel = fftChannel
     registrar.addMethodCallDelegate(instance, channel: channel)
+    registrar.addMethodCallDelegate(instance, channel: converterChannel)
     fftChannel.setStreamHandler(instance)
   }
 
@@ -355,6 +366,21 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
           message: error.localizedDescription,
           details: nil
         ))
+      }
+
+    case "getCapabilities":
+      result(AppleAudioTranscoder.capabilities())
+
+    case "convertFile":
+      guard let args = call.arguments as? [String: Any] else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "Arguments are null", details: nil))
+        return
+      }
+      conversionQueue.async {
+        let payload = AppleAudioTranscoder.convert(request: args)
+        DispatchQueue.main.async {
+          result(payload)
+        }
       }
 
     case "registerPersistentAccess":
