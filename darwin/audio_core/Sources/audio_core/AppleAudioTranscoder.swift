@@ -45,6 +45,8 @@ enum AppleAudioTranscoder {
     let inputPath = try stringValue(request, key: "inputPath")
     let outputPath = try stringValue(request, key: "outputPath")
     let outputFormat = normalizeFormat(try stringValue(request, key: "outputFormat"))
+    let bitRate = intValue(request, key: "bitRate")
+    let bitRateMode = normalizeBitRateMode(optionalStringValue(request, key: "bitRateMode"))
 
     guard supportedFormatValues.contains(outputFormat) else {
       throw ConversionError.unsupportedOutputFormat(outputFormat)
@@ -57,7 +59,16 @@ enum AppleAudioTranscoder {
     try? FileManager.default.removeItem(at: destinationURL)
 
     do {
-      try AudioConverter.convert(sourceURL, to: destinationURL)
+      if let encoder = try makeEncoder(
+        destinationURL: destinationURL,
+        outputFormat: outputFormat,
+        bitRate: bitRate,
+        bitRateMode: bitRateMode
+      ) {
+        try AudioConverter.convert(sourceURL, using: encoder)
+      } else {
+        try AudioConverter.convert(sourceURL, to: destinationURL)
+      }
     } catch {
       try? FileManager.default.removeItem(at: destinationURL)
       throw error
@@ -125,6 +136,20 @@ enum AppleAudioTranscoder {
     value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
   }
 
+  private static func normalizeBitRateMode(_ value: String?) -> String? {
+    guard let value else { return nil }
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return trimmed.isEmpty ? nil : trimmed
+  }
+
+  private static func intValue(_ request: [String: Any], key: String) -> Int? {
+    guard let value = request[key] as? NSNumber else {
+      return nil
+    }
+    let intValue = value.intValue
+    return intValue > 0 ? intValue : nil
+  }
+
   private static func stringValue(_ request: [String: Any], key: String) throws -> String {
     guard let value = request[key] as? String else {
       throw ConversionError.invalidRequest("Missing required field: \(key)")
@@ -134,6 +159,106 @@ enum AppleAudioTranscoder {
       throw ConversionError.invalidRequest("Missing required field: \(key)")
     }
     return trimmed
+  }
+
+  private static func optionalStringValue(_ request: [String: Any], key: String) -> String? {
+    guard let value = request[key] as? String else {
+      return nil
+    }
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+  }
+
+  private static func makeEncoder(
+    destinationURL: URL,
+    outputFormat: String,
+    bitRate: Int?,
+    bitRateMode: String?
+  ) throws -> AudioEncoder? {
+    guard bitRate != nil || bitRateMode != nil || outputFormat == "opus" else {
+      return nil
+    }
+
+    let encoder = try createEncoder(destinationURL: destinationURL, outputFormat: outputFormat)
+    var settings: [AudioEncodingSettingsKey: Any] = [:]
+
+    switch outputFormat {
+    case "m4a", "m4b", "aac", "caf":
+      if let bitRate {
+        settings[.coreAudioAudioConverterPropertySettings] = [
+          kAudioConverterEncodeBitRate: NSNumber(value: bitRate),
+          kAudioCodecPropertyBitRateControlMode: NSNumber(
+            value: bitRateMode == "vbr"
+              ? kAudioCodecBitRateControlMode_VariableConstrained
+              : kAudioCodecBitRateControlMode_Constant
+          ),
+        ]
+      } else if let bitRateMode {
+        settings[.coreAudioAudioConverterPropertySettings] = [
+          kAudioCodecPropertyBitRateControlMode: NSNumber(
+            value: bitRateMode == "vbr"
+              ? kAudioCodecBitRateControlMode_VariableConstrained
+              : kAudioCodecBitRateControlMode_Constant
+          ),
+        ]
+      }
+    case "mp3":
+      if let bitRate {
+        let kilobitsPerSecond = normalizeBitRateForKbps(bitRate)
+        if bitRateMode == "vbr" {
+          settings[.mp3AverageBitrate] = kilobitsPerSecond
+        } else {
+          settings[.mp3ConstantBitrate] = kilobitsPerSecond
+        }
+      } else if bitRateMode == "vbr" {
+        settings[.mp3UseVariableBitrate] = true
+      }
+    case "opus":
+      settings[.opusPreserveSampleRate] = true
+      if let bitRate {
+        settings[.opusBitrate] = normalizeBitRateForKbps(bitRate)
+      }
+      if let bitRateMode {
+        settings[.opusBitrateMode] = switch bitRateMode {
+        case "vbr":
+          OpusBitrateMode.constrainedVBR
+        case "cbr":
+          OpusBitrateMode.hardCBR
+        default:
+          OpusBitrateMode.constrainedVBR
+        }
+      }
+    default:
+      return nil
+    }
+
+    if !settings.isEmpty {
+      encoder.settings = settings
+    }
+    return encoder
+  }
+
+  private static func createEncoder(
+    destinationURL: URL,
+    outputFormat: String
+  ) throws -> AudioEncoder {
+    switch outputFormat {
+    case "m4a", "m4b", "aac", "caf":
+      return try AudioEncoder(url: destinationURL)
+    case "mp3":
+      return try AudioEncoder(url: destinationURL, encoderName: .MP3)
+    case "opus":
+      return try AudioEncoder(url: destinationURL, encoderName: .oggOpus)
+    default:
+      return try AudioEncoder(url: destinationURL)
+    }
+  }
+
+  private static func normalizeBitRateForKbps(_ bitRate: Int) -> Int {
+    if bitRate <= 1000 {
+      return max(1, bitRate)
+    }
+    return max(1, (bitRate + 500) / 1000)
   }
 }
 
