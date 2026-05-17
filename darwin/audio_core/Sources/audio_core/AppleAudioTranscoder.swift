@@ -1,4 +1,5 @@
 import Foundation
+import AudioToolbox
 
 import SFBAudioEngine
 
@@ -175,15 +176,39 @@ enum AppleAudioTranscoder {
     bitRate: Int?,
     bitRateMode: String?
   ) throws -> AudioEncoder? {
-    guard bitRate != nil || bitRateMode != nil || outputFormat == "opus" else {
-      return nil
-    }
-
     let encoder = try createEncoder(destinationURL: destinationURL, outputFormat: outputFormat)
     var settings: [AudioEncodingSettingsKey: Any] = [:]
 
     switch outputFormat {
-    case "m4a", "m4b", "aac", "caf":
+    case "m4a", "m4b":
+      settings[.coreAudioFileTypeID] = NSNumber(
+        value: outputFormat == "m4a" ? UInt32(kAudioFileM4AType) : UInt32(kAudioFileM4BType)
+      )
+      settings[.coreAudioFormatID] = NSNumber(value: UInt32(kAudioFormatMPEG4AAC))
+
+      if let bitRate {
+        settings[.coreAudioAudioConverterPropertySettings] = [
+          kAudioConverterEncodeBitRate: NSNumber(value: bitRate),
+          kAudioCodecPropertyBitRateControlMode: NSNumber(
+            value: bitRateMode == "vbr"
+              ? kAudioCodecBitRateControlMode_VariableConstrained
+              : kAudioCodecBitRateControlMode_Constant
+          ),
+        ]
+      } else if let bitRateMode {
+        settings[.coreAudioAudioConverterPropertySettings] = [
+          kAudioCodecPropertyBitRateControlMode: NSNumber(
+            value: bitRateMode == "vbr"
+              ? kAudioCodecBitRateControlMode_VariableConstrained
+              : kAudioCodecBitRateControlMode_Constant
+          ),
+        ]
+      }
+    case "aac", "caf":
+      guard bitRate != nil || bitRateMode != nil else {
+        return nil
+      }
+
       if let bitRate {
         settings[.coreAudioAudioConverterPropertySettings] = [
           kAudioConverterEncodeBitRate: NSNumber(value: bitRate),
