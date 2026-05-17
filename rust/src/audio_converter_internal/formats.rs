@@ -1,7 +1,7 @@
 use ffmpeg::codec::codec::Codec as FfmpegCodec;
 use ffmpeg_core::ffmpeg;
 
-use super::models::AndroidConvertRequest;
+use crate::api::audio_converter::models::AndroidConvertRequest;
 
 pub use ffmpeg::codec::Id;
 

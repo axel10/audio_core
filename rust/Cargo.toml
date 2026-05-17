@@ -22,8 +22,10 @@ zune-imageprocs = { version = "0.5.1", default-features = false }
 palette_core = { path = "palette" }
 fast_image_resize = "6.0.0"
 libblur = "0.23.3"
-ffmpeg_core = { path = "ffmpeg_core" }
 
+
+[target.'cfg(not(any(target_os = "ios", target_os = "macos")))'.dependencies]
+ffmpeg_core = { path = "ffmpeg_core" }
 
 
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]

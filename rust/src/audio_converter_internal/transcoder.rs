@@ -12,7 +12,7 @@ use super::formats::{
     output_channel_layout, output_format_key, output_sample_format, output_sample_rate,
     uses_lossy_bitrate_controls,
 };
-use super::models::{
+use crate::api::audio_converter::models::{
     emit_conversion_event, AndroidConvertRequest, AndroidConvertResult, ConversionEvent,
     ConversionFailure,
 };

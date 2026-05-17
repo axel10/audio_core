@@ -1257,9 +1257,9 @@ dependencies = [
 
 [[package]]
 name = "novtb"
-version = "0.1.10"
+version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e105c32eee1d3b93683100124b2feb0a7c380553124c121f4ef83f67686c69d6"
+checksum = "75c0ea7569466bbce2394c0e5654b1e283c28ef7c70799e6f07b32029cca6d74"
 dependencies = [
  "core_affinity",
 ]
@@ -2872,9 +2872,9 @@ dependencies = [
 
 [[package]]
 name = "zaft"
-version = "0.3.5"
+version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa5d3e56a3dce84f6bb1de268317bc8b647bbe575f4912bf1f954951b492e4cc"
+checksum = "1181071f72d1c900322c7616fbac059d520a1aef469df4b9fd26dc6bafc461a1"
 dependencies = [
  "novtb",
  "num-complex",
