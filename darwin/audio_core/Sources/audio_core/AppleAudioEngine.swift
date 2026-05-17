@@ -1,5 +1,7 @@
+import Accelerate
 import AVFoundation
 import Foundation
+import os
 
 import SFBAudioEngine
 
@@ -217,15 +219,39 @@ final class AppleAudioEngine: NSObject {
   private var fadeGeneration: UInt64 = 0
   private var seekDebounceTimer: DispatchSourceTimer?
   private var pendingSeekPositionMs: Int?
-  private var fftGroupingConfig = AppleFftGroupingConfig()
+  private let fftSize = 1024
   private let fftBinCount = 512
+  private let fftLog2Size: vDSP_Length = 9
+  private let fftHopSize = 512
+  private let fftFrameQueueCapacity = 24
+  private let fftProcessingQueue = DispatchQueue(
+    label: "audio_core.apple.fft.processing",
+    qos: .userInitiated
+  )
+  private let fftCaptureBuffer = AppleFftRingBuffer(capacity: 16_384)
+  private let fftResultLock = NSLock()
+  private let fftSetup: FFTSetup?
+  private let fftWorkspace: AppleFftWorkspace
   private var latestRawFft: [Double]
   private var latestRawTapMagnitudes: [Double]
+  private var fftAnalysisRemainder: [Float] = []
+  private var pendingFftFrames: [[Double]] = []
+  private var fftTapCount: Int = 0
+  private var fftLastTapAtMs: Double?
+  private var fftLastFetchAtMs: Double?
+  private var fftTapSlotKind: SlotKind?
+  private var isFftTapInstalled = false
+  private var fftProcessingGeneration: UInt64 = 0
+  private let waveformRmsWindowsPerChunk = 8
+  private let waveformPrecisionScale = 100.0
+  private var fftGroupingConfig = AppleFftGroupingConfig()
 
   var onPlayerStateChanged: ((String?, String?) -> Void)?
 
   init(fileAccess: SecurityScopedFileAccessCoordinator) {
     self.fileAccess = fileAccess
+    self.fftSetup = vDSP_create_fftsetup(fftLog2Size, FFTRadix(kFFTRadix2))
+    self.fftWorkspace = AppleFftWorkspace(fftSize: fftSize)
     self.latestRawFft = Array(repeating: 0.0, count: fftBinCount)
     self.latestRawTapMagnitudes = Array(repeating: 0.0, count: fftBinCount)
     super.init()
@@ -236,6 +262,10 @@ final class AppleAudioEngine: NSObject {
 
   deinit {
     cancelTimers()
+    removeFftCaptureTap()
+    if let fftSetup {
+      vDSP_destroy_fftsetup(fftSetup)
+    }
     releaseAllAccess()
   }
 
@@ -252,6 +282,7 @@ final class AppleAudioEngine: NSObject {
       let slot = activeSlot
       try slot.load(url: url)
       slot.applyBaseVolume(latestVolume)
+      refreshFftCapture(for: activeSlotKind)
     }
   }
 
@@ -324,11 +355,12 @@ final class AppleAudioEngine: NSObject {
         try slot.play()
         slot.applyBaseVolume(target)
       }
+      refreshFftCapture(for: activeSlotKind)
     }
   }
 
   func pause(fadeDurationMs: Int) throws {
-    try syncOnStateQueue {
+    syncOnStateQueue {
       guard let slot = publicSlot(), slot.isLoaded, slot.isPlaying else { return }
       if fadeDurationMs > 0 {
         let originalVolume = slot.currentVolume
@@ -371,7 +403,7 @@ final class AppleAudioEngine: NSObject {
   }
 
   func setVolume(_ volume: Double) throws {
-    try syncOnStateQueue {
+    syncOnStateQueue {
       latestVolume = volume.clamped(to: 0.0...1.0)
       if primarySlot.isLoaded {
         primarySlot.applyBaseVolume(latestVolume)
@@ -383,19 +415,19 @@ final class AppleAudioEngine: NSObject {
   }
 
   func getDurationMs() -> Int {
-    syncOnStateQueue {
+    return syncOnStateQueue {
       publicSlot()?.durationMs ?? 0
     }
   }
 
   func getCurrentPositionMs() -> Int {
-    syncOnStateQueue {
+    return syncOnStateQueue {
       publicSlot()?.currentPositionMs ?? 0
     }
   }
 
   func statusPayload(playbackState: String? = nil, error: String? = nil) -> [String: Any] {
-    syncOnStateQueue {
+    return syncOnStateQueue {
       let slot = publicSlot()
       var payload: [String: Any] = [
         "playerId": "main",
@@ -433,23 +465,24 @@ final class AppleAudioEngine: NSObject {
     aggregationMode: String
   ) {
     syncOnStateQueue {
-      fftGroupingConfig.frequencyGroups = max(1, frequencyGroups)
+      fftGroupingConfig.frequencyGroups = max(1, min(frequencyGroups, fftBinCount))
       fftGroupingConfig.skipHighFrequencyGroups = max(0, skipHighFrequencyGroups)
       fftGroupingConfig.aggregationMode = aggregationMode
     }
   }
 
   func getLatestFft() throws -> [Double] {
-    syncOnStateQueue {
-      latestRawFft
+    return syncOnStateQueue {
+      consumeLatestFftSnapshot()
     }
   }
 
   func getWaveform(path: String, expectedChunks: Int) throws -> [Double] {
-    let normalizedPath = normalizedFilePath(path)
-    _ = normalizedPath
     guard expectedChunks > 0 else { return [] }
-    return Array(repeating: 0.0, count: expectedChunks)
+    let normalizedPath = normalizedFilePath(path)
+    return try fileAccess.withTemporaryAccess(for: normalizedPath) { url in
+      try decodeWaveform(url: url, expectedChunks: expectedChunks)
+    }
   }
 
   func extractFingerprint(path: String, expectedChunks: Int) throws -> String? {
@@ -583,6 +616,7 @@ final class AppleAudioEngine: NSObject {
       pendingEdit = nil
       clearPreparedAccessPaths()
       stopSlots(releasingFile: true, preservePosition: false)
+      removeFftCaptureTap()
       fileAccess.releaseAllAccess()
     }
   }
@@ -674,6 +708,9 @@ final class AppleAudioEngine: NSObject {
         slot.gain = 1.0
         slot.applyBaseVolume(latestVolume)
       }
+    }
+    if releasingFile {
+      removeFftCaptureTap()
     }
   }
 
@@ -802,6 +839,7 @@ final class AppleAudioEngine: NSObject {
     incomingSlot.gain = 1.0
     incomingSlot.applyBaseVolume(latestVolume)
     activeSlotKind = incomingKind
+    refreshFftCapture(for: incomingKind)
     emitPlayerState(playbackState: "PLAYING")
   }
 
@@ -901,6 +939,457 @@ final class AppleAudioEngine: NSObject {
       code: 1,
       userInfo: [NSLocalizedDescriptionKey: message]
     )
+  }
+}
+
+final class AppleFftWorkspace {
+  let fftSize: Int
+  let fftBinCount: Int
+
+  var window: [Float]
+  var windowed: [Float]
+  var real: [Float]
+  var imag: [Float]
+  var windowSum: Double = 0
+
+  init(fftSize: Int) {
+    self.fftSize = fftSize
+    self.fftBinCount = fftSize / 2
+
+    self.window = Array(repeating: 0, count: fftSize)
+    self.windowed = Array(repeating: 0, count: fftSize)
+    self.real = Array(repeating: 0, count: fftBinCount)
+    self.imag = Array(repeating: 0, count: fftBinCount)
+
+    vDSP_hann_window(&window, vDSP_Length(fftSize), Int32(vDSP_HANN_NORM))
+
+    var sum: Float = 0
+    vDSP_sve(window, 1, &sum, vDSP_Length(fftSize))
+    self.windowSum = max(Double(sum), 1e-9)
+  }
+}
+
+final class AppleFftRingBuffer {
+  private let capacity: Int
+  private var samples: UnsafeMutablePointer<Float>
+  private var writeIndex: Int = 0
+  private var available: Int = 0
+  private var lock = os_unfair_lock_s()
+
+  init(capacity: Int) {
+    self.capacity = max(1, capacity)
+    self.samples = .allocate(capacity: self.capacity)
+    self.samples.initialize(repeating: 0, count: self.capacity)
+  }
+
+  deinit {
+    self.samples.deallocate()
+  }
+
+  func clear() {
+    os_unfair_lock_lock(&lock)
+    writeIndex = 0
+    available = 0
+    os_unfair_lock_unlock(&lock)
+  }
+
+  func pushMono(from buffer: AVAudioPCMBuffer) {
+    let frameLength = Int(buffer.frameLength)
+    guard frameLength > 0, let channelData = buffer.floatChannelData else { return }
+    let channelCount = Int(buffer.format.channelCount)
+
+    os_unfair_lock_lock(&lock)
+    defer { os_unfair_lock_unlock(&lock) }
+
+    for frame in 0..<frameLength {
+      var sum: Float = 0
+      for channel in 0..<channelCount {
+        sum += channelData[channel][frame]
+      }
+      samples[writeIndex] = sum / Float(channelCount)
+      writeIndex += 1
+      if writeIndex >= capacity { writeIndex = 0 }
+      if available < capacity { available += 1 }
+    }
+  }
+
+  func pullAll() -> [Float] {
+    os_unfair_lock_lock(&lock)
+    defer { os_unfair_lock_unlock(&lock) }
+
+    guard available > 0 else { return [] }
+
+    var result = Array(repeating: Float(0), count: available)
+    var readIndex = writeIndex - available
+    if readIndex < 0 { readIndex += capacity }
+
+    for i in 0..<available {
+      result[i] = samples[readIndex]
+      readIndex += 1
+      if readIndex >= capacity { readIndex = 0 }
+    }
+    available = 0
+    return result
+  }
+}
+
+extension AppleAudioEngine {
+  private func refreshFftCapture(for slotKind: SlotKind) {
+    guard let slot = slotIfLoaded(slotKind) else {
+      removeFftCaptureTap()
+      return
+    }
+
+    if fftTapSlotKind == slotKind, isFftTapInstalled {
+      return
+    }
+
+    removeFftCaptureTap()
+    installFftCaptureTap(for: slotKind, on: slot)
+  }
+
+  private func installFftCaptureTap(for slotKind: SlotKind, on slot: PlaybackSlot) {
+#if canImport(SFBAudioEngine)
+    slot.player.modifyProcessingGraph { engine in
+      engine.mainMixerNode.installTap(
+        onBus: 0,
+        bufferSize: AVAudioFrameCount(self.fftSize / 2),
+        format: nil
+      ) { [weak self] buffer, _ in
+        self?.handleFftTapBuffer(buffer, slotKind: slotKind)
+      }
+    }
+    fftTapSlotKind = slotKind
+    isFftTapInstalled = true
+    resetFftCaptureState()
+#else
+    _ = slot
+    _ = slotKind
+#endif
+  }
+
+  private func removeFftCaptureTap() {
+#if canImport(SFBAudioEngine)
+    primarySlot.player.mainMixerNode.removeTap(onBus: 0)
+    secondarySlot.player.mainMixerNode.removeTap(onBus: 0)
+#endif
+    fftTapSlotKind = nil
+    isFftTapInstalled = false
+    resetFftCaptureState()
+  }
+
+  private func resetFftCaptureState() {
+    fftCaptureBuffer.clear()
+    fftResultLock.lock()
+    fftProcessingGeneration &+= 1
+    latestRawFft = Array(repeating: 0.0, count: fftBinCount)
+    latestRawTapMagnitudes = Array(repeating: 0.0, count: fftBinCount)
+    fftAnalysisRemainder.removeAll(keepingCapacity: true)
+    pendingFftFrames.removeAll(keepingCapacity: true)
+    fftLastFetchAtMs = nil
+    fftResultLock.unlock()
+    fftTapCount = 0
+    fftLastTapAtMs = nil
+  }
+
+  private func slotIfLoaded(_ kind: SlotKind) -> PlaybackSlot? {
+    let slot = slot(for: kind)
+    return slot.isLoaded ? slot : nil
+  }
+
+  private func handleFftTapBuffer(_ buffer: AVAudioPCMBuffer, slotKind: SlotKind) {
+    guard fftTapSlotKind == slotKind else { return }
+    guard let slot = slotIfLoaded(slotKind), slot.isPlaying else { return }
+
+    fftCaptureBuffer.pushMono(from: buffer)
+    let generation = currentFftProcessingGeneration()
+    let frameLength = Int(buffer.frameLength)
+
+    fftProcessingQueue.async { [weak self] in
+      self?.processFftRingBuffer(frameLength: frameLength, generation: generation)
+    }
+  }
+
+  private func processFftRingBuffer(frameLength: Int, generation: UInt64) {
+    guard isCurrentFftProcessingGeneration(generation) else { return }
+
+    let monoSamples = fftCaptureBuffer.pullAll()
+    guard !monoSamples.isEmpty else { return }
+
+    enqueueTapFftFrames(monoSamples, frameLength: frameLength, generation: generation)
+  }
+
+  private func enqueueTapFftFrames(
+    _ monoSamples: [Float],
+    frameLength: Int? = nil,
+    generation: UInt64
+  ) {
+    guard isCurrentFftProcessingGeneration(generation) else { return }
+    var windows: [[Float]] = []
+    var previousLatest = rawZeroFrame()
+    var previousTapMagnitudes = Array(repeating: 0.0, count: fftBinCount)
+
+    fftResultLock.lock()
+    guard fftProcessingGeneration == generation else {
+      fftResultLock.unlock()
+      return
+    }
+    previousLatest = latestRawFft
+    previousTapMagnitudes = latestRawTapMagnitudes
+    fftAnalysisRemainder.append(contentsOf: monoSamples)
+    while fftAnalysisRemainder.count >= fftSize {
+      windows.append(Array(fftAnalysisRemainder.prefix(fftSize)))
+      fftAnalysisRemainder.removeFirst(fftHopSize)
+    }
+    fftResultLock.unlock()
+
+    guard !windows.isEmpty else { return }
+
+    var queuedFrames: [[Double]] = []
+    queuedFrames.reserveCapacity(windows.count)
+    for window in windows {
+      queuedFrames.append(computeMagnitudes(from: window))
+    }
+
+    guard let latestMagnitudes = queuedFrames.last else { return }
+    guard isCurrentFftProcessingGeneration(generation) else { return }
+
+    let tapNowMs = currentTimestampMs()
+    fftTapCount &+= 1
+    let tapDeltaMs = fftLastTapAtMs.map { tapNowMs - $0 }
+    fftLastTapAtMs = tapNowMs
+
+    let rawDelta = meanAbsoluteDelta(latestMagnitudes, comparedTo: previousLatest)
+    let magnitudeDelta = meanAbsoluteDelta(latestMagnitudes, comparedTo: previousTapMagnitudes)
+
+    fftResultLock.lock()
+    guard fftProcessingGeneration == generation else {
+      fftResultLock.unlock()
+      return
+    }
+    pendingFftFrames.append(contentsOf: queuedFrames)
+    if pendingFftFrames.count > fftFrameQueueCapacity {
+      pendingFftFrames.removeFirst(pendingFftFrames.count - fftFrameQueueCapacity)
+    }
+    latestRawFft = latestMagnitudes
+    latestRawTapMagnitudes = latestMagnitudes
+    let queueDepth = pendingFftFrames.count
+    fftResultLock.unlock()
+
+    if fftTapCount <= 5 || fftTapCount % 30 == 0 {
+      debugPrint(
+        "[AppleAudioEngine] fft tap count=\(fftTapCount) " +
+        "frameLength=\(frameLength.map(String.init) ?? "nil") " +
+        "producedFrames=\(queuedFrames.count) " +
+        "queueDepth=\(queueDepth) " +
+        "deltaMs=\(tapDeltaMs.map { String(format: "%.1f", $0) } ?? "nil") " +
+        "rawDelta=\(String(format: "%.6f", rawDelta)) " +
+        "magnitudeDelta=\(String(format: "%.6f", magnitudeDelta)) " +
+        "first=\(latestMagnitudes.first.map { String(format: "%.6f", $0) } ?? "nil")"
+      )
+    }
+  }
+
+  private func currentFftProcessingGeneration() -> UInt64 {
+    fftResultLock.lock()
+    let generation = fftProcessingGeneration
+    fftResultLock.unlock()
+    return generation
+  }
+
+  private func isCurrentFftProcessingGeneration(_ generation: UInt64) -> Bool {
+    fftResultLock.lock()
+    let isCurrent = fftProcessingGeneration == generation
+    fftResultLock.unlock()
+    return isCurrent
+  }
+
+  private func consumeLatestFftSnapshot() -> [Double] {
+    let now = currentTimestampMs()
+    let sampleRate = playbackSampleRate()
+    let frameDurationMs = (Double(fftHopSize) / sampleRate) * 1000.0
+
+    if let lastFetch = fftLastFetchAtMs, now - lastFetch < 500 {
+      let elapsed = now - lastFetch
+      let framesToConsume = Int(elapsed / frameDurationMs)
+
+      if framesToConsume > 0 {
+        let toRemove = min(framesToConsume, pendingFftFrames.count)
+        if toRemove > 0 {
+          latestRawFft = pendingFftFrames[toRemove - 1]
+          pendingFftFrames.removeFirst(toRemove)
+        }
+        fftLastFetchAtMs = lastFetch + (Double(framesToConsume) * frameDurationMs)
+      }
+    } else {
+      if !pendingFftFrames.isEmpty {
+        latestRawFft = pendingFftFrames.removeFirst()
+      }
+      fftLastFetchAtMs = now
+    }
+
+    return latestRawFft
+  }
+
+  private func playbackSampleRate() -> Double {
+    syncOnStateQueue {
+      publicSlot()?.sampleRate ?? 44_100
+    }
+  }
+
+  private func rawZeroFrame() -> [Double] {
+    Array(repeating: 0.0, count: fftBinCount)
+  }
+
+  private func meanAbsoluteDelta(_ lhs: [Double], comparedTo rhs: [Double]) -> Double {
+    let count = min(lhs.count, rhs.count)
+    guard count > 0 else { return 0.0 }
+    var total = 0.0
+    for index in 0..<count {
+      total += abs(lhs[index] - rhs[index])
+    }
+    return total / Double(count)
+  }
+
+  private func computeMagnitudes(from samples: [Float]) -> [Double] {
+    let count = min(samples.count, fftSize)
+    guard count > 0, let fftSetup else {
+      return rawZeroFrame()
+    }
+
+    if count < fftSize {
+      fftWorkspace.windowed.withUnsafeMutableBufferPointer { ptr in
+        ptr.initialize(repeating: 0)
+      }
+    }
+
+    samples.withUnsafeBufferPointer { sampleBuffer in
+      fftWorkspace.windowed.withUnsafeMutableBufferPointer { windowedBuffer in
+        vDSP_vmul(
+          sampleBuffer.baseAddress!,
+          1,
+          fftWorkspace.window,
+          1,
+          windowedBuffer.baseAddress!,
+          1,
+          vDSP_Length(count)
+        )
+      }
+    }
+
+    var magnitudes = Array(repeating: 0.0, count: fftBinCount)
+    for index in 0..<fftBinCount {
+      fftWorkspace.real[index] = fftWorkspace.windowed[index * 2]
+      fftWorkspace.imag[index] = fftWorkspace.windowed[(index * 2) + 1]
+    }
+
+    fftWorkspace.real.withUnsafeMutableBufferPointer { realBuffer in
+      fftWorkspace.imag.withUnsafeMutableBufferPointer { imagBuffer in
+        var splitComplex = DSPSplitComplex(
+          realp: realBuffer.baseAddress!,
+          imagp: imagBuffer.baseAddress!
+        )
+
+        vDSP_fft_zrip(fftSetup, &splitComplex, 1, fftLog2Size, FFTDirection(FFT_FORWARD))
+
+        let safeWindowSum = fftWorkspace.windowSum
+        magnitudes[0] = Double(abs(splitComplex.realp[0])) / safeWindowSum
+        if fftBinCount > 1 {
+          for bin in 1..<fftBinCount {
+            let realValue = Double(splitComplex.realp[bin])
+            let imagValue = Double(splitComplex.imagp[bin])
+            magnitudes[bin] = (sqrt((realValue * realValue) + (imagValue * imagValue)) * 2.0) / safeWindowSum
+          }
+        }
+      }
+    }
+
+    return magnitudes
+  }
+
+  private func decodeWaveform(url: URL, expectedChunks: Int) throws -> [Double] {
+    let decoder = try AudioDecoder(url: url, detectContentType: true)
+    defer { _ = try? decoder.close() }
+
+    _ = try decoder.open()
+
+    let bufferCapacity: AVAudioFrameCount = 4096
+    guard let buffer = AVAudioPCMBuffer(
+      pcmFormat: decoder.processingFormat,
+      frameCapacity: bufferCapacity
+    ) else {
+      return Array(repeating: 0.0, count: expectedChunks)
+    }
+
+    var monoSamples: [Double] = []
+    while true {
+      try decoder.decode(into: buffer, length: bufferCapacity)
+      let frameLength = Int(buffer.frameLength)
+      guard frameLength > 0, let channelData = buffer.floatChannelData else {
+        break
+      }
+
+      let channelCount = max(Int(buffer.format.channelCount), 1)
+      for frame in 0..<frameLength {
+        var sum = 0.0
+        for channel in 0..<channelCount {
+          sum += Double(channelData[channel][frame])
+        }
+        monoSamples.append(sum / Double(channelCount))
+      }
+    }
+
+    return processWaveform(samples: monoSamples, expectedChunks: expectedChunks)
+  }
+
+  private func processWaveform(samples: [Double], expectedChunks: Int) -> [Double] {
+    guard expectedChunks > 0 else { return [] }
+    guard !samples.isEmpty else {
+      return Array(repeating: 0.0, count: expectedChunks)
+    }
+
+    let windowCount = max(
+      expectedChunks,
+      min(samples.count, expectedChunks * waveformRmsWindowsPerChunk)
+    )
+    var envelope = Array(repeating: 0.0, count: windowCount)
+
+    for window in 0..<windowCount {
+      let start = (window * samples.count) / windowCount
+      let end = ((window + 1) * samples.count) / windowCount
+      guard end > start else { continue }
+      envelope[window] = computeRms(samples: samples, start: start, end: end)
+    }
+
+    var output = Array(repeating: 0.0, count: expectedChunks)
+    for chunk in 0..<expectedChunks {
+      let start = (chunk * windowCount) / expectedChunks
+      let end = ((chunk + 1) * windowCount) / expectedChunks
+      var maxValue = 0.0
+      if end > start {
+        for index in start..<end {
+          if envelope[index] > maxValue {
+            maxValue = envelope[index]
+          }
+        }
+      }
+      output[chunk] = roundWaveformPrecision(max(0.0, min(maxValue, 1.0)))
+    }
+    return output
+  }
+
+  private func computeRms(samples: [Double], start: Int, end: Int) -> Double {
+    guard end > start else { return 0.0 }
+    var sum = 0.0
+    for index in start..<end {
+      let sample = samples[index]
+      sum += sample * sample
+    }
+    return sqrt(sum / Double(end - start))
+  }
+
+  private func roundWaveformPrecision(_ value: Double) -> Double {
+    (value * waveformPrecisionScale).rounded() / waveformPrecisionScale
   }
 }
 
