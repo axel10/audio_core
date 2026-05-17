@@ -14,7 +14,7 @@ A new Flutter FFI plugin project.
   s.author           = { 'Your Company' => 'email@example.com' }
 
   s.source           = { :path => '.' }
-  s.source_files     = ['Classes/**/*']
+  s.source_files     = 'audio_core/Sources/audio_core/**/*'
   s.ios.dependency 'Flutter'
   s.osx.dependency 'FlutterMacOS'
 
@@ -35,6 +35,8 @@ A new Flutter FFI plugin project.
 
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
+    'SWIFT_INCLUDE_PATHS' => '$(PODS_CONFIGURATION_BUILD_DIR)',
+    'FRAMEWORK_SEARCH_PATHS' => '$(PODS_CONFIGURATION_BUILD_DIR)',
     'OTHER_LDFLAGS' => [
       '$(inherited)',
       '-lavformat',
@@ -84,7 +86,7 @@ A new Flutter FFI plugin project.
   }
 
   s.osx.script_phase = {
-    :name => 'Embed FFmpeg Frameworks',
+    :name => 'Embed FFmpeg and SPM Frameworks',
     :script => '
       # 获取当前正在编译的架构 (如果是多个，取第一个)
       ARCH=$(echo $ARCHS | cut -d" " -f1)
@@ -102,6 +104,15 @@ A new Flutter FFI plugin project.
         echo "Error: FFmpeg libraries not found at ${SRC}"
         exit 1
       fi
+
+      # Embed SPM package binary frameworks
+      echo "Embedding SPM binary frameworks from ${PODS_CONFIGURATION_BUILD_DIR}"
+      for fw in lame tta-cpp opus FLAC mpg123 mpc wavpack ogg sndfile vorbis; do
+        if [ -d "${PODS_CONFIGURATION_BUILD_DIR}/${fw}.framework" ]; then
+          echo "Copying ${fw}.framework to ${DEST}"
+          cp -af "${PODS_CONFIGURATION_BUILD_DIR}/${fw}.framework" "${DEST}/"
+        fi
+      done
     ',
     :execution_position => :after_compile,
   }
