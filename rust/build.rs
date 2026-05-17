@@ -1,6 +1,17 @@
 use std::env;
 use std::path::PathBuf;
 
+fn link_optional_library(lib_dir: &PathBuf, name: &str) {
+    let static_lib = lib_dir.join(format!("lib{}.a", name));
+    let dynamic_lib = lib_dir.join(format!("lib{}.dylib", name));
+
+    if static_lib.exists() {
+        println!("cargo:rustc-link-lib=static={}", name);
+    } else if dynamic_lib.exists() {
+        println!("cargo:rustc-link-lib=dylib={}", name);
+    }
+}
+
 fn main() {
     // 告诉 Cargo 如果环境变量变化了重新运行
     println!("cargo:rerun-if-env-changed=FFMPEG_DIR");
@@ -61,15 +72,10 @@ fn main() {
             // 设置 rpath，方便开发阶段直接运行程序
             println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_dir.display());
 
-            // 链接 LAME 动态库
-            if lib_dir.join("libmp3lame.dylib").exists() {
-                println!("cargo:rustc-link-lib=dylib=mp3lame");
-            }
-
-            // 链接 Opus 动态库
-            if lib_dir.join("libopus.dylib").exists() {
-                println!("cargo:rustc-link-lib=dylib=opus");
-            }
+            // iOS uses static archives while macOS typically ships dynamic libraries.
+            // Pick the available format so Rust links against the right variant.
+            link_optional_library(&lib_dir, "mp3lame");
+            link_optional_library(&lib_dir, "opus");
         }
     }
 }
