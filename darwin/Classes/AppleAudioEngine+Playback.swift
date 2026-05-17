@@ -97,6 +97,30 @@ extension AppleAudioEngine {
       "[AppleAudioEngine] seek request positionMs=\(positionMs) " +
       "public=\(publicURL()?.path ?? "nil")"
     )
+    
+    // Ensure deck is loaded before doing anything, throw error immediately if not.
+    guard let _ = publicDeck() else {
+      throw NSError(
+        domain: "AudioCore",
+        code: 2,
+        userInfo: [NSLocalizedDescriptionKey: "audio is not loaded"]
+      )
+    }
+
+    if seekDebounceTimer != nil {
+      // Within the 200ms debounce window. Postpone the seek.
+      pendingSeekPositionMs = positionMs
+      debugPrint("[AppleAudioEngine] seek debounced to 200ms window positionMs=\(positionMs)")
+    } else {
+      // First seek, execute immediately.
+      try executeSeek(positionMs: positionMs)
+      
+      // Start the 200ms debounce window.
+      startSeekDebounceTimer()
+    }
+  }
+
+  func executeSeek(positionMs: Int) throws {
     guard let currentDeck = publicDeck() else {
       throw NSError(
         domain: "AudioCore",
@@ -118,6 +142,37 @@ extension AppleAudioEngine {
       "[AppleAudioEngine] seek applied positionMs=\(positionMs) frame=\(clampedFrame) " +
       "wasPlaying=\(wasPlaying)"
     )
+  }
+
+  private func startSeekDebounceTimer() {
+    seekDebounceTimer?.invalidate()
+    seekDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.200, repeats: false) { [weak self] timer in
+      guard let self = self else { return }
+      self.handleSeekDebounceTimerFired()
+    }
+    RunLoop.main.add(seekDebounceTimer!, forMode: .common)
+  }
+
+  private func handleSeekDebounceTimerFired() {
+    seekDebounceTimer = nil
+    
+    if let pendingPos = pendingSeekPositionMs {
+      pendingSeekPositionMs = nil
+      debugPrint("[AppleAudioEngine] seek debounce timer fired, executing pending seek positionMs=\(pendingPos)")
+      
+      do {
+        try executeSeek(positionMs: pendingPos)
+        // Protect this executed seek for another 200ms by starting the timer again.
+        startSeekDebounceTimer()
+        // Emit state change because the seek was completed asynchronously.
+        emitPlayerState()
+      } catch {
+        debugPrint("[AppleAudioEngine] seek debounce error: \(error.localizedDescription)")
+        emitPlayerState(error: error.localizedDescription)
+      }
+    } else {
+      debugPrint("[AppleAudioEngine] seek debounce timer fired, no pending seek")
+    }
   }
 
   func setVolume(_ volume: Double) throws {

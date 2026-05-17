@@ -42,6 +42,16 @@ final class AppleAudioEngine {
   var preparedAccessPaths = Set<String>()
   private let preparedAccessPathsLock = NSLock()
   var isEngineConfigured = false
+
+  // Seek Debouncing
+  var seekDebounceTimer: Timer?
+  var pendingSeekPositionMs: Int?
+
+  func cancelSeekDebounce() {
+    seekDebounceTimer?.invalidate()
+    seekDebounceTimer = nil
+    pendingSeekPositionMs = nil
+  }
   var fftGroupingConfig = AppleFftGroupingConfig()
   let fftSetup: FFTSetup?
   let fftWorkspace: AppleFftWorkspace
@@ -71,6 +81,7 @@ final class AppleAudioEngine {
   }
 
   deinit {
+    cancelSeekDebounce()
     if let fftSetup {
       vDSP_destroy_fftsetup(fftSetup)
     }
@@ -132,6 +143,7 @@ final class AppleAudioEngine {
   }
 
   func drainDeckFfmpegPlaybackState(_ deck: PlaybackDeck, releasingFile: Bool) {
+    deck.invalidatePendingPlaybackCallbacks()
     syncOnFfmpegPlaybackQueue {
       deck.scheduledPCMBuffers.removeAll()
       if releasingFile {

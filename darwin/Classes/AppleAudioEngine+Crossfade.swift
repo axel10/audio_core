@@ -62,9 +62,9 @@ extension AppleAudioEngine {
       }
       // Ensure the native node reports a stopped state so the Dart layer can
       // reliably treat this as a completed track and advance the queue.
+      self.drainDeckFfmpegPlaybackState(deck, releasingFile: false)
       deck.stopPlaybackNode()
       deck.isPlaybackScheduled = false
-      self.drainDeckFfmpegPlaybackState(deck, releasingFile: false)
       self.emitPlayerState(playbackState: "ENDED")
     }
   }
@@ -74,6 +74,7 @@ extension AppleAudioEngine {
       "[AppleAudioEngine] stopPlayback releasingFile=\(releasingFile) preservePosition=\(preservePosition) " +
       "current=\(currentDeck.loadedURL?.path ?? "nil") incoming=\(incomingDeck.loadedURL?.path ?? "nil")"
     )
+    cancelSeekDebounce()
     fadeTimer?.invalidate()
     fadeTimer = nil
     fadeGeneration &+= 1
@@ -93,10 +94,10 @@ extension AppleAudioEngine {
       }
     }
 
-    currentDeck.stopPlaybackNode()
-    incomingDeck.stopPlaybackNode()
     drainDeckFfmpegPlaybackState(currentDeck, releasingFile: releasingFile)
     drainDeckFfmpegPlaybackState(incomingDeck, releasingFile: releasingFile)
+    currentDeck.stopPlaybackNode()
+    incomingDeck.stopPlaybackNode()
     currentDeck.clear(releasingFile: releasingFile)
     incomingDeck.clear(releasingFile: releasingFile)
     
@@ -113,6 +114,7 @@ extension AppleAudioEngine {
       "[AppleAudioEngine] pausePlayback preservePosition=\(preservePosition) " +
       "current=\(currentDeck.loadedURL?.path ?? "nil") incoming=\(incomingDeck.loadedURL?.path ?? "nil")"
     )
+    cancelSeekDebounce()
     fadeTimer?.invalidate()
     fadeTimer = nil
     fadeGeneration &+= 1
@@ -164,6 +166,7 @@ extension AppleAudioEngine {
       "positionMs=\(positionMs.map(String.init) ?? "nil") current=\(currentDeck.loadedURL?.path ?? "nil") " +
       "incoming=\(incomingDeck.loadedURL?.path ?? "nil")"
     )
+    cancelSeekDebounce()
     guard let outgoingDeck = publicDeck(),
           outgoingDeck.loadedFile != nil || outgoingDeck.loadedFFmpegStream != nil else {
       try load(path: path)
@@ -180,8 +183,8 @@ extension AppleAudioEngine {
       if let oldIncomingURL = stagingDeck.loadedURL {
         fileAccess.releaseAccess(for: oldIncomingURL)
       }
-      stagingDeck.stopPlaybackNode()
       drainDeckFfmpegPlaybackState(stagingDeck, releasingFile: true)
+      stagingDeck.stopPlaybackNode()
       stagingDeck.clear(releasingFile: true)
     }
 
@@ -255,8 +258,8 @@ extension AppleAudioEngine {
       fileAccess.releaseAccess(for: oldURL)
     }
 
-    outgoingDeck.stopPlaybackNode()
     drainDeckFfmpegPlaybackState(outgoingDeck, releasingFile: true)
+    outgoingDeck.stopPlaybackNode()
     outgoingDeck.clear(releasingFile: true)
     outgoingDeck.playbackFramePosition = 0
 

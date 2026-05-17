@@ -268,8 +268,8 @@ extension AppleAudioEngine {
       try engine.start()
     }
 
-    deck.stopPlaybackNode()
     drainDeckFfmpegPlaybackState(deck, releasingFile: false)
+    deck.stopPlaybackNode()
     let generation = deck.playbackGeneration
     let scheduledPath = deck.loadedURL?.path
     if let stream = deck.loadedFFmpegStream {
