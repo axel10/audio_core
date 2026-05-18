@@ -5,7 +5,7 @@ let package = Package(
     name: "audio_core",
     platforms: [
         .iOS("15.0"),
-        .macOS("11.0")
+        .macOS("13.0")
     ],
     products: [
         .library(name: "audio-core", targets: ["audio_core"])
