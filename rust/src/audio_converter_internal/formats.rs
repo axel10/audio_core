@@ -197,7 +197,7 @@ pub(crate) fn supported_output_formats() -> Vec<String> {
 }
 
 pub(crate) fn capabilities_notes() -> String {
-    let mut notes =
+    let notes =
         "Uses the bundled Rust/FFmpeg shared libraries through rust-ffmpeg.".to_string();
     #[cfg(any(target_os = "ios", target_os = "macos"))]
     {
