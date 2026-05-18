@@ -803,7 +803,7 @@
 /* Begin XCRemoteSwiftPackageReference section */
 		9538445AA5FC7B4A1E326319 /* XCRemoteSwiftPackageReference "SFBAudioEngine" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/sbooth/SFBAudioEngine";
+			repositoryURL = "https://github.com/axel10/SFBAudioEngine";
 			requirement = {
 				branch = main;
 				kind = branch;

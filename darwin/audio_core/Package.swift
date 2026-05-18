@@ -11,7 +11,7 @@ let package = Package(
         .library(name: "audio-core", targets: ["audio_core"])
     ],
     dependencies: [
-        .package(url: "https://github.com/sbooth/SFBAudioEngine", branch: "main")
+        .package(url: "https://github.com/axel10/SFBAudioEngine", branch: "main")
     ],
     targets: [
         .target(
