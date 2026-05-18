@@ -427,6 +427,8 @@ final class AppleAudioEngine: NSObject {
   }
 
   func statusPayload(playbackState: String? = nil, error: String? = nil) -> [String: Any] {
+    let isEnded = playbackState == "ENDED"
+
     return syncOnStateQueue {
       let slot = publicSlot()
       var payload: [String: Any] = [
@@ -434,7 +436,7 @@ final class AppleAudioEngine: NSObject {
         "state": playbackState ?? currentPlaybackState(),
         "position": slot?.currentPositionMs ?? 0,
         "duration": slot?.durationMs ?? 0,
-        "isPlaying": slot?.isPlaying ?? false,
+        "isPlaying": isEnded ? false : (slot?.isPlaying ?? false),
         "volume": latestVolume,
         "updateTime": Int(Date().timeIntervalSince1970 * 1000),
         "error": error ?? NSNull(),
@@ -1672,6 +1674,10 @@ extension AppleAudioEngine: AudioPlayer.Delegate {
       if let slot = slot(matching: audioPlayer) {
         slot.storedPositionMs = slot.durationMs
       }
+      // Some SFBAudioEngine state transitions can report the final ENDED
+      // callback before `isPlaying` has fully flipped to false. Emit a
+      // completed snapshot so the Dart playlist controller can auto-advance
+      // reliably at the end of the queue.
       emitPlayerState(playbackState: "ENDED")
     }
   }
