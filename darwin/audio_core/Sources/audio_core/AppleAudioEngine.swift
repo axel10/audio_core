@@ -221,7 +221,7 @@ final class AppleAudioEngine: NSObject {
   private var pendingSeekPositionMs: Int?
   private let fftSize = 1024
   private let fftBinCount = 512
-  private let fftLog2Size: vDSP_Length = 9
+  private let fftLog2Size: vDSP_Length = 10
   private let fftHopSize = 512
   private let fftFrameQueueCapacity = 24
   private let fftProcessingQueue = DispatchQueue(
