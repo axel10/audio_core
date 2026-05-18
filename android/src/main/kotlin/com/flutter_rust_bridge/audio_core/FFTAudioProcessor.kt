@@ -53,6 +53,8 @@ class FFTAudioProcessor(private val fftSize: Int = 1024) : BaseAudioProcessor() 
     private var skipHighFrequencyGroups: Int = 0
     @Volatile
     private var aggregationMode: FftAggregationMode = FftAggregationMode.PEAK
+    @Volatile
+    var sampleRate: Int = 44100
 
     init {
         // Pre-calculate Hanning window
@@ -69,6 +71,7 @@ class FFTAudioProcessor(private val fftSize: Int = 1024) : BaseAudioProcessor() 
         if (inputAudioFormat.channelCount <= 0 || inputAudioFormat.sampleRate <= 0) {
             throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
         }
+        this.sampleRate = inputAudioFormat.sampleRate
         // Always output 16-bit PCM
         return AudioFormat(inputAudioFormat.sampleRate, inputAudioFormat.channelCount, C.ENCODING_PCM_16BIT)
     }
@@ -120,9 +123,6 @@ class FFTAudioProcessor(private val fftSize: Int = 1024) : BaseAudioProcessor() 
         // Finalize input buffer position consumption
         inputBuffer.position(inputBuffer.position() + remaining)
         
-        // Execute FFT after filling the buffer with all samples from this chunk
-        runFft()
-        
         outputBuffer.flip()
     }
 
@@ -141,6 +141,10 @@ class FFTAudioProcessor(private val fftSize: Int = 1024) : BaseAudioProcessor() 
     private fun processSample(monoSample: Float) {
         sampleBuffer[(sampleCount % fftSize).toInt()] = monoSample
         sampleCount++
+        val hopSize = fftSize / 2
+        if (sampleCount >= fftSize && (sampleCount - fftSize) % hopSize == 0L) {
+            runFft()
+        }
     }
 
     private fun runFft() {

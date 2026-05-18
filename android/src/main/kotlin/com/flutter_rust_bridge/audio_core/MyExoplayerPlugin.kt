@@ -141,9 +141,8 @@ class MyExoplayerPlugin :
     private var fftEventSink: EventChannel.EventSink? = null
     private val fftEmitHandler = Handler(Looper.getMainLooper())
     private val fftEmitLock = Any()
-    private var fftPendingPayload: Pair<String, FloatArray>? = null
-    private var fftLastEmitAtMs: Long = 0L
-    private var fftEmitScheduled: Boolean = false
+    private val fftQueue = java.util.concurrent.ConcurrentLinkedQueue<Pair<String, FloatArray>>()
+    private var fftConsumerActive: Boolean = false
 
     private data class FftGroupingConfig(
         val frequencyGroups: Int = 32,
@@ -152,17 +151,28 @@ class MyExoplayerPlugin :
     )
 
     private var fftGroupingConfig = FftGroupingConfig()
-    private val fftEmitRunnable = Runnable {
-        val payload = synchronized(fftEmitLock) {
-            fftEmitScheduled = false
-            val current = fftPendingPayload
-            fftPendingPayload = null
-            if (current != null) {
-                fftLastEmitAtMs = SystemClock.elapsedRealtime()
+    private val fftConsumerRunnable = object : Runnable {
+        override fun run() {
+            val payload = fftQueue.poll()
+            if (payload != null) {
+                sendFftPayload(payload.first, payload.second)
             }
-            current
+            synchronized(fftEmitLock) {
+                if (!fftQueue.isEmpty()) {
+                    var frameDurationMs = 11L
+                    val mainCtx = playerContexts[MAIN_PLAYER_ID]
+                    if (mainCtx != null) {
+                        val sampleRate = mainCtx.fftProcessor.sampleRate
+                        if (sampleRate > 0) {
+                            frameDurationMs = (512.0 / sampleRate * 1000.0).toLong().coerceIn(5, 50)
+                        }
+                    }
+                    fftEmitHandler.postDelayed(this, frameDurationMs)
+                } else {
+                    fftConsumerActive = false
+                }
+            }
         }
-        payload?.let { sendFftPayload(it.first, it.second) }
     }
 
     private data class CrossfadeSession(
@@ -214,10 +224,10 @@ class MyExoplayerPlugin :
             override fun onCancel(arguments: Any?) {
                 fftEventSink = null
                 synchronized(fftEmitLock) {
-                    fftPendingPayload = null
-                    fftEmitScheduled = false
+                    fftQueue.clear()
+                    fftConsumerActive = false
                 }
-                fftEmitHandler.removeCallbacks(fftEmitRunnable)
+                fftEmitHandler.removeCallbacks(fftConsumerRunnable)
             }
         })
         
@@ -2005,24 +2015,13 @@ class MyExoplayerPlugin :
                 playerId
             }
         synchronized(fftEmitLock) {
-            fftPendingPayload = routedPlayerId to magnitudes.copyOf()
-            val now = SystemClock.elapsedRealtime()
-            val elapsed = now - fftLastEmitAtMs
-            val throttleMs = 33L
-            if (elapsed >= throttleMs && !fftEmitScheduled) {
-                fftLastEmitAtMs = now
-                val current = fftPendingPayload
-                fftPendingPayload = null
-                if (current != null) {
-                    fftEmitHandler.post { sendFftPayload(current.first, current.second) }
-                }
-                return
+            fftQueue.add(routedPlayerId to magnitudes.copyOf())
+            while (fftQueue.size > 20) {
+                fftQueue.poll()
             }
-
-            if (!fftEmitScheduled) {
-                fftEmitScheduled = true
-                val delay = (throttleMs - elapsed).coerceAtLeast(1L)
-                fftEmitHandler.postDelayed(fftEmitRunnable, delay)
+            if (!fftConsumerActive) {
+                fftConsumerActive = true
+                fftEmitHandler.post(fftConsumerRunnable)
             }
         }
     }
