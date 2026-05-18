@@ -356,8 +356,23 @@ class AudioConverter {
   static const MethodChannel _appleFileAccessChannel = MethodChannel(
     'audio_core.player',
   );
+  static const MethodChannel _appleConverterChannel = MethodChannel(
+    'audio_core.audio_converter',
+  );
+
+  bool get _usesAppleTranscoder => Platform.isIOS || Platform.isMacOS;
 
   Future<ConverterCapabilities> getCapabilities() async {
+    if (_usesAppleTranscoder) {
+      final raw = await _appleConverterChannel.invokeMapMethod<String, Object?>(
+        'getCapabilities',
+      );
+      if (raw == null) {
+        throw StateError('Apple audio converter returned no capabilities.');
+      }
+      return ConverterCapabilities.fromMap(raw);
+    }
+
     final raw = rust_api.getCapabilities();
     return ConverterCapabilities.fromMap(
       jsonDecode(raw) as Map<Object?, Object?>,
@@ -368,6 +383,59 @@ class AudioConverter {
     ConvertRequest request, {
     AudioConverterProgressCallback? onProgress,
   }) async {
+    if (_usesAppleTranscoder) {
+      onProgress?.call(
+        ConversionProgress(
+          completedFiles: 0,
+          totalFiles: 1,
+          currentFilePath: request.inputPath,
+          currentFileProgress: 0.0,
+          currentPosition: Duration.zero,
+          message: 'Starting conversion',
+        ),
+      );
+
+      try {
+        final rawResult = await _appleConverterChannel
+            .invokeMapMethod<String, Object?>('convertFile', request.toMap());
+        if (rawResult == null) {
+          throw StateError('Apple audio converter returned no result.');
+        }
+
+        final result = ConvertResult.fromMap(rawResult);
+        onProgress?.call(
+          ConversionProgress(
+            completedFiles: 1,
+            totalFiles: 1,
+            currentFilePath: result.outputPath ?? request.inputPath,
+            currentFileProgress: 1.0,
+            currentPosition: null,
+            totalDuration: null,
+            message: result.success ? 'Completed' : 'Failed',
+          ),
+        );
+        return result;
+      } catch (error) {
+        final message = error.toString();
+        onProgress?.call(
+          ConversionProgress(
+            completedFiles: 1,
+            totalFiles: 1,
+            currentFilePath: request.inputPath,
+            currentFileProgress: 1.0,
+            message: 'Failed',
+          ),
+        );
+        return ConvertResult(
+          success: false,
+          engine: 'SFBAudioEngine',
+          outputFormat: request.outputFormat,
+          errorCode: 'native_bridge_failed',
+          errorMessage: message,
+        );
+      }
+    }
+
     final rawEvents = rust_api.convertFileWithProgress(
       requestJson: jsonEncode(request.toMap()),
     );
@@ -456,7 +524,7 @@ class AudioConverter {
       customArgs: customArgs,
     );
 
-    if (!Platform.isIOS) {
+    if (!Platform.isIOS && !Platform.isMacOS) {
       return convertFile(request, onProgress: onProgress);
     }
 
@@ -465,12 +533,16 @@ class AudioConverter {
       return convertFile(request, onProgress: onProgress);
     }
 
-    final beganScopedAccess = await _beginScopedAccess(scopedOutputDirectory);
+    final beganInputAccess = await _beginScopedAccess(inputPath);
+    final beganOutputAccess = await _beginScopedAccess(scopedOutputDirectory);
     try {
       return await convertFile(request, onProgress: onProgress);
     } finally {
-      if (beganScopedAccess) {
+      if (beganOutputAccess) {
         await _endScopedAccess(scopedOutputDirectory);
+      }
+      if (beganInputAccess) {
+        await _endScopedAccess(inputPath);
       }
     }
   }
@@ -518,7 +590,7 @@ class AudioConverter {
   }
 
   Future<bool> _beginScopedAccess(String path) async {
-    if (!Platform.isIOS) {
+    if (!Platform.isIOS && !Platform.isMacOS) {
       return true;
     }
 
@@ -534,7 +606,7 @@ class AudioConverter {
   }
 
   Future<void> _endScopedAccess(String path) async {
-    if (!Platform.isIOS) {
+    if (!Platform.isIOS && !Platform.isMacOS) {
       return;
     }
 

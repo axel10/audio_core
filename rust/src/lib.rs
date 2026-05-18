@@ -1,6 +1,10 @@
 pub mod api;
 mod frb_generated;
 
+#[cfg(not(any(target_os = "ios", target_os = "macos")))]
+pub mod audio_converter_internal;
+
+
 #[cfg(target_os = "android")]
 #[no_mangle]
 pub extern "C" fn JNI_OnLoad(vm: jni::JavaVM, res: *mut std::os::raw::c_void) -> jni::sys::jint {

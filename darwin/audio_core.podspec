@@ -14,7 +14,7 @@ A new Flutter FFI plugin project.
   s.author           = { 'Your Company' => 'email@example.com' }
 
   s.source           = { :path => '.' }
-  s.source_files     = ['Classes/**/*']
+  s.source_files     = 'audio_core/Sources/audio_core/**/*'
   s.ios.dependency 'Flutter'
   s.osx.dependency 'FlutterMacOS'
 
@@ -35,16 +35,10 @@ A new Flutter FFI plugin project.
 
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
+    'SWIFT_INCLUDE_PATHS' => '$(PODS_CONFIGURATION_BUILD_DIR)',
+    'FRAMEWORK_SEARCH_PATHS' => '$(PODS_CONFIGURATION_BUILD_DIR)',
     'OTHER_LDFLAGS' => [
       '$(inherited)',
-      '-lavformat',
-      '-lavcodec',
-      '-lavfilter',
-      '-lavutil',
-      '-lswresample',
-      '-lswscale',
-      '-lmp3lame',
-      '-lopus',
       '-lm',
       '-lz',
       '-lbz2',
@@ -58,50 +52,29 @@ A new Flutter FFI plugin project.
   }
 
   s.ios.pod_target_xcconfig = {
-    'HEADER_SEARCH_PATHS' => [
-      '$(inherited)',
-      '$(PODS_TARGET_SRCROOT)/../ios/ffmpeg_lib/arm64/include',
-      '$(PODS_TARGET_SRCROOT)/../ios/ffmpeg_lib/arm64-sim/include',
-    ].join(' '),
-    'LIBRARY_SEARCH_PATHS' => [
-      '$(inherited)',
-      '$(PODS_TARGET_SRCROOT)/../ios/ffmpeg_lib/arm64/lib',
-      '$(PODS_TARGET_SRCROOT)/../ios/ffmpeg_lib/arm64-sim/lib',
-    ].join(' '),
+    'HEADER_SEARCH_PATHS' => '$(inherited)',
+    'LIBRARY_SEARCH_PATHS' => '$(inherited)',
   }
 
   s.osx.pod_target_xcconfig = {
-    'HEADER_SEARCH_PATHS' => [
-      '$(inherited)',
-      '$(PODS_TARGET_SRCROOT)/../macos/ffmpeg_lib/arm64/include',
-      '$(PODS_TARGET_SRCROOT)/../macos/ffmpeg_lib/x86_64/include',
-    ].join(' '),
-    'LIBRARY_SEARCH_PATHS' => [
-      '$(inherited)',
-      '$(PODS_TARGET_SRCROOT)/../macos/ffmpeg_lib/arm64/lib',
-      '$(PODS_TARGET_SRCROOT)/../macos/ffmpeg_lib/x86_64/lib',
-    ].join(' '),
+    'HEADER_SEARCH_PATHS' => '$(inherited)',
+    'LIBRARY_SEARCH_PATHS' => '$(inherited)',
   }
 
   s.osx.script_phase = {
-    :name => 'Embed FFmpeg Frameworks',
+    :name => 'Embed SPM Frameworks',
     :script => '
-      # 获取当前正在编译的架构 (如果是多个，取第一个)
-      ARCH=$(echo $ARCHS | cut -d" " -f1)
       DEST="${BUILT_PRODUCTS_DIR}/${FRAMEWORKS_FOLDER_PATH}"
-      SRC="${PODS_TARGET_SRCROOT}/../macos/ffmpeg_lib/${ARCH}/lib"
-
-      echo "Embedding FFmpeg libraries for architecture: ${ARCH}"
-      echo "Source: ${SRC}"
-      echo "Destination: ${DEST}"
-
       mkdir -p "${DEST}"
-      if [ -d "${SRC}" ]; then
-        cp -af "${SRC}/"*.dylib "${DEST}/"
-      else
-        echo "Error: FFmpeg libraries not found at ${SRC}"
-        exit 1
-      fi
+
+      # Embed SPM package binary frameworks
+      echo "Embedding SPM binary frameworks from ${PODS_CONFIGURATION_BUILD_DIR}"
+      for fw in lame tta-cpp opus FLAC mpg123 mpc wavpack ogg sndfile vorbis; do
+        if [ -d "${PODS_CONFIGURATION_BUILD_DIR}/${fw}.framework" ]; then
+          echo "Copying ${fw}.framework to ${DEST}"
+          cp -af "${PODS_CONFIGURATION_BUILD_DIR}/${fw}.framework" "${DEST}/"
+        fi
+      done
     ',
     :execution_position => :after_compile,
   }

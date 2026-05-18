@@ -9,11 +9,21 @@ set(BUILD_TESTS OFF CACHE BOOL "Build test suite" FORCE)
 set(BUILD_TOOLS OFF CACHE BOOL "Build command line tools" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
 
-# Fix for add_subdirectory() overriding CMAKE_SOURCE_DIR in FindKissFFT
-set(KISSFFT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/chromaprint/src/3rdparty/kissfft" CACHE PATH "KissFFT root directory" FORCE)
-set(KISSFFT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/chromaprint/src/3rdparty/kissfft" CACHE PATH "KissFFT source directory" FORCE)
-
-add_subdirectory(chromaprint)
+# Fetch chromaprint from GitHub directly
+include(FetchContent)
+FetchContent_Declare(
+    chromaprint
+    GIT_REPOSITORY https://github.com/acoustid/chromaprint
+    GIT_TAG        master
+)
+FetchContent_GetProperties(chromaprint)
+if(NOT chromaprint_POPULATED)
+    FetchContent_Populate(chromaprint)
+    # Fix for add_subdirectory() overriding CMAKE_SOURCE_DIR in FindKissFFT
+    set(KISSFFT_ROOT "${chromaprint_SOURCE_DIR}/src/3rdparty/kissfft" CACHE PATH "KissFFT root directory" FORCE)
+    set(KISSFFT_SOURCE_DIR "${chromaprint_SOURCE_DIR}/src/3rdparty/kissfft" CACHE PATH "KissFFT source directory" FORCE)
+    add_subdirectory(${chromaprint_SOURCE_DIR} ${chromaprint_BINARY_DIR})
+endif()
 
 add_library( # Sets the name of the library.
         my_exoplayer
@@ -26,7 +36,7 @@ add_library( # Sets the name of the library.
         EqualizerEngine.cpp)
 
 # Make sure our code can find chromaprint.h
-target_include_directories(my_exoplayer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/chromaprint/src)
+target_include_directories(my_exoplayer PRIVATE ${chromaprint_SOURCE_DIR}/src)
 
 set(AUDIO_CONVERTER_FFMPEG_ROOT
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../android/ffmpeg_lib/${CMAKE_ANDROID_ARCH_ABI}

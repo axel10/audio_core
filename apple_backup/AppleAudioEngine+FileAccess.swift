@@ -107,6 +107,7 @@ extension AppleAudioEngine {
       "[AppleAudioEngine] dispose current=\(currentDeck.loadedURL?.path ?? "nil") " +
       "incoming=\(incomingDeck.loadedURL?.path ?? "nil")"
     )
+    cancelSeekDebounce()
     fadeTimer?.invalidate()
     fadeTimer = nil
     pendingEdit = nil

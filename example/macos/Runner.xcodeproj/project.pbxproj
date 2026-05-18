@@ -292,6 +292,9 @@
 				Base,
 			);
 			mainGroup = 33CC10E42044A3C60003C045;
+			packageReferences = (
+				91ABABC34BC2FDEADBB7E74E /* XCLocalSwiftPackageReference "SFBAudioEngine" */,
+			);
 			productRefGroup = 33CC10EE2044A3C60003C045 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -796,6 +799,13 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		91ABABC34BC2FDEADBB7E74E /* XCLocalSwiftPackageReference "SFBAudioEngine" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../../../SFBAudioEngine;
+		};
+/* End XCLocalSwiftPackageReference section */
 	};
 	rootObject = 33CC10E52044A3C60003C045 /* Project object */;
 }
