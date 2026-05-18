@@ -502,6 +502,31 @@ final class AppleAudioEngine: NSObject {
     return [:]
   }
 
+  func getTrackMetadata(path: String) -> [String: Any] {
+    let normalizedPath = normalizedFilePath(path)
+    return AppleTrackMetadataBridge.readTrackMetadata(
+      path: normalizedPath,
+      fileAccess: fileAccess
+    )
+  }
+
+  func updateTrackMetadata(path: String, metadata: [String: Any]) throws {
+    let normalizedPath = normalizedFilePath(path)
+    try AppleTrackMetadataBridge.updateTrackMetadata(
+      path: normalizedPath,
+      metadata: metadata,
+      fileAccess: fileAccess
+    )
+  }
+
+  func removeAllTags(path: String) throws {
+    let normalizedPath = normalizedFilePath(path)
+    try AppleTrackMetadataBridge.removeAllTags(
+      path: normalizedPath,
+      fileAccess: fileAccess
+    )
+  }
+
   func deleteFromLibrary(path: String) throws {
     _ = path
   }

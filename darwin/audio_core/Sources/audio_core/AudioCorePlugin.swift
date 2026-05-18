@@ -23,6 +23,10 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
   private var fftEmitCount = 0
   private var fftLastEmitAtMs: Double?
   private let loadQueue = DispatchQueue(label: "audio_core.plugin.load", qos: .userInitiated)
+  private let metadataQueue = DispatchQueue(
+    label: "audio_core.plugin.metadata",
+    qos: .userInitiated
+  )
   private let conversionQueue = DispatchQueue(
     label: "audio_core.plugin.convert",
     qos: .userInitiated
@@ -368,6 +372,79 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         ))
       }
 
+    case "getTrackMetadata":
+      guard let args = call.arguments as? [String: Any],
+            let path = args["path"] as? String else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
+        return
+      }
+      metadataQueue.async {
+        do {
+          let payload = self.engine.getTrackMetadata(path: path)
+          DispatchQueue.main.async {
+            result(payload)
+          }
+        } catch {
+          self.sendPlayerState(error: error.localizedDescription)
+          DispatchQueue.main.async {
+            result(FlutterError(
+              code: "GET_METADATA_FAILED",
+              message: error.localizedDescription,
+              details: nil
+            ))
+          }
+        }
+      }
+
+    case "updateTrackMetadata":
+      guard let args = call.arguments as? [String: Any],
+            let path = args["path"] as? String else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
+        return
+      }
+      let metadata = Self.normalizeMetadataDictionary(args["metadata"]) ?? [:]
+      metadataQueue.async {
+        do {
+          try self.engine.updateTrackMetadata(path: path, metadata: metadata)
+          DispatchQueue.main.async {
+            result(true)
+          }
+        } catch {
+          self.sendPlayerState(error: error.localizedDescription)
+          DispatchQueue.main.async {
+            result(FlutterError(
+              code: "UPDATE_METADATA_FAILED",
+              message: error.localizedDescription,
+              details: nil
+            ))
+          }
+        }
+      }
+
+    case "removeAllTags":
+      guard let args = call.arguments as? [String: Any],
+            let path = args["path"] as? String else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
+        return
+      }
+      metadataQueue.async {
+        do {
+          try self.engine.removeAllTags(path: path)
+          DispatchQueue.main.async {
+            result(true)
+          }
+        } catch {
+          self.sendPlayerState(error: error.localizedDescription)
+          DispatchQueue.main.async {
+            result(FlutterError(
+              code: "REMOVE_METADATA_FAILED",
+              message: error.localizedDescription,
+              details: nil
+            ))
+          }
+        }
+      }
+
     case "getCapabilities":
       result(AppleAudioTranscoder.capabilities())
 
@@ -598,5 +675,37 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
 
   private static func readTrackMetadataArgs(_ args: [String: Any]) -> [String: Any] {
     args
+  }
+
+  private static func normalizeMetadataDictionary(_ value: Any?) -> [String: Any]? {
+    guard let dictionary = value as? [String: Any] else { return nil }
+    return dictionary.reduce(into: [String: Any]()) { result, entry in
+      let normalized = normalizeMetadataValue(entry.value)
+      if let normalized {
+        result[entry.key] = normalized
+      }
+    }
+  }
+
+  private static func normalizeMetadataValue(_ value: Any) -> Any? {
+    if value is NSNull {
+      return NSNull()
+    }
+    if let typedData = value as? FlutterStandardTypedData {
+      return typedData.data
+    }
+    if let data = value as? Data {
+      return data
+    }
+    if let data = value as? NSData {
+      return data as Data
+    }
+    if let dictionary = value as? [String: Any] {
+      return normalizeMetadataDictionary(dictionary)
+    }
+    if let array = value as? [Any] {
+      return array.compactMap(normalizeMetadataValue)
+    }
+    return value
   }
 }

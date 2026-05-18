@@ -12,7 +12,6 @@ import '../track_artwork.dart';
 import '../track_metadata.dart';
 import '../track_metadata_update.dart';
 import 'audio_engine_interface.dart';
-import 'rust_metadata_bridge.dart';
 import 'track_artwork_support.dart';
 
 class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
@@ -444,11 +443,14 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   }) async {
     final targetPath = _normalizePath(path);
     return _withAppleFileWriteAccess(targetPath, () async {
-      await rust.updateTrackMetadata(
-        path: targetPath,
-        metadata: trackMetadataUpdateFromMap(metadata),
+      final result = await _channel.invokeMethod<bool>(
+        'updateTrackMetadata',
+        <String, Object?>{
+          'path': targetPath,
+          'metadata': metadata,
+        },
       );
-      return true;
+      return result ?? true;
     });
   }
 
@@ -474,15 +476,13 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
       final results = <bool>[];
       for (final request in normalizedRequests) {
         try {
-          final metadata = trackMetadataUpdateFromUpdate(
-            request.metadata,
-            includeEmptyCollections: request.clearBeforeWrite,
-          );
-          await rust.updateTrackMetadata(
+          final success = await updateTrackMetadata(
             path: request.path,
-            metadata: metadata,
+            metadata: request.metadata.toMap(
+              includeEmptyCollections: request.clearBeforeWrite,
+            ),
           );
-          results.add(true);
+          results.add(success);
         } catch (_) {
           results.add(false);
         }
@@ -505,10 +505,21 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
       results.add(
         await _withAppleFileWriteAccess(targetPath, () async {
           final metadata = await _withAppleFileReadAccess(sourcePath, () async {
-            return rust.getTrackMetadata(path: sourcePath);
+            final result = await _channel.invokeMethod<Map<Object?, Object?>>(
+              'getTrackMetadata',
+              <String, Object?>{'path': sourcePath},
+            );
+            return TrackMetadata.fromMap(
+              Map<String, Object?>.from(result ?? const <Object?, Object?>{}),
+            );
           });
-          await rust.removeAllTags(path: targetPath);
-          await rust.updateTrackMetadata(path: targetPath, metadata: metadata);
+          await removeAllTags(path: targetPath);
+          await updateTrackMetadata(
+            path: targetPath,
+            metadata: TrackMetadataUpdate.fromTrackMetadata(metadata).toMap(
+              includeEmptyCollections: true,
+            ),
+          );
           return true;
         }).catchError((_) => false),
       );
@@ -523,9 +534,15 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   }) async {
     final targetPath = _normalizePath(path);
     final metadata = await _withAppleFileReadAccess(targetPath, () async {
-      return rust.getTrackMetadata(path: targetPath);
+      final result = await _channel.invokeMethod<Map<Object?, Object?>>(
+        'getTrackMetadata',
+        <String, Object?>{'path': targetPath},
+      );
+      return TrackMetadata.fromMap(
+        Map<String, Object?>.from(result ?? const <Object?, Object?>{}),
+      );
     });
-    return trackMetadataFromRust(metadata);
+    return metadata;
   }
 
   @override
@@ -564,7 +581,10 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     }
     final normalizedPath = _normalizePath(targetPath);
     await _withAppleFileWriteAccess(normalizedPath, () async {
-      await rust.removeAllTags(path: normalizedPath);
+      await _channel.invokeMethod<bool>(
+        'removeAllTags',
+        <String, Object?>{'path': normalizedPath},
+      );
     });
   }
 
