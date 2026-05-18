@@ -293,8 +293,7 @@
 			);
 			mainGroup = 33CC10E42044A3C60003C045;
 			packageReferences = (
-				91ABABC34BC2FDEADBB7E74E /* XCLocalSwiftPackageReference "SFBAudioEngine" */,
-				12621CF0CD5560B3E406D992 /* XCLocalSwiftPackageReference "SFBAudioEngine" */,
+				9538445AA5FC7B4A1E326319 /* XCRemoteSwiftPackageReference "SFBAudioEngine" */,
 			);
 			productRefGroup = 33CC10EE2044A3C60003C045 /* Products */;
 			projectDirPath = "";
@@ -801,16 +800,16 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		12621CF0CD5560B3E406D992 /* XCLocalSwiftPackageReference "SFBAudioEngine" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../../../../../../../Users/axel10/projects/player_project/SFBAudioEngine;
+/* Begin XCRemoteSwiftPackageReference section */
+		9538445AA5FC7B4A1E326319 /* XCRemoteSwiftPackageReference "SFBAudioEngine" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sbooth/SFBAudioEngine";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
 		};
-		91ABABC34BC2FDEADBB7E74E /* XCLocalSwiftPackageReference "SFBAudioEngine" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../../../SFBAudioEngine;
-		};
-/* End XCLocalSwiftPackageReference section */
+/* End XCRemoteSwiftPackageReference section */
 	};
 	rootObject = 33CC10E52044A3C60003C045 /* Project object */;
 }
