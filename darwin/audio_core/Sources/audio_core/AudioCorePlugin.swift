@@ -76,7 +76,6 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       result(nil)
 
     case "load":
-      cancelPendingSeekDebounce()
       guard let args = call.arguments as? [String: Any],
             let path = args["url"] as? String else {
         result(FlutterError(code: "INVALID_ARGUMENT", message: "URL is null", details: nil))
@@ -100,7 +99,6 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       }
 
     case "crossfade":
-      cancelPendingSeekDebounce()
       guard let args = call.arguments as? [String: Any],
             let path = args["path"] as? String else {
         result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
@@ -154,12 +152,12 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     case "seek":
       let positionMs = Self.readInt(call.arguments, key: "position") ?? 0
       debugPrint("[AudioCorePlugin] method=seek positionMs=\(positionMs)")
-      guard engine.publicDeck() != nil else {
-        result(FlutterError(code: "SEEK_FAILED", message: "audio is not loaded", details: nil))
-        return
+      do {
+        try engine.seek(positionMs: positionMs)
+        result(nil)
+      } catch {
+        result(FlutterError(code: "SEEK_FAILED", message: error.localizedDescription, details: nil))
       }
-      scheduleSeekDebounce(positionMs: positionMs)
-      result(nil)
 
     case "setVolume":
       let volume = Self.readDouble(call.arguments, key: "volume") ?? 1.0
@@ -378,20 +376,9 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         return
       }
       metadataQueue.async {
-        do {
-          let payload = self.engine.getTrackMetadata(path: path)
-          DispatchQueue.main.async {
-            result(payload)
-          }
-        } catch {
-          self.sendPlayerState(error: error.localizedDescription)
-          DispatchQueue.main.async {
-            result(FlutterError(
-              code: "GET_METADATA_FAILED",
-              message: error.localizedDescription,
-              details: nil
-            ))
-          }
+        let payload = self.engine.getTrackMetadata(path: path)
+        DispatchQueue.main.async {
+          result(payload)
         }
       }
 
@@ -500,7 +487,6 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       result(nil)
 
     case "dispose":
-      cancelPendingSeekDebounce()
       engine.dispose()
       result(nil)
 
@@ -536,39 +522,6 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       "onPlayerStateChanged",
       arguments: engine.statusPayload(playbackState: playbackState, error: error)
     )
-  }
-
-  private func scheduleSeekDebounce(positionMs: Int) {
-    var workItem: DispatchWorkItem?
-    seekDebounceLock.lock()
-    pendingSeekPositionMs = positionMs
-    seekDebounceWorkItem?.cancel()
-
-    workItem = DispatchWorkItem { [weak self] in
-      guard let self = self else { return }
-      let latestPositionMs: Int?
-      self.seekDebounceLock.lock()
-      latestPositionMs = self.pendingSeekPositionMs
-      self.pendingSeekPositionMs = nil
-      self.seekDebounceWorkItem = nil
-      self.seekDebounceLock.unlock()
-
-      guard let latestPositionMs else { return }
-      self.engine.requestSeek(positionMs: latestPositionMs)
-    }
-    seekDebounceWorkItem = workItem
-    seekDebounceLock.unlock()
-
-    guard let workItem else { return }
-    seekDebounceQueue.asyncAfter(deadline: .now() + seekDebounceDelay, execute: workItem)
-  }
-
-  private func cancelPendingSeekDebounce() {
-    seekDebounceLock.lock()
-    seekDebounceWorkItem?.cancel()
-    seekDebounceWorkItem = nil
-    pendingSeekPositionMs = nil
-    seekDebounceLock.unlock()
   }
 
   private func emitLatestFftSnapshot() {
@@ -636,7 +589,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       fftEmitCount &+= 1
       let emitCount = fftEmitCount
       let emittedAtMs = Date().timeIntervalSince1970 * 1000.0
-      let deltaMs = fftLastEmitAtMs.map { emittedAtMs - $0 }
+      // let deltaMs = fftLastEmitAtMs.map { emittedAtMs - $0 }
       fftLastEmitAtMs = emittedAtMs
       // if engine.isPlaying {
       //   let preview = Array(fft.prefix(10))

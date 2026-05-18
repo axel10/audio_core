@@ -269,6 +269,12 @@ final class AppleAudioEngine: NSObject {
     releaseAllAccess()
   }
 
+  var hasAudioLoaded: Bool {
+    return syncOnStateQueue {
+      publicSlot()?.isLoaded == true
+    }
+  }
+
   func ensureReady() {
     // The player is created eagerly so the channel contract stays simple.
   }
