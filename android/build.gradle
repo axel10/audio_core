@@ -55,6 +55,7 @@ android {
         // Compile the vendored Media3 FFmpeg extension directly from source so we
         // do not need the third-party nextlib wrapper.
         main.java.srcDirs += 'media3-src/decoder_ffmpeg/src/main/java'
+        main.jniLibs.srcDirs += 'ffmpeg_lib'
     }
 
     defaultConfig {

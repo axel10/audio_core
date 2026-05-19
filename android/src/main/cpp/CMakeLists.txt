@@ -39,7 +39,7 @@ add_library( # Sets the name of the library.
 target_include_directories(my_exoplayer PRIVATE ${chromaprint_SOURCE_DIR}/src)
 
 set(AUDIO_CONVERTER_FFMPEG_ROOT
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../android/ffmpeg_lib/${CMAKE_ANDROID_ARCH_ABI}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../ffmpeg_lib/${CMAKE_ANDROID_ARCH_ABI}
         CACHE PATH "FFmpeg root directory for Android fallback"
 )
 if(EXISTS "${AUDIO_CONVERTER_FFMPEG_ROOT}/include/libavcodec/avcodec.h"
