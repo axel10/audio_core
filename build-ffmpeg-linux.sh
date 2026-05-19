@@ -43,7 +43,7 @@ done
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$script_dir"
-ffmpeg_root="$repo_root/ffmpeg"
+ffmpeg_root="$repo_root/ffmpeg-8.1"
 build_root="$repo_root/build/ffmpeg-linux"
 install_root="$build_root/install"
 

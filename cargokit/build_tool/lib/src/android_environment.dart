@@ -170,7 +170,9 @@ class AndroidEnvironment {
     }
 
     final bindgenEnvKey = 'BINDGEN_EXTRA_CLANG_ARGS_${target.rust.replaceAll('-', '_').toUpperCase()}';
-    final bindgenEnvValue = '--sysroot=$sysrootPath -isystem $sysrootPath/usr/include -isystem $sysrootPath/usr/include/${headerTargetTriple(target.rust)}';
+    final bindgenEnvKeyLower = 'BINDGEN_EXTRA_CLANG_ARGS_${target.rust.replaceAll('-', '_')}';
+    final bindgenEnvKeyDashes = 'BINDGEN_EXTRA_CLANG_ARGS_${target.rust}';
+    final bindgenEnvValue = '$targetArg --sysroot=$sysrootPath -isystem $sysrootPath/usr/include -isystem $sysrootPath/usr/include/${headerTargetTriple(target.rust)}';
 
     return {
       arKey: arValue,
@@ -187,6 +189,9 @@ class AndroidEnvironment {
       'CARGOKIT_TOOL_TEMP_DIR': toolTempDir,
       if (Directory(ffmpegDir).existsSync()) 'FFMPEG_DIR': ffmpegDir,
       bindgenEnvKey: bindgenEnvValue,
+      bindgenEnvKeyLower: bindgenEnvValue,
+      bindgenEnvKeyDashes: bindgenEnvValue,
+      'BINDGEN_EXTRA_CLANG_ARGS': bindgenEnvValue,
     };
   }
 
