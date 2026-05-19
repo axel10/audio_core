@@ -15,5 +15,16 @@ apply_cargokit(${PROJECT_NAME} ../rust audio_core "")
 # external build triggered from this build file.
 set(audio_core_bundled_libraries
   "${${PROJECT_NAME}_cargokit_lib}"
+)
+
+set(LOCAL_FFMPEG_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../build/ffmpeg-linux/install/lib")
+get_filename_component(LOCAL_FFMPEG_LIB_DIR "${LOCAL_FFMPEG_LIB_DIR}" REALPATH)
+if (EXISTS "${LOCAL_FFMPEG_LIB_DIR}")
+    file(GLOB FFMPEG_LIBS "${LOCAL_FFMPEG_LIB_DIR}/*.so*")
+    list(APPEND audio_core_bundled_libraries ${FFMPEG_LIBS})
+endif()
+
+set(audio_core_bundled_libraries
+  ${audio_core_bundled_libraries}
   PARENT_SCOPE
 )

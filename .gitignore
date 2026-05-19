@@ -44,3 +44,5 @@ FFmpeg.xcframework
 
 build
 ._*
+
+.cache

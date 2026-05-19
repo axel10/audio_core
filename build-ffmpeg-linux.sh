@@ -74,6 +74,51 @@ for path in "$ffmpeg_root" "$ffmpeg_root/configure"; do
   fi
 done
 
+# Detect and install missing dependencies
+missing_packages=()
+
+check_tool() {
+  local tool="$1"
+  local pkg="$2"
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    missing_packages+=("$pkg")
+  fi
+}
+
+check_tool gcc gcc
+check_tool g++ g++
+check_tool make make
+check_tool nasm nasm
+check_tool perl perl
+check_tool pkg-config pkg-config
+
+if command -v pkg-config >/dev/null 2>&1; then
+  if ! pkg-config --exists opus; then
+    missing_packages+=("libopus-dev")
+  fi
+  if ! pkg-config --exists libmp3lame && ! pkg-config --exists lame; then
+    missing_packages+=("libmp3lame-dev")
+  fi
+  if ! pkg-config --exists fdk-aac; then
+    missing_packages+=("libfdk-aac-dev")
+  fi
+else
+  missing_packages+=("libopus-dev" "libmp3lame-dev" "libfdk-aac-dev")
+fi
+
+if [[ ${#missing_packages[@]} -gt 0 ]]; then
+  log "Missing dependencies: ${missing_packages[*]}"
+  if command -v apt-get >/dev/null 2>&1; then
+    log "Attempting to install missing dependencies using apt-get (sudo password may be required)..."
+    sudo apt-get update
+    sudo apt-get install -y "${missing_packages[@]}"
+  else
+    echo "Warning: The following packages are missing and could not be installed automatically (unsupported package manager):" >&2
+    echo "  ${missing_packages[*]}" >&2
+    echo "Please install them manually using your system package manager." >&2
+  fi
+fi
+
 need_tool gcc
 need_tool g++
 need_tool make
