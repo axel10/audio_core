@@ -39,7 +39,8 @@ subprojects {
         val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
         project.layout.buildDirectory.value(newSubprojectBuildDir)
     } else {
-        project.layout.buildDirectory.set(file("/tmp/vibe_flow_audio_core_build/${project.name}"))
+        val tmpDir = System.getProperty("java.io.tmpdir")
+        project.layout.buildDirectory.set(file("$tmpDir/vibe_flow_audio_core_build/${project.name}"))
     }
 }
 subprojects {
