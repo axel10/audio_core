@@ -44,3 +44,4 @@ FFmpeg.xcframework
 jniLibs/
 
 build
+._*

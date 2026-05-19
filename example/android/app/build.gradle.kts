@@ -15,6 +15,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    aaptOptions {
+        ignoreAssetsPattern = "!._*:!.DS_Store:!*.scc:.*:<dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"
+    }
+
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_17.toString()
     }
@@ -31,6 +35,10 @@ android {
     }
 
     packaging {
+        resources {
+            excludes += "**/._*"
+            excludes += "**/._**"
+        }
         jniLibs {
       //      pickFirsts += listOf(
       //          "**/libavcodec.so",
