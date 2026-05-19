@@ -153,6 +153,25 @@ class AndroidEnvironment {
     final rootDir = path.dirname(path.dirname(selfPath));
     final ffmpegDir = path.join(rootDir, 'android', 'ffmpeg_lib', target.android);
 
+    final sysrootPath = path.join(
+      ndkPath,
+      'toolchains',
+      'llvm',
+      'prebuilt',
+      hostArch,
+      'sysroot',
+    );
+
+    String headerTargetTriple(String rustTarget) {
+      if (rustTarget == 'armv7-linux-androideabi') {
+        return 'arm-linux-androideabi';
+      }
+      return rustTarget;
+    }
+
+    final bindgenEnvKey = 'BINDGEN_EXTRA_CLANG_ARGS_${target.rust.replaceAll('-', '_').toUpperCase()}';
+    final bindgenEnvValue = '--sysroot=$sysrootPath -isystem $sysrootPath/usr/include -isystem $sysrootPath/usr/include/${headerTargetTriple(target.rust)}';
+
     return {
       arKey: arValue,
       ccKey: ccValue,
@@ -167,6 +186,7 @@ class AndroidEnvironment {
       '_CARGOKIT_NDK_LINK_CLANG': ccValue,
       'CARGOKIT_TOOL_TEMP_DIR': toolTempDir,
       if (Directory(ffmpegDir).existsSync()) 'FFMPEG_DIR': ffmpegDir,
+      bindgenEnvKey: bindgenEnvValue,
     };
   }
 
