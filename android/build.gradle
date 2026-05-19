@@ -112,3 +112,63 @@ cargokit {
     manifestDir = "../rust"
     libname = "audio_core"
 }
+
+task downloadFFmpeg {
+    def targetDir = file("ffmpeg_lib")
+    outputs.dir(targetDir)
+
+    doLast {
+        if (!targetDir.exists() || targetDir.list().length == 0) {
+            println "--------------------------------------------------------"
+            println "FFmpeg precompiled binaries for Android not found."
+            println "Downloading from GitHub Releases..."
+            println "--------------------------------------------------------"
+            
+            targetDir.mkdirs()
+            def downloadUrl = "https://github.com/axel10/audio_core/releases/download/0.0.1/ffmpeg_lib_android.tar.gz"
+            def tempFile = file("ffmpeg_lib_temp.tar.gz")
+            
+            try {
+                def connection = new URL(downloadUrl).openConnection()
+                connection.setRequestProperty("User-Agent", "Mozilla/5.0")
+                connection.setConnectTimeout(15000)
+                connection.setReadTimeout(30000)
+                
+                int status = connection.getResponseCode()
+                if (status >= 300 && status < 400) {
+                    def redirectUrl = connection.getHeaderField("Location")
+                    connection = new URL(redirectUrl).openConnection()
+                    connection.setRequestProperty("User-Agent", "Mozilla/5.0")
+                    connection.setConnectTimeout(15000)
+                    connection.setReadTimeout(30000)
+                }
+                
+                connection.getInputStream().withStream { i -> 
+                    tempFile.withOutputStream { it << i } 
+                }
+                
+                println "Extracting FFmpeg binaries..."
+                copy {
+                    from tarTree(resources.gzip(tempFile))
+                    into file(".")
+                }
+                println "FFmpeg binaries downloaded and extracted successfully!"
+            } catch (Exception e) {
+                if (tempFile.exists()) {
+                    tempFile.delete()
+                }
+                throw new GradleScriptException("Failed to download FFmpeg precompiled libraries: " + e.getMessage(), e)
+            } finally {
+                if (tempFile.exists()) {
+                    tempFile.delete()
+                }
+            }
+        }
+    }
+}
+
+tasks.configureEach { task ->
+    if (task.name.startsWith("cargokitCargoBuild") || task.name == "preBuild") {
+        task.dependsOn downloadFFmpeg
+    }
+}
