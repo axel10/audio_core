@@ -43,6 +43,41 @@ done
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$script_dir"
+
+if [ "${INSIDE_DOCKER:-}" != "true" ]; then
+  # Detect docker command and permissions
+  if command -v docker >/dev/null 2>&1; then
+    if docker ps >/dev/null 2>&1; then
+      DOCKER_CMD="docker"
+    elif command -v sudo >/dev/null 2>&1; then
+      DOCKER_CMD="sudo docker"
+    else
+      DOCKER_CMD="docker"
+    fi
+  else
+    DOCKER_CMD=""
+  fi
+
+  if [ -n "$DOCKER_CMD" ]; then
+    echo "Running build inside Ubuntu 22.04 Docker container using $DOCKER_CMD..."
+    $DOCKER_CMD run --rm \
+      -v "$repo_root":/workspace \
+      -w /workspace \
+      -e INSIDE_DOCKER=true \
+      -e HOST_UID="$(id -u)" \
+      -e HOST_GID="$(id -g)" \
+      ubuntu:22.04 bash -c "
+        apt-get update && \
+        apt-get install -y sudo build-essential nasm pkg-config curl git libopus-dev libmp3lame-dev libfdk-aac-dev && \
+        ./download_sources.sh && \
+        ./build-ffmpeg-linux.sh $* && \
+        chown -R \${HOST_UID}:\${HOST_GID} /workspace
+      "
+    exit 0
+  else
+    echo "Docker not found or no permissions to run Docker, building natively on host..."
+  fi
+fi
 ffmpeg_root="$repo_root/ffmpeg-8.1"
 build_root="$repo_root/build/ffmpeg-linux"
 install_root="$build_root/install"
@@ -96,7 +131,7 @@ if command -v pkg-config >/dev/null 2>&1; then
   if ! pkg-config --exists opus; then
     missing_packages+=("libopus-dev")
   fi
-  if ! pkg-config --exists libmp3lame && ! pkg-config --exists lame; then
+  if [[ ! -f "/usr/include/lame/lame.h" ]]; then
     missing_packages+=("libmp3lame-dev")
   fi
   if ! pkg-config --exists fdk-aac; then
@@ -136,14 +171,29 @@ if command -v ccache >/dev/null 2>&1; then
 fi
 
 need_pkg_config_pkg opus
-if ! pkg-config --exists libmp3lame && ! pkg-config --exists lame; then
-  echo "Missing pkg-config package: libmp3lame (or lame)" >&2
+if [[ ! -f "/usr/include/lame/lame.h" ]]; then
+  echo "Missing dependency: libmp3lame-dev (header lame/lame.h not found)" >&2
   exit 1
 fi
 need_pkg_config_pkg fdk-aac
 
 if $clean && [[ -e "$build_root" ]]; then
   rm -rf "$build_root"
+elif [[ -f "$build_root/Makefile" ]]; then
+  # If we are inside Docker, Makefile source path should contain /workspace.
+  # If we are on the host, Makefile source path should NOT contain /workspace.
+  has_workspace=false
+  if grep -q "include /workspace/" "$build_root/Makefile"; then
+    has_workspace=true
+  fi
+  
+  if [ "${INSIDE_DOCKER:-}" = "true" ] && ! $has_workspace; then
+    log "Detected stale host paths in build directory inside Docker. Cleaning..."
+    rm -rf "$build_root"
+  elif [ "${INSIDE_DOCKER:-}" != "true" ] && $has_workspace; then
+    log "Detected stale Docker paths in build directory on host. Cleaning..."
+    rm -rf "$build_root"
+  fi
 fi
 
 mkdir -p "$build_root" "$install_root"

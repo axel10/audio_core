@@ -51,6 +51,17 @@ function(apply_cargokit target manifest_dir lib_name any_symbol_name)
     if (NOT WIN32 AND NOT APPLE)
         set(LOCAL_FFMPEG_PKGCONFIG "${CMAKE_CURRENT_SOURCE_DIR}/${manifest_dir}/../build/ffmpeg-linux/install/lib/pkgconfig")
         get_filename_component(LOCAL_FFMPEG_PKGCONFIG "${LOCAL_FFMPEG_PKGCONFIG}" REALPATH)
+        if (NOT EXISTS "${LOCAL_FFMPEG_PKGCONFIG}")
+            message(STATUS "Local FFmpeg build not found. Attempting to download precompiled binaries...")
+            execute_process(
+                COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/${manifest_dir}/../download-ffmpeg-linux.sh"
+                WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${manifest_dir}/.."
+                RESULT_VARIABLE DOWNLOAD_RESULT
+            )
+            if (NOT DOWNLOAD_RESULT EQUAL 0)
+                message(WARNING "Failed to download precompiled FFmpeg binaries. Building from source may be required.")
+            endif()
+        endif()
         if (EXISTS "${LOCAL_FFMPEG_PKGCONFIG}")
             set(ENV_PKG_CONFIG_PATH "$ENV{PKG_CONFIG_PATH}")
             if (ENV_PKG_CONFIG_PATH)
