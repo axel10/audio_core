@@ -44,6 +44,10 @@ function(apply_cargokit target manifest_dir lib_name any_symbol_name)
         "CARGOKIT_ROOT_PROJECT_DIR=${CMAKE_SOURCE_DIR}"
     )
 
+    if (FFMPEG_DIR)
+        list(APPEND CARGOKIT_ENV "FFMPEG_DIR=${FFMPEG_DIR}")
+    endif()
+
     if (WIN32)
         set(SCRIPT_EXTENSION ".cmd")
         set(IMPORT_LIB_EXTENSION ".lib")

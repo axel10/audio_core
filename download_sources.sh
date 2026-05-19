@@ -62,20 +62,24 @@ ensure_vcpkg() {
 }
 
 if is_windows_shell; then
-    echo "Windows detected, using vcpkg for FFmpeg dependencies."
+    if [ -d "$ROOT_DIR/windows/third_party/ffmpeg" ]; then
+        echo "Prebuilt FFmpeg found at windows/third_party/ffmpeg. Skipping vcpkg installation."
+    else
+        echo "Windows detected, using vcpkg for FFmpeg dependencies."
 
-    ensure_vcpkg
-    export VCPKG_ROOT
+        ensure_vcpkg
+        export VCPKG_ROOT
 
-    if [ ! -d "$ROOT_DIR/$VCPKG_PORT_NAME" ]; then
-        echo "Expected port directory '$VCPKG_PORT_NAME' was not found."
-        exit 1
+        if [ ! -d "$ROOT_DIR/$VCPKG_PORT_NAME" ]; then
+            echo "Expected port directory '$VCPKG_PORT_NAME' was not found."
+            exit 1
+        fi
+
+        echo "Installing $VCPKG_PORT_NAME:$VCPKG_TRIPLET from overlay ports..."
+        "$VCPKG_ROOT/vcpkg.exe" install "${VCPKG_PORT_NAME}:${VCPKG_TRIPLET}" \
+            --overlay-ports="$ROOT_DIR" \
+            --overlay-triplets="$ROOT_DIR/$VCPKG_PORT_NAME/triplets"
     fi
-
-    echo "Installing $VCPKG_PORT_NAME:$VCPKG_TRIPLET from overlay ports..."
-    "$VCPKG_ROOT/vcpkg.exe" install "${VCPKG_PORT_NAME}:${VCPKG_TRIPLET}" \
-        --overlay-ports="$ROOT_DIR" \
-        --overlay-triplets="$ROOT_DIR/$VCPKG_PORT_NAME/triplets"
 else
     # 1. fdk-aac
     if [ ! -d "fdk-aac-2.0.3" ]; then

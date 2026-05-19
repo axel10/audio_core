@@ -8,6 +8,8 @@ cmake_minimum_required(VERSION 3.14)
 set(PROJECT_NAME "audio_core")
 project(${PROJECT_NAME} LANGUAGES CXX)
 
+set(FFMPEG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffmpeg")
+
 include("../cargokit/cmake/cargokit.cmake")
 apply_cargokit(${PROJECT_NAME} ../rust audio_core "")
 
@@ -16,5 +18,13 @@ apply_cargokit(${PROJECT_NAME} ../rust audio_core "")
 # external build triggered from this build file.
 set(audio_core_bundled_libraries
   "${${PROJECT_NAME}_cargokit_lib}"
+  "${FFMPEG_DIR}/bin/avcodec-62.dll"
+  "${FFMPEG_DIR}/bin/avfilter-11.dll"
+  "${FFMPEG_DIR}/bin/avformat-62.dll"
+  "${FFMPEG_DIR}/bin/avutil-60.dll"
+  "${FFMPEG_DIR}/bin/fdk-aac.dll"
+  "${FFMPEG_DIR}/bin/libmp3lame.dll"
+  "${FFMPEG_DIR}/bin/opus.dll"
+  "${FFMPEG_DIR}/bin/swresample-6.dll"
   PARENT_SCOPE
 )
