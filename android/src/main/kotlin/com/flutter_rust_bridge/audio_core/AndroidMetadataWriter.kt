@@ -12,7 +12,7 @@ import com.kyant.taglib.TagLib
 import java.io.File
 import java.util.Locale
 
-internal object AndroidMetadataWriter {
+object AndroidMetadataWriter {
     fun resolveMediaStoreUri(context: Context, path: String): String? {
         val normalizedPath = path.trim()
         if (normalizedPath.startsWith("content://")) {

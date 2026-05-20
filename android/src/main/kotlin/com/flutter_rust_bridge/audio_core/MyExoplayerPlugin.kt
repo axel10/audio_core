@@ -25,7 +25,6 @@ import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.util.EventLogger
-import com.linc.amplituda.Amplituda
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -132,7 +131,6 @@ class MyExoplayerPlugin :
     private var context: Context? = null
     private var activity: Activity? = null
     private var activityBinding: ActivityPluginBinding? = null
-    private var amplituda: Amplituda? = null
     private var pendingMetadataWrite: PendingMetadataWrite? = null
     private var pendingMediaLibraryPermissionResult: Result? = null
     private var crossfadeAnimator: ValueAnimator? = null
@@ -231,7 +229,6 @@ class MyExoplayerPlugin :
             }
         })
         
-        amplituda = Amplituda(context)
         // Initialize default player
         getOrCreatePlayerContext("main")
     }
@@ -372,66 +369,33 @@ class MyExoplayerPlugin :
             "getWaveform" -> {
                 val path = call.argument<String>("path") ?: return result.error("INVALID_ARGUMENT", "Path is null", null)
                 val expectedChunks = call.argument<Int>("expectedChunks") ?: 0
-                // Amplituda's processing and any content:// materialization can be expensive,
-                // so keep it off the main thread to avoid janking the UI.
                 Thread {
                     var localPath = path
                     var isTemp = false
                     try {
-                        val amp = amplituda ?: run {
-                            result.error("INTERNAL_ERROR", "Amplituda not initialized", null)
-                            return@Thread
-                        }
-
                         val resolvedPath = ensureLocalPath(path)
                         localPath = resolvedPath.first
                         isTemp = resolvedPath.second
 
-                        amp.processAudio(localPath).get({ amResult ->
-                            try {
-                                val rawData = amResult.amplitudesAsList()
-                                val processedData = if (expectedChunks > 0) {
-                                    downsample(rawData, expectedChunks)
-                                } else {
-                                    rawData
-                                }
-                                result.success(processedData)
-                            } finally {
-                                if (isTemp) java.io.File(localPath).delete()
-                            }
-                        }, { error ->
-                            try {
-                                val fallbackWaveform = ChromaprintNative
-                                    .nativeGetWaveformFromFileFfmpeg(localPath, expectedChunks)
-                                    ?.toList()
-                                if (fallbackWaveform != null) {
-                                    val processedData = if (expectedChunks > 0) {
-                                        downsampleWaveform(fallbackWaveform, expectedChunks)
-                                    } else {
-                                        fallbackWaveform
-                                    }
-                                    result.success(processedData)
-                                } else {
-                                    result.error("AMPLITUDA_ERROR", error.message, null)
-                                }
-                            } finally {
-                                if (isTemp) java.io.File(localPath).delete()
-                            }
-                        })
-                    } catch (e: Exception) {
-                        val fallbackWaveform = ChromaprintNative
+                        val rawWaveform = ChromaprintNative
                             .nativeGetWaveformFromFileFfmpeg(localPath, expectedChunks)
                             ?.toList()
-                        if (fallbackWaveform != null) {
+
+                        if (rawWaveform != null) {
+                            // Scale values by 100.0 to match the 0.0 - 100.0 range expected by Dart
+                            val scaledWaveform = rawWaveform.map { it * 100.0 }
                             val processedData = if (expectedChunks > 0) {
-                                downsampleWaveform(fallbackWaveform, expectedChunks)
+                                downsampleWaveform(scaledWaveform, expectedChunks)
                             } else {
-                                fallbackWaveform
+                                scaledWaveform
                             }
                             result.success(processedData)
                         } else {
-                            result.error("AMPLITUDA_ERROR", e.message, null)
+                            result.error("WAVEFORM_ERROR", "Failed to extract waveform", null)
                         }
+                    } catch (e: Exception) {
+                        result.error("WAVEFORM_ERROR", e.message, null)
+                    } finally {
                         if (isTemp) {
                             java.io.File(localPath).delete()
                         }
@@ -1859,24 +1823,7 @@ class MyExoplayerPlugin :
         }
     }
 
-    private fun downsample(amplitudes: List<Int>, targetSize: Int): List<Int> {
-        if (targetSize <= 0 || amplitudes.isEmpty()) return emptyList()
-        if (amplitudes.size <= targetSize) return amplitudes
-        
-        val result = ArrayList<Int>(targetSize)
-        val chunkSize = amplitudes.size.toDouble() / targetSize
-        for (i in 0 until targetSize) {
-            val start = (i * chunkSize).toInt()
-            val end = ((i + 1) * chunkSize).toInt().coerceAtMost(amplitudes.size)
-            var max = 0
-            for (j in start until end) {
-                val value = amplitudes.get(j)
-                if (value > max) max = value
-            }
-            result.add(max)
-        }
-        return result
-    }
+
 
     private fun downsampleWaveform(amplitudes: List<Double>, targetSize: Int): List<Double> {
         if (targetSize <= 0 || amplitudes.isEmpty()) return emptyList()
@@ -1903,7 +1850,6 @@ class MyExoplayerPlugin :
         fftEventChannel.setStreamHandler(null)
         fftEventSink = null
         instance = null
-        amplituda = null
         context = null
         pendingMetadataWrite = null
         pendingMediaLibraryPermissionResult = null
