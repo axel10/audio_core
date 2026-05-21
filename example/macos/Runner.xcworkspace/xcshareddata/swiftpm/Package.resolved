@@ -1,5 +1,5 @@
 {
-  "originHash" : "6a22000fa58b7195180764376ab1c553a82a009d21d49309a74bced04d6f66ef",
+  "originHash" : "1c1e9418103ea9d948ef92fb7d10b7980207d273114cd5428a10b45b87b3d5a1",
   "pins" : [
     {
       "identity" : "avfaudioextensions",
@@ -134,15 +134,6 @@
       "state" : {
         "revision" : "8e23828b9d88f0ff1ff2d7c4bcb65739a4bdeff8",
         "version" : "0.3.0"
-      }
-    },
-    {
-      "identity" : "sfbaudioengine",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/axel10/SFBAudioEngine",
-      "state" : {
-        "branch" : "main",
-        "revision" : "a72c020bdaad9f9b88405124a411515540389a7b"
       }
     },
     {
