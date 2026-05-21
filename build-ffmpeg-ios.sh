@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# 配置项
+
 DEPLOYMENT_TARGET="11.0"
-# 默认编译架构：真机 arm64，模拟器 arm64 (Apple Silicon Mac)
-# 如果你还在用 Intel Mac，可以加上 x86_64
 ARCHS=("arm64" "arm64-sim")
 usage() {
   cat <<EOF
@@ -52,45 +50,31 @@ find_source_dir() {
 }
 
 ffmpeg_root="$(find_source_dir FFmpeg || find_source_dir ffmpeg || true)"
-lame_root="$(find_source_dir lame || true)"
-opus_root="$(find_source_dir opus || true)"
 log() {
   printf "[$(date +%H:%M:%S)] %s\n" "$*"
 }
 [[ -z "$ffmpeg_root" ]] && { echo "Error: FFmpeg source not found in $repo_root" >&2; exit 1; }
-[[ -z "$lame_root" ]] && { echo "Error: LAME source not found in $repo_root" >&2; exit 1; }
-[[ -z "$opus_root" ]] && { echo "Error: Opus source not found in $repo_root" >&2; exit 1; }
 for arch in "${ARCHS[@]}"; do
   log "Targeting architecture: $arch"
   
-  # 根据架构设置 SDK 和编译器标志
   if [[ "$arch" == "arm64" ]]; then
     sdk="iphoneos"
-    platform_name="iphoneos"
     ff_arch="arm64"
     cc_arch="arm64"
     ff_cpu="armv8-a"
     extra_flags="-arch arm64 -miphoneos-version-min=$DEPLOYMENT_TARGET"
-    # Opus treats arm* hosts as 32-bit ARM and enables celt/arm/*.S.
-    # Use aarch64 here so Apple Silicon iPhone builds do not pick the wrong asm path.
-    opus_host="aarch64-apple-darwin"
   elif [[ "$arch" == "arm64-sim" ]]; then
     sdk="iphonesimulator"
-    platform_name="iphonesimulator"
     ff_arch="arm64"
     cc_arch="arm64"
     ff_cpu="armv8-a"
     extra_flags="-arch arm64 -miphonesimulator-version-min=$DEPLOYMENT_TARGET"
-    lame_host="aarch64-apple-darwin"
-    opus_host="aarch64-apple-darwin"
   elif [[ "$arch" == "x86_64" ]]; then
     sdk="iphonesimulator"
-    platform_name="iphonesimulator"
     ff_arch="x86_64"
     cc_arch="x86_64"
     ff_cpu="x86-64"
     extra_flags="-arch x86_64 -miphonesimulator-version-min=$DEPLOYMENT_TARGET"
-    opus_host="x86_64-apple-darwin"
   else
     echo "Unsupported architecture: $arch" >&2; exit 1
   fi
@@ -103,63 +87,10 @@ for arch in "${ARCHS[@]}"; do
   strip="xcrun -sdk $sdk strip"
   build_root="$repo_root/build/ffmpeg-ios-$arch"
   install_root="$repo_root/ios/ffmpeg_lib/$arch"
-  lame_build_root="$repo_root/build/lame-ios-$arch"
-  lame_install_root="$lame_build_root/install"
-  opus_build_root="$repo_root/build/opus-ios-$arch"
-  opus_install_root="$opus_build_root/install"
   if $clean; then
-    rm -rf "$build_root" "$lame_build_root" "$opus_build_root" "$install_root"
+    rm -rf "$build_root" "$install_root"
   fi
-  # 1. 编译 LAME
-  log "Building LAME for $arch..."
-  mkdir -p "$lame_build_root"
-  cd "$lame_build_root"
-  
-  # LAME configure 对于 iOS 需要设置 host
-  lame_host="arm-apple-darwin"
-  [[ "$arch" == "arm64-sim" ]] && lame_host="aarch64-apple-darwin"
-  [[ "$arch" == "x86_64" ]] && lame_host="x86_64-apple-darwin"
-  "$lame_root/configure" \
-    --prefix="$lame_install_root" \
-    --host="$lame_host" \
-    --disable-shared \
-    --enable-static \
-    --disable-frontend \
-    CC="$cc" \
-    CFLAGS="$extra_flags -isysroot $sdk_path" \
-    LDFLAGS="$extra_flags -isysroot $sdk_path" \
-    AR="$ar" \
-    RANLIB="$ranlib"
-  make -j"$jobs"
-  make install
-  # FFmpeg's pkg-config metadata links against libmp3lame, so install the
-  # matching static archive alongside the other iOS libraries.
-  mkdir -p "$install_root/lib"
-  cp -f "$lame_install_root/lib/libmp3lame.a" "$install_root/lib/libmp3lame.a"
 
-  # 2. 编译 Opus
-  log "Building Opus for $arch..."
-  mkdir -p "$opus_build_root"
-  cd "$opus_build_root"
-
-  "$opus_root/configure" \
-    --prefix="$opus_install_root" \
-    --host="$opus_host" \
-    --disable-shared \
-    --enable-static \
-    --disable-extra-programs \
-    --disable-doc \
-    CC="$cc" \
-    CFLAGS="$extra_flags -isysroot $sdk_path -fPIC" \
-    LDFLAGS="$extra_flags -isysroot $sdk_path" \
-    AR="$ar" \
-    RANLIB="$ranlib"
-  make -j"$jobs"
-  make install
-
-  cp -f "$opus_install_root/lib/libopus.a" "$install_root/lib/libopus.a"
-
-  # 3. 编译 FFmpeg
   log "Configuring FFmpeg for $arch..."
   mkdir -p "$build_root"
   cd "$build_root"
@@ -176,10 +107,6 @@ for arch in "${ARCHS[@]}"; do
     --strip="$strip"
     --enable-cross-compile
     --sysroot="$sdk_path"
-    --extra-cflags="$extra_flags -I$lame_install_root/include -I$opus_install_root/include/opus"
-    --extra-ldflags="$extra_flags -L$lame_install_root/lib -L$opus_install_root/lib"
-
-    # 基础配置 (参考你的 Android 脚本)
     --disable-everything
     --disable-autodetect
     --disable-debug
@@ -189,33 +116,59 @@ for arch in "${ARCHS[@]}"; do
     --disable-ffmpeg
     --disable-avdevice
     --disable-filters
-    --enable-filter=abuffer,abuffersink,anull,aresample,aformat
+    --disable-muxers
+    --disable-programs
     --enable-small
     --disable-gpl
     --enable-pic
-    --disable-shared
     --enable-static
-    --enable-libmp3lame
-    --enable-libopus
-    
-    # 编解码器配置 (保持与 Android 一致)
+    --disable-shared
+
     --enable-protocol=file,pipe
-    --enable-parser=aac,aac_latm,flac,mpegaudio,opus
     --enable-bsf=aac_adtstoasc
-    --enable-decoder=aac,aac_latm,flac,mjpeg,mp3,mp3float,opus,libopus,pcm_alaw,pcm_f32le,pcm_f64le,pcm_mulaw,pcm_s16le,pcm_s24le,pcm_s32le,pcm_u8
-    --enable-encoder=aac,flac,mjpeg,libopus,libmp3lame,pcm_s16be,pcm_s16le
-    --enable-demuxer=aac,flac,mp3,mov,ffmetadata,ogg,wav,matroska
-    --enable-muxer=adts,flac,ipod,matroska,mov,mp3,ogg,opus,wav
+    --enable-parser=aac
+    --enable-parser=aac_latm
+    --enable-parser=flac
+    --enable-parser=mpegaudio
+    --enable-parser=opus
+    --enable-parser=vorbis
+    --enable-demuxer=aac
+    --enable-demuxer=aiff
+    --enable-demuxer=caf
+    --enable-demuxer=flac
+    --enable-demuxer=mov
+    --enable-demuxer=mp3
+    --enable-demuxer=ogg
+    --enable-demuxer=wav
+    --enable-demuxer=matroska
+    --enable-decoder=aac
+    --enable-decoder=aac_latm
+    --enable-decoder=alac
+    --enable-decoder=flac
+    --enable-decoder=mp3
+    --enable-decoder=mp3float
+    --enable-decoder=opus
+    --enable-decoder=vorbis
+    --enable-decoder=pcm_alaw
+    --enable-decoder=pcm_f32be
+    --enable-decoder=pcm_f32le
+    --enable-decoder=pcm_f64be
+    --enable-decoder=pcm_f64le
+    --enable-decoder=pcm_mulaw
+    --enable-decoder=pcm_s16be
+    --enable-decoder=pcm_s16le
+    --enable-decoder=pcm_s24be
+    --enable-decoder=pcm_s24le
+    --enable-decoder=pcm_s32be
+    --enable-decoder=pcm_s32le
+    --enable-decoder=pcm_u8
   )
-  export PKG_CONFIG_PATH="$opus_install_root/lib/pkgconfig:$lame_install_root/lib/pkgconfig"
-  "$ffmpeg_root/configure" --pkg-config-flags="--static" "${configure_args[@]}"
+  "$ffmpeg_root/configure" "${configure_args[@]}"
   make -j"$jobs"
   make install
 
-  # 4. 合并所有静态库为一个 libffmpeg.a
+  # 合并所有静态库为一个 libffmpeg.a
   log "Merging all static libraries into libffmpeg.a for $arch..."
-  # 获取所有 .a 文件，排除可能已经存在的 libffmpeg.a (如果是重复运行且没 clean)
-  # 虽然脚本开头有 rm -rf，但显式排除更安全
   libs=$(find "$install_root/lib" -name "*.a" ! -name "libffmpeg.a")
   libtool -static -o "$install_root/lib/libffmpeg.a" $libs
 
@@ -223,7 +176,6 @@ for arch in "${ARCHS[@]}"; do
   log "Single static library created at: $install_root/lib/libffmpeg.a"
 done
 
-# 5. 生成 XCFramework
 log "Generating XCFramework..."
 
 xcframework_path="$repo_root/ios/FFmpeg.xcframework"
