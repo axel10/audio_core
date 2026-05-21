@@ -1042,13 +1042,10 @@ class AudioCoreController extends ChangeNotifier
       return false;
     }
 
-    final isCurrentTrack = player.currentPath == path;
-    final fileSize = file?.lengthSync() ?? 0;
-    final needsSync =
-        isCurrentTrack && (Platform.isAndroid || fileSize >= 60 * 1024 * 1024);
+    final needsSync = managePlaybackSync && _needsMetadataWriteSyncForPath(path);
 
     try {
-      if (managePlaybackSync && needsSync) {
+      if (needsSync) {
         await _engine.prepareForFileWrite();
         await Future.delayed(const Duration(milliseconds: 200));
       }
@@ -1073,7 +1070,7 @@ class AudioCoreController extends ChangeNotifier
         );
       }
 
-      if (managePlaybackSync && needsSync) {
+      if (needsSync) {
         await _engine.finishFileWrite();
       }
 
@@ -1091,7 +1088,7 @@ class AudioCoreController extends ChangeNotifier
       debugPrint('[AudioCore][Metadata] updateMetadata failed: $errorText');
       player.setError('Metadata update failed: $errorText');
 
-      if (managePlaybackSync && needsSync) {
+      if (needsSync) {
         await _engine.finishFileWrite().catchError((_) {});
       }
       return false;
