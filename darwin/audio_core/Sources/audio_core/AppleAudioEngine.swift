@@ -763,6 +763,21 @@ final class AppleAudioEngine: NSObject {
     }
 
     let clampedPositionMs = max(0, positionMs)
+    let durationMs = slot.durationMs
+    let toleranceMs = completionToleranceMs(for: slot)
+
+    if durationMs > 0 && clampedPositionMs >= durationMs - toleranceMs {
+      slot.storedPositionMs = durationMs
+#if canImport(SFBAudioEngine)
+      slot.player.stop()
+#else
+      slot.player?.stop()
+      slot.player?.currentTime = 0
+#endif
+      emitPlayerState(playbackState: "ENDED")
+      return
+    }
+
     let wasPlaying = slot.isPlaying
     try slot.seek(positionMs: clampedPositionMs)
     if !wasPlaying {
@@ -1989,12 +2004,13 @@ extension AppleAudioEngine: AudioPlayer.Delegate {
   func audioPlayerEndOfAudio(_ audioPlayer: AudioPlayer) {
     syncOnStateQueue {
       if let slot = slot(matching: audioPlayer) {
+        // Set storedPositionMs BEFORE calling stop():
+        // stop() triggers playbackStateChanged(.stopped) synchronously,
+        // and isPlaybackComplete() must see the final position at that point.
+        // (SFBAudioEngine source: audioPlayerEndOfAudio → shouldStop=false,
+        //  engine stays in paused state; we must stop it ourselves.)
         slot.storedPositionMs = slot.durationMs
-        // When the delegate is implemented SFBAudioEngine leaves final stop
-        // handling to us; explicitly stop the player so tail playback can't
-        // linger in a half-finished state on macOS.
         audioPlayer.stop()
-        slot.storedPositionMs = slot.durationMs
       }
       emitPlayerState(playbackState: "ENDED")
     }
