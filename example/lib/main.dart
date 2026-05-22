@@ -302,6 +302,35 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
     await _handleImportedPaths(paths, fadeSetting: fadeSetting);
   }
 
+  Future<void> _pickAudioWithFilePicker({FadeSettings? fadeSetting}) async {
+    debugPrint('[AudioCore][Example] File picker audio clicked');
+    if (!_controller.isInitialized) {
+      debugPrint(
+        '[AudioCore][Example] Controller not initialized, initializing now...',
+      );
+      await _controller.initialize();
+    }
+
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: _audioFileExtensions,
+      allowMultiple: false,
+    );
+    debugPrint(
+      '[AudioCore][Example] File picker returned: ${result?.files.length ?? 0} files',
+    );
+    if (result == null || result.files.isEmpty) {
+      return;
+    }
+
+    final path = result.files.first.path;
+    if (path == null || path.isEmpty) {
+      return;
+    }
+
+    await _handleImportedPaths([path], fadeSetting: fadeSetting);
+  }
+
   Future<AndroidMediaLibraryEntry?> _openAndroidMediaLibraryPicker(
     AudioLibraryFolder root,
   ) {
@@ -492,6 +521,13 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
           ElevatedButton(
             onPressed: _controller.isSupported ? _pickAudio : null,
             child: const Text('Select Audio'),
+          ),
+          const SizedBox(width: 12),
+          ElevatedButton(
+            onPressed: _controller.isSupported
+                ? _pickAudioWithFilePicker
+                : null,
+            child: const Text('File Picker'),
           ),
           const SizedBox(width: 12),
           ElevatedButton(
