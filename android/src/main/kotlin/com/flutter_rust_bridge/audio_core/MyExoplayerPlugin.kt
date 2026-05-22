@@ -17,14 +17,23 @@ import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.media3.common.C
+import androidx.media3.common.Format
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.RendererCapabilities
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.AudioRendererEventListener
+import androidx.media3.exoplayer.audio.MediaCodecAudioRenderer
 import androidx.media3.exoplayer.util.EventLogger
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -36,6 +45,33 @@ import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
 import io.flutter.plugin.common.PluginRegistry.ActivityResultListener
 import io.flutter.plugin.common.PluginRegistry.RequestPermissionsResultListener
+
+@UnstableApi
+private class FlacSkippingMediaCodecAudioRenderer(
+    context: Context,
+    mediaCodecSelector: MediaCodecSelector,
+    enableDecoderFallback: Boolean,
+    eventHandler: Handler?,
+    eventListener: AudioRendererEventListener?,
+    audioSink: AudioSink,
+) : MediaCodecAudioRenderer(
+    context,
+    mediaCodecSelector,
+    enableDecoderFallback,
+    eventHandler,
+    eventListener,
+    audioSink,
+) {
+    protected override fun supportsFormat(
+        mediaCodecSelector: MediaCodecSelector,
+        format: Format,
+    ): Int {
+        if (MimeTypes.AUDIO_FLAC == format.sampleMimeType) {
+            return RendererCapabilities.create(C.FORMAT_UNSUPPORTED_TYPE)
+        }
+        return super.supportsFormat(mediaCodecSelector, format)
+    }
+}
 
 @UnstableApi
 /** MyExoplayerPlugin */
@@ -247,7 +283,47 @@ class MyExoplayerPlugin :
 
         val renderersFactory = object : DefaultRenderersFactory(safeContext) {
             init {
+                // Keep the extension renderer in the normal position, but let
+                // MediaCodec explicitly step aside for FLAC so only that format
+                // falls through to FFmpeg.
                 setExtensionRendererMode(EXTENSION_RENDERER_MODE_ON)
+            }
+
+            override fun buildAudioRenderers(
+                context: Context,
+                extensionRendererMode: Int,
+                mediaCodecSelector: MediaCodecSelector,
+                enableDecoderFallback: Boolean,
+                audioSink: AudioSink,
+                eventHandler: Handler,
+                eventListener: AudioRendererEventListener,
+                out: ArrayList<Renderer>,
+            ) {
+                out.add(
+                    FlacSkippingMediaCodecAudioRenderer(
+                        context,
+                        mediaCodecSelector,
+                        enableDecoderFallback,
+                        eventHandler,
+                        eventListener,
+                        audioSink,
+                    ),
+                )
+
+                if (extensionRendererMode == EXTENSION_RENDERER_MODE_OFF) {
+                    return
+                }
+
+                // The vendored FFmpeg extension should only receive the FLAC
+                // stream because the MediaCodec renderer above explicitly
+                // rejects FLAC before renderer selection happens.
+                out.add(
+                    FfmpegAudioRenderer(
+                        eventHandler,
+                        eventListener,
+                        audioSink,
+                    ),
+                )
             }
 
             override fun buildAudioSink(

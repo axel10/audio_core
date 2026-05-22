@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package android.media3;
+package androidx.media3.decoder.ffmpeg;
 
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.decoder.DecoderException;
