@@ -17,6 +17,7 @@ package androidx.media3.decoder.ffmpeg;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
+import android.util.Log;
 import androidx.annotation.Nullable;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
@@ -89,6 +90,9 @@ import java.util.List;
                    | ((long)(extraData[15] & 0xFF) << 16)
                    | ((long)(extraData[16] & 0xFF) << 8)
                    | ((long)(extraData[17] & 0xFF));
+    //   Log.d("FfmpegAudioDecoder", "Parsed totalSamples for FLAC: " + totalSamples + " (extraData length: " + extraData.length + ")");
+    // } else {
+    //   Log.d("FfmpegAudioDecoder", "Not FLAC or extraData too short. MimeType: " + format.sampleMimeType + ", extraData: " + (extraData != null ? extraData.length : "null"));
     }
   }
 
@@ -159,19 +163,30 @@ import java.util.List;
     }
 
     if (shouldResetDecodedSamples) {
-      decodedSamplesCount = (inputBuffer.timeUs * sampleRate) / 1000000L;
+      long oldVal = decodedSamplesCount;
+      long relativeTimeUs = inputBuffer.timeUs;
+      if (relativeTimeUs == C.TIME_UNSET || relativeTimeUs < 0) {
+        relativeTimeUs = 0;
+      } else {
+        relativeTimeUs = relativeTimeUs % 1000000000000L;
+      }
+      decodedSamplesCount = (relativeTimeUs * sampleRate) / 1000000L;
+      // Log.d("FfmpegAudioDecoder", "Reset decodedSamplesCount from " + oldVal + " to " + decodedSamplesCount + " (inputBuffer.timeUs: " + inputBuffer.timeUs + ", sampleRate: " + sampleRate + ", isFirstPacket: " + isFirstPacket + ", reset: " + reset + ")");
       isFirstPacket = false;
     }
 
     int bytesPerFrame = channelCount * (encoding == C.ENCODING_PCM_FLOAT ? 4 : 2);
     int framesDecoded = result / bytesPerFrame;
+    // Log.d("FfmpegAudioDecoder", "ffmpegDecode result bytes: " + result + ", framesDecoded: " + framesDecoded + ", decodedSamplesCount before: " + decodedSamplesCount + ", totalSamples: " + totalSamples);
     if (totalSamples > 0) {
       if (decodedSamplesCount >= totalSamples) {
+        // Log.d("FfmpegAudioDecoder", "decodedSamplesCount (" + decodedSamplesCount + ") >= totalSamples (" + totalSamples + "), skipping buffer!");
         outputBuffer.shouldBeSkipped = true;
         return null;
       }
       if (decodedSamplesCount + framesDecoded > totalSamples) {
         int allowedFrames = (int) (totalSamples - decodedSamplesCount);
+        // Log.d("FfmpegAudioDecoder", "decodedSamplesCount + framesDecoded (" + (decodedSamplesCount + framesDecoded) + ") > totalSamples (" + totalSamples + "). Truncating. Allowed frames: " + allowedFrames);
         if (allowedFrames <= 0) {
           outputBuffer.shouldBeSkipped = true;
           return null;
@@ -181,6 +196,7 @@ import java.util.List;
       }
     }
     decodedSamplesCount += framesDecoded;
+    // Log.d("FfmpegAudioDecoder", "decodedSamplesCount after update: " + decodedSamplesCount);
 
     // Get a new reference to the output ByteBuffer in case the native decode method reallocated the
     // buffer to grow its size.
