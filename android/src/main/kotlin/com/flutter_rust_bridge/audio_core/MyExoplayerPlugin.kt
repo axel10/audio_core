@@ -41,6 +41,13 @@ import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.TransformationRequest
 
+import android.os.Environment
+import android.provider.DocumentsContract
+import android.webkit.MimeTypeMap
+import androidx.documentfile.provider.DocumentFile
+import java.io.FileInputStream
+import java.util.Locale
+
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -106,6 +113,7 @@ class MyExoplayerPlugin :
         private const val CROSSFADE_PLAYER_ID = "crossfade"
         private const val REQUEST_WRITE_MEDIA = 43041
         private const val REQUEST_READ_MEDIA = 4892
+        private const val REQUEST_PICK_OUTPUT_DIRECTORY = 42109
 
         init {
             System.loadLibrary("my_exoplayer")
@@ -170,6 +178,8 @@ class MyExoplayerPlugin :
     private lateinit var channel: MethodChannel
     private lateinit var mediaLibraryChannel: MethodChannel
     private lateinit var fftEventChannel: EventChannel
+    private lateinit var safChannel: MethodChannel
+    private var pendingDirectoryResult: Result? = null
     private var context: Context? = null
     private var activity: Activity? = null
     private var activityBinding: ActivityPluginBinding? = null
@@ -271,6 +281,9 @@ class MyExoplayerPlugin :
                 fftEmitHandler.removeCallbacks(fftConsumerRunnable)
             }
         })
+        
+        safChannel = MethodChannel(flutterPluginBinding.binaryMessenger, "com.example.audio_converter/saf")
+        safChannel.setMethodCallHandler(safMethodCallHandler)
         
         // Initialize default player
         getOrCreatePlayerContext("main")
@@ -1824,6 +1837,40 @@ class MyExoplayerPlugin :
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode == REQUEST_PICK_OUTPUT_DIRECTORY) {
+            val result = pendingDirectoryResult
+            pendingDirectoryResult = null
+
+            if (result == null) {
+                return true
+            }
+
+            val safeActivity = activity ?: run {
+                result.error("no_activity", "Android activity is not available.", null)
+                return true
+            }
+
+            if (resultCode != Activity.RESULT_OK || data == null || data.data == null) {
+                result.success(null)
+                return true
+            }
+
+            val treeUri = data.data!!
+            val takeFlags = data.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            try {
+                safeActivity.contentResolver.takePersistableUriPermission(treeUri, takeFlags)
+            } catch (error: SecurityException) {
+                NativeLog.w("AudioCore", "Failed to persist SAF permission for $treeUri: ${error.message}")
+            }
+
+            val response = mapOf(
+                "treeUri" to treeUri.toString(),
+                "displayPath" to resolveDisplayPath(treeUri)
+            )
+            result.success(response)
+            return true
+        }
+
         if (requestCode != REQUEST_WRITE_MEDIA) return false
 
         val pending = pendingMetadataWrite ?: return true
@@ -1985,6 +2032,157 @@ class MyExoplayerPlugin :
         }
     }
 
+    private val safMethodCallHandler = MethodCallHandler { call, originalResult ->
+        val result = MainThreadResult(originalResult)
+        when (call.method) {
+            "pickOutputDirectory" -> {
+                pickOutputDirectory(result)
+            }
+            "saveFileToDirectory" -> {
+                saveFileToDirectory(call.arguments, result)
+            }
+            else -> {
+                result.notImplemented()
+            }
+        }
+    }
+
+    private fun pickOutputDirectory(result: Result) {
+        val safeActivity = activity ?: run {
+            result.error("no_activity", "Android activity is not available.", null)
+            return
+        }
+        if (pendingDirectoryResult != null) {
+            result.error("already_active", "A directory picker is already active.", null)
+            return
+        }
+
+        pendingDirectoryResult = result
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                putExtra(
+                    DocumentsContract.EXTRA_INITIAL_URI,
+                    Uri.parse("content://com.android.externalstorage.documents/root/primary")
+                )
+            }
+        }
+
+        try {
+            safeActivity.startActivityForResult(intent, REQUEST_PICK_OUTPUT_DIRECTORY)
+        } catch (error: Exception) {
+            pendingDirectoryResult = null
+            result.error("directory_picker_failed", error.message, null)
+        }
+    }
+
+    private fun saveFileToDirectory(arguments: Any?, result: Result) {
+        val safeActivity = activity ?: run {
+            result.error("no_activity", "Android activity is not available.", null)
+            return
+        }
+        if (arguments !is Map<*, *>) {
+            result.error("invalid_arguments", "Expected a map of arguments.", null)
+            return
+        }
+
+        val treeUriString = arguments["treeUri"]?.toString()
+        val sourcePath = arguments["sourcePath"]?.toString()
+        val fileName = arguments["fileName"]?.toString()
+
+        if (treeUriString.isNullOrEmpty()) {
+            result.error("invalid_arguments", "Missing treeUri.", null)
+            return
+        }
+        if (sourcePath.isNullOrEmpty()) {
+            result.error("invalid_arguments", "Missing sourcePath.", null)
+            return
+        }
+        if (fileName.isNullOrEmpty()) {
+            result.error("invalid_arguments", "Missing fileName.", null)
+            return
+        }
+
+        val treeUri = Uri.parse(treeUriString)
+        val tree = DocumentFile.fromTreeUri(safeActivity, treeUri)
+        if (tree == null) {
+            result.error("save_failed", "Failed to resolve the selected directory.", null)
+            return
+        }
+
+        try {
+            val existing = tree.findFile(fileName)
+            existing?.delete()
+
+            val created = tree.createFile(mimeTypeForFileName(fileName), fileName)
+            if (created == null) {
+                result.error("save_failed", "Failed to create the output file.", null)
+                return
+            }
+
+            try {
+                FileInputStream(sourcePath).use { input ->
+                    safeActivity.contentResolver.openOutputStream(created.uri, "w").use { output ->
+                        if (output == null) {
+                            result.error("save_failed", "Failed to open the output stream.", null)
+                            return
+                        }
+
+                        val buffer = ByteArray(8192)
+                        var read: Int
+                        while (input.read(buffer).also { read = it } != -1) {
+                            output.write(buffer, 0, read)
+                        }
+                        output.flush()
+                    }
+                }
+            } catch (e: Exception) {
+                result.error("save_failed", e.message, null)
+                return
+            }
+
+            val response = mapOf(
+                "savedUri" to created.uri.toString(),
+                "displayPath" to resolveDisplayPath(treeUri) + "/" + fileName
+            )
+            result.success(response)
+        } catch (error: java.io.IOException) {
+            NativeLog.e("AudioCore", "Failed to copy output file into SAF directory", error)
+            result.error("save_failed", error.message, null)
+        }
+    }
+
+    private fun resolveDisplayPath(treeUri: Uri): String {
+        return try {
+            val docId = DocumentsContract.getTreeDocumentId(treeUri)
+            val parts = docId.split(":")
+            if (parts.size > 1) {
+                if ("primary".equals(parts[0], ignoreCase = true)) {
+                    Environment.getExternalStorageDirectory().toString() + "/" + parts[1]
+                } else {
+                    "/storage/" + parts[0] + "/" + parts[1]
+                }
+            } else {
+                treeUri.toString()
+            }
+        } catch (e: Exception) {
+            treeUri.toString()
+        }
+    }
+
+    private fun mimeTypeForFileName(fileName: String): String {
+        val dotIndex = fileName.lastIndexOf('.')
+        if (dotIndex < 0 || dotIndex == fileName.length - 1) {
+            return "application/octet-stream"
+        }
+
+        val extension = fileName.substring(dotIndex + 1).lowercase(Locale.US)
+        val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
+        return mimeType ?: "application/octet-stream"
+    }
+
     private fun ensureLocalPath(path: String): Pair<String, Boolean> {
         if (!path.startsWith("content://")) return Pair(path, false)
         
@@ -2027,6 +2225,7 @@ class MyExoplayerPlugin :
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
+        safChannel.setMethodCallHandler(null)
         mediaLibraryChannel.setMethodCallHandler(null)
         fftEventChannel.setStreamHandler(null)
         fftEventSink = null
