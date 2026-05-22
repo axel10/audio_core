@@ -671,7 +671,7 @@ final class AppleAudioEngine: NSObject {
     if slot.isPlaying {
       return "PLAYING"
     }
-    if slot.durationMs > 0, slot.currentPositionMs >= slot.durationMs {
+    if isPlaybackComplete(slot) {
       return "ENDED"
     }
     if slot.currentPositionMs > 0 || slot.isPaused {
@@ -687,6 +687,16 @@ final class AppleAudioEngine: NSObject {
   private func installDelegates() {
     primarySlot.player.delegate = self
     secondarySlot.player.delegate = self
+  }
+
+  private func completionToleranceMs(for slot: PlaybackSlot) -> Int {
+    max(100, Int((4096.0 / max(slot.sampleRate, 1.0) * 1000.0).rounded()))
+  }
+
+  private func isPlaybackComplete(_ slot: PlaybackSlot) -> Bool {
+    let durationMs = slot.durationMs
+    guard durationMs > 0 else { return false }
+    return slot.currentPositionMs >= max(0, durationMs - completionToleranceMs(for: slot))
   }
 
   private func syncOnStateQueue<T>(_ work: () throws -> T) rethrows -> T {
@@ -1955,6 +1965,7 @@ extension AppleAudioEngine {
 extension AppleAudioEngine: AudioPlayer.Delegate {
   func audioPlayer(_ audioPlayer: AudioPlayer, playbackStateChanged playbackState: AudioPlayer.PlaybackState) {
     syncOnStateQueue {
+      let matchedSlot = slot(matching: audioPlayer)
       let state: String
       switch playbackState {
       case .playing:
@@ -1962,7 +1973,12 @@ extension AppleAudioEngine: AudioPlayer.Delegate {
       case .paused:
         state = "PAUSED"
       case .stopped:
-        state = currentPlaybackState()
+        if let matchedSlot, isPlaybackComplete(matchedSlot) {
+          matchedSlot.storedPositionMs = matchedSlot.durationMs
+          state = "ENDED"
+        } else {
+          state = currentPlaybackState()
+        }
       @unknown default:
         state = currentPlaybackState()
       }
@@ -1974,11 +1990,12 @@ extension AppleAudioEngine: AudioPlayer.Delegate {
     syncOnStateQueue {
       if let slot = slot(matching: audioPlayer) {
         slot.storedPositionMs = slot.durationMs
+        // When the delegate is implemented SFBAudioEngine leaves final stop
+        // handling to us; explicitly stop the player so tail playback can't
+        // linger in a half-finished state on macOS.
+        audioPlayer.stop()
+        slot.storedPositionMs = slot.durationMs
       }
-      // Some SFBAudioEngine state transitions can report the final ENDED
-      // callback before `isPlaying` has fully flipped to false. Emit a
-      // completed snapshot so the Dart playlist controller can auto-advance
-      // reliably at the end of the queue.
       emitPlayerState(playbackState: "ENDED")
     }
   }
