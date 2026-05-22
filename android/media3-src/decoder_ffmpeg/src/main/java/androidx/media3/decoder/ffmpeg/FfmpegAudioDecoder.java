@@ -55,6 +55,10 @@ import java.util.List;
   private volatile int channelCount;
   private volatile int sampleRate;
 
+  private boolean isFirstPacket = true;
+  private long decodedSamplesCount;
+  private long totalSamples;
+
   public FfmpegAudioDecoder(
       Format format,
       int numInputBuffers,
@@ -78,6 +82,14 @@ import java.util.List;
       throw new FfmpegDecoderException("Initialization failed.");
     }
     setInitialInputBufferSize(initialInputBufferSize);
+
+    if (MimeTypes.AUDIO_FLAC.equals(format.sampleMimeType) && extraData != null && extraData.length >= 18) {
+      totalSamples = ((long)(extraData[13] & 0x0F) << 32)
+                   | ((long)(extraData[14] & 0xFF) << 24)
+                   | ((long)(extraData[15] & 0xFF) << 16)
+                   | ((long)(extraData[16] & 0xFF) << 8)
+                   | ((long)(extraData[17] & 0xFF));
+    }
   }
 
   @Override
@@ -106,6 +118,7 @@ import java.util.List;
   @Nullable
   protected FfmpegDecoderException decode(
       DecoderInputBuffer inputBuffer, SimpleDecoderOutputBuffer outputBuffer, boolean reset) {
+    boolean shouldResetDecodedSamples = reset || isFirstPacket;
     if (reset) {
       nativeContext = ffmpegReset(nativeContext, extraData);
       if (nativeContext == 0) {
@@ -144,6 +157,31 @@ import java.util.List;
       }
       hasOutputFormat = true;
     }
+
+    if (shouldResetDecodedSamples) {
+      decodedSamplesCount = (inputBuffer.timeUs * sampleRate) / 1000000L;
+      isFirstPacket = false;
+    }
+
+    int bytesPerFrame = channelCount * (encoding == C.ENCODING_PCM_FLOAT ? 4 : 2);
+    int framesDecoded = result / bytesPerFrame;
+    if (totalSamples > 0) {
+      if (decodedSamplesCount >= totalSamples) {
+        outputBuffer.shouldBeSkipped = true;
+        return null;
+      }
+      if (decodedSamplesCount + framesDecoded > totalSamples) {
+        int allowedFrames = (int) (totalSamples - decodedSamplesCount);
+        if (allowedFrames <= 0) {
+          outputBuffer.shouldBeSkipped = true;
+          return null;
+        }
+        result = allowedFrames * bytesPerFrame;
+        framesDecoded = allowedFrames;
+      }
+    }
+    decodedSamplesCount += framesDecoded;
+
     // Get a new reference to the output ByteBuffer in case the native decode method reallocated the
     // buffer to grow its size.
     outputData = checkNotNull(outputBuffer.data);
