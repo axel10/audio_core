@@ -482,7 +482,7 @@ impl<'a> Transcoder<'a> {
     fn receive_and_process_decoded_frames(
         &mut self,
         octx: &mut format::context::Output,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         let mut decoded = frame::Audio::empty();
         loop {
             match self.decoder.receive_frame(&mut decoded) {
@@ -537,13 +537,26 @@ impl<'a> Transcoder<'a> {
                     break;
                 }
                 Err(error) if error == ffmpeg::Error::Eof => {
-                    break;
+                    return Ok(false);
                 }
-                Err(error) => return Err(error.to_string()),
+                Err(error) => {
+                    if self.decoded_sample_count > 0 {
+                        push_log_line(
+                            &mut self.debug_log,
+                            format!(
+                                "Warning: Ignored decoder error near EOF (decoded samples: {}): {error}",
+                                self.decoded_sample_count
+                            ),
+                        );
+                        return Ok(false);
+                    } else {
+                        return Err(error.to_string());
+                    }
+                }
             }
         }
 
-        Ok(())
+        Ok(true)
     }
 
     fn add_frame_to_filter(&mut self, frame: &frame::Audio) -> Result<(), String> {
@@ -765,7 +778,7 @@ pub(crate) fn transcode_direct(
                         transcoder.debug_log.clone(),
                     )
                 })?;
-            transcoder
+            let should_continue = transcoder
                 .receive_and_process_decoded_frames(&mut octx)
                 .map_err(|error| {
                     ConversionFailure::with_log(
@@ -773,6 +786,9 @@ pub(crate) fn transcode_direct(
                         transcoder.debug_log.clone(),
                     )
                 })?;
+            if !should_continue {
+                break;
+            }
         }
     }
 
@@ -782,7 +798,7 @@ pub(crate) fn transcode_direct(
             transcoder.debug_log.clone(),
         )
     })?;
-    transcoder
+    let _ = transcoder
         .receive_and_process_decoded_frames(&mut octx)
         .map_err(|error| {
             ConversionFailure::with_log(
