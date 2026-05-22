@@ -14,6 +14,7 @@ class TranscodeTab extends StatefulWidget {
 
 class _TranscodeTabState extends State<TranscodeTab> {
   AudioFormat _outputFormat = AudioFormat.m4a;
+  bool _useSystemEncoder = false;
   ConverterCapabilities? _capabilities;
   String? _inputPath;
   String? _outputDirectory;
@@ -103,6 +104,7 @@ class _TranscodeTabState extends State<TranscodeTab> {
                 inputPath: inputPath,
                 outputDirectory: _androidDirectory!.displayPath,
                 outputFormat: _outputFormat,
+                useSystemEncoder: _useSystemEncoder,
               ),
               _androidDirectory!,
               onProgress: (progress) {
@@ -133,6 +135,7 @@ class _TranscodeTabState extends State<TranscodeTab> {
           inputPath: inputPath,
           outputDirectory: outputDirectory,
           outputFormat: _outputFormat,
+          useSystemEncoder: _useSystemEncoder,
           onProgress: (progress) {
             if (!mounted) return;
             setState(() {
@@ -252,6 +255,22 @@ class _TranscodeTabState extends State<TranscodeTab> {
                           });
                         },
                 ),
+                if (Platform.isAndroid && _outputFormat == AudioFormat.m4a) ...[
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    title: const Text('使用系统内置编码器 (Media3)'),
+                    value: _useSystemEncoder,
+                    onChanged: _busy
+                        ? null
+                        : (value) {
+                            setState(() {
+                              _useSystemEncoder = value ?? false;
+                            });
+                          },
+                    controlAffinity: ListTileControlAffinity.leading,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ],
                 const SizedBox(height: 8),
                 Text(_outputDirectory ?? 'No output directory selected'),
                 if (_androidDirectory != null) ...[

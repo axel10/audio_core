@@ -34,6 +34,12 @@ import androidx.media3.exoplayer.audio.MediaCodecAudioRenderer
 import androidx.media3.exoplayer.util.EventLogger
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer
+import androidx.media3.transformer.Transformer
+import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.ExportException
+import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.Composition
+import androidx.media3.transformer.TransformationRequest
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -177,6 +183,7 @@ class MyExoplayerPlugin :
     private val fftEmitLock = Any()
     private val fftQueue = java.util.concurrent.ConcurrentLinkedQueue<Pair<String, FloatArray>>()
     private var fftConsumerActive: Boolean = false
+    private val activeTransformers = java.util.concurrent.ConcurrentHashMap<String, Transformer>()
 
     private data class FftGroupingConfig(
         val frequencyGroups: Int = 32,
@@ -432,6 +439,14 @@ class MyExoplayerPlugin :
         when (call.method) {
             "sayHello" -> {
                 result.success(null)
+                return
+            }
+            "convertFileWithTransformer" -> {
+                val inputPath = call.argument<String>("inputPath")
+                    ?: return result.error("INVALID_ARGUMENT", "Input path is null", null)
+                val outputPath = call.argument<String>("outputPath")
+                    ?: return result.error("INVALID_ARGUMENT", "Output path is null", null)
+                handleConvertFileWithTransformer(inputPath, outputPath, result)
                 return
             }
             "ensureAudioPermission" -> {
@@ -1880,6 +1895,96 @@ class MyExoplayerPlugin :
         }
     }
 
+    private fun handleConvertFileWithTransformer(
+        inputPath: String,
+        outputPath: String,
+        result: Result
+    ) {
+        val safeContext = context ?: run {
+            result.error("INTERNAL_ERROR", "Context is null", null)
+            return
+        }
+
+        // Clean up any existing transformer for the same output path
+        activeTransformers[outputPath]?.let {
+            try {
+                it.cancel()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            activeTransformers.remove(outputPath)
+        }
+
+        try {
+            // Ensure parent directory exists
+            val outputFile = java.io.File(outputPath)
+            val parentDir = outputFile.parentFile
+            if (parentDir != null && !parentDir.exists()) {
+                parentDir.mkdirs()
+            }
+
+            val inputUri = if (inputPath.startsWith("content://") || inputPath.startsWith("file://")) {
+                Uri.parse(inputPath)
+            } else {
+                Uri.fromFile(java.io.File(inputPath))
+            }
+
+            val mediaItem = MediaItem.fromUri(inputUri)
+            val editedMediaItem = EditedMediaItem.Builder(mediaItem)
+                .setRemoveVideo(true)
+                .build()
+
+            val transformerBuilder = Transformer.Builder(safeContext)
+                .setAudioMimeType(MimeTypes.AUDIO_AAC)
+
+            val listener = object : Transformer.Listener {
+                override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                    activeTransformers.remove(outputPath)
+                    val resultMap = mapOf(
+                        "success" to true,
+                        "engine" to "Media3Transformer",
+                        "outputPath" to outputPath,
+                        "outputFormat" to "m4a"
+                    )
+                    result.success(resultMap)
+                }
+
+                override fun onError(
+                    composition: Composition,
+                    exportResult: ExportResult,
+                    exportException: ExportException
+                ) {
+                    activeTransformers.remove(outputPath)
+                    val errorMsg = exportException.message ?: "Unknown transformer error"
+                    val resultMap = mapOf(
+                        "success" to false,
+                        "engine" to "Media3Transformer",
+                        "errorCode" to "transformer_failed",
+                        "errorMessage" to errorMsg
+                    )
+                    result.success(resultMap)
+                }
+            }
+
+            val transformer = transformerBuilder
+                .addListener(listener)
+                .build()
+
+            activeTransformers[outputPath] = transformer
+            transformer.start(editedMediaItem, outputPath)
+
+        } catch (e: Exception) {
+            activeTransformers.remove(outputPath)
+            val resultMap = mapOf(
+                "success" to false,
+                "engine" to "Media3Transformer",
+                "errorCode" to "transformer_exception",
+                "errorMessage" to (e.message ?: e.toString())
+            )
+            result.success(resultMap)
+        }
+    }
+
     private fun ensureLocalPath(path: String): Pair<String, Boolean> {
         if (!path.startsWith("content://")) return Pair(path, false)
         
@@ -1928,6 +2033,14 @@ class MyExoplayerPlugin :
         instance = null
         context = null
         pendingMetadataWrite = null
+        activeTransformers.values.forEach {
+            try {
+                it.cancel()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+        activeTransformers.clear()
         pendingMediaLibraryPermissionResult = null
         activityBinding?.removeActivityResultListener(this)
         activityBinding?.removeRequestPermissionsResultListener(this)

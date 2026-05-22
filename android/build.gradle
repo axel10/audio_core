@@ -93,15 +93,17 @@ android {
 
 dependencies {
     def media3_version = "1.9.3"
-    def checkerframework_version = "3.44.0"
+    def checkerframework_version = "3.43.0"
     def kotlin_annotations_version = "1.9.24"
 
     implementation "androidx.media3:media3-exoplayer:$media3_version"
     implementation "androidx.media3:media3-decoder:$media3_version"
     implementation "androidx.media3:media3-ui:$media3_version"
     implementation "androidx.media3:media3-common:$media3_version"
+    implementation "androidx.media3:media3-transformer:$media3_version"
     compileOnly "org.checkerframework:checker-qual:$checkerframework_version"
     compileOnly "org.jetbrains.kotlin:kotlin-annotations-jvm:$kotlin_annotations_version"
+    implementation "androidx.documentfile:documentfile:1.0.1"
     implementation "com.github.wendykierp:JTransforms:3.2"
     implementation "io.github.kyant0:taglib:1.0.5"
 }

@@ -107,6 +107,7 @@ class ConvertRequest {
     this.allowFallbackToFfmpeg = true,
     this.extraOptions,
     this.customArgs,
+    this.useSystemEncoder = false,
   });
 
   final String inputPath;
@@ -121,6 +122,7 @@ class ConvertRequest {
   final bool allowFallbackToFfmpeg;
   final Map<String, String>? extraOptions;
   final List<String>? customArgs;
+  final bool useSystemEncoder;
 
   factory ConvertRequest.forOutputDirectory({
     required String inputPath,
@@ -135,6 +137,7 @@ class ConvertRequest {
     bool allowFallbackToFfmpeg = true,
     Map<String, String>? extraOptions,
     List<String>? customArgs,
+    bool useSystemEncoder = false,
   }) {
     final baseName = p.basenameWithoutExtension(inputPath);
     final outputPath = Platform.isAndroid
@@ -158,6 +161,7 @@ class ConvertRequest {
       allowFallbackToFfmpeg: allowFallbackToFfmpeg,
       extraOptions: extraOptions,
       customArgs: customArgs,
+      useSystemEncoder: useSystemEncoder,
     );
   }
 
@@ -175,6 +179,7 @@ class ConvertRequest {
       'allowFallbackToFfmpeg': allowFallbackToFfmpeg,
       'extraOptions': extraOptions,
       'customArgs': customArgs,
+      'useSystemEncoder': useSystemEncoder,
     };
   }
 }
@@ -359,6 +364,9 @@ class AudioConverter {
   static const MethodChannel _appleConverterChannel = MethodChannel(
     'audio_core.audio_converter',
   );
+  static const MethodChannel _androidConverterChannel = MethodChannel(
+    'my_exoplayer',
+  );
 
   bool get _usesAppleTranscoder => Platform.isIOS || Platform.isMacOS;
 
@@ -383,6 +391,61 @@ class AudioConverter {
     ConvertRequest request, {
     AudioConverterProgressCallback? onProgress,
   }) async {
+    if (Platform.isAndroid && request.useSystemEncoder && request.outputFormat == AudioFormat.m4a) {
+      onProgress?.call(
+        ConversionProgress(
+          completedFiles: 0,
+          totalFiles: 1,
+          currentFilePath: request.inputPath,
+          currentFileProgress: 0.0,
+          currentPosition: Duration.zero,
+          message: 'Starting conversion',
+        ),
+      );
+
+      try {
+        final rawResult = await _androidConverterChannel.invokeMapMethod<String, Object?>(
+          'convertFileWithTransformer',
+          request.toMap(),
+        );
+        if (rawResult == null) {
+          throw StateError('Android audio converter returned no result.');
+        }
+
+        final result = ConvertResult.fromMap(rawResult);
+        onProgress?.call(
+          ConversionProgress(
+            completedFiles: 1,
+            totalFiles: 1,
+            currentFilePath: result.outputPath ?? request.inputPath,
+            currentFileProgress: 1.0,
+            currentPosition: null,
+            totalDuration: null,
+            message: result.success ? 'Completed' : 'Failed',
+          ),
+        );
+        return result;
+      } catch (error) {
+        final message = error.toString();
+        onProgress?.call(
+          ConversionProgress(
+            completedFiles: 1,
+            totalFiles: 1,
+            currentFilePath: request.inputPath,
+            currentFileProgress: 1.0,
+            message: 'Failed',
+          ),
+        );
+        return ConvertResult(
+          success: false,
+          engine: 'Media3Transformer',
+          outputFormat: request.outputFormat,
+          errorCode: 'native_bridge_failed',
+          errorMessage: message,
+        );
+      }
+    }
+
     if (_usesAppleTranscoder) {
       onProgress?.call(
         ConversionProgress(
@@ -507,6 +570,7 @@ class AudioConverter {
     Map<String, String>? extraOptions,
     List<String>? customArgs,
     AndroidOutputDirectory? androidOutputDirectory,
+    bool useSystemEncoder = false,
     AudioConverterProgressCallback? onProgress,
   }) async {
     final request = ConvertRequest.forOutputDirectory(
@@ -522,6 +586,7 @@ class AudioConverter {
       allowFallbackToFfmpeg: allowFallbackToFfmpeg,
       extraOptions: extraOptions,
       customArgs: customArgs,
+      useSystemEncoder: useSystemEncoder,
     );
 
     if (!Platform.isIOS && !Platform.isMacOS) {
