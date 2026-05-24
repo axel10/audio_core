@@ -9,7 +9,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 [dependencies]
 flutter_rust_bridge = "=2.11.1"
 anyhow = "1.0.102"
-lofty = "0.23.3"
+lofty = { git="https://github.com/axel10/lofty-rs",branch = "main"}
 id3 = "1.16.4"
 log = "0.4.29"
 base64 = "0.22.1"
