@@ -1119,23 +1119,16 @@ class AudioCoreController extends ChangeNotifier
   }
 
   bool _needsMetadataWriteSyncForPath(String path) {
-    if (player.currentPath != path) {
+    final current = player.currentPath;
+    if (current == null) {
       return false;
     }
-    if (Platform.isAndroid) {
-      return true;
+    final normCurrent = _normalizeLocalPathKey(current);
+    final normPath = _normalizeLocalPathKey(path);
+    if (normCurrent == null || normPath == null) {
+      return current == path;
     }
-    // Apple platforms need the playback file to be paused and reloaded before
-    // any current-track tag write, even for small files, so the file handle
-    // does not stay live while metadata is rewritten.
-    if (Platform.isIOS || Platform.isMacOS) {
-      return true;
-    }
-
-    final file = path.startsWith('content://') ? null : File(path);
-    return file != null &&
-        file.existsSync() &&
-        file.lengthSync() >= 60 * 1024 * 1024;
+    return normCurrent == normPath;
   }
 
   Future<bool> _writeMetadataRequest(
