@@ -415,6 +415,37 @@ fn theme_soft_suppression_penalty(color: &PaletteColor) -> f64 {
     0.18 * hue_weight * saturation_weight * lightness_weight
 }
 
+fn mesh_skin_tone_penalty(color: &PaletteColor) -> f64 {
+    let hue_distance = circular_hue_distance(color.hsl.hue, 25.0);
+    if hue_distance > 15.0 {
+        return 0.0;
+    }
+
+    if color.hsl.lightness < 0.50 {
+        return 0.0;
+    }
+
+    let hue_weight = (1.0 - hue_distance / 15.0).clamp(0.0, 1.0);
+    let saturation_weight = if color.hsl.saturation >= 0.15 && color.hsl.saturation <= 0.70 {
+        1.0
+    } else if color.hsl.saturation > 0.70 && color.hsl.saturation < 0.85 {
+        (0.85 - color.hsl.saturation) / 0.15
+    } else {
+        0.0
+    };
+
+    let lightness_weight = if color.hsl.lightness >= 0.55 && color.hsl.lightness <= 0.85 {
+        1.0
+    } else if color.hsl.lightness >= 0.50 && color.hsl.lightness < 0.55 {
+        (color.hsl.lightness - 0.50) / 0.05
+    } else {
+        0.0
+    };
+
+    2.5 * hue_weight * saturation_weight * lightness_weight
+}
+
+
 fn quantize_rgb(red: u8, green: u8, blue: u8) -> u32 {
     pack_rgb(
         red & QUANTIZE_WORD_MASK,
@@ -1222,9 +1253,11 @@ fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64, tuning: MeshSco
 
     let mut l_var = 0.0;
     let mut c_var = 0.0;
+    let mut skin_tone_penalty = 0.0;
     for c in combo {
         l_var += (c.oklch.l - l_mean).powi(2);
         c_var += (c.oklch.c - c_mean).powi(2);
+        skin_tone_penalty += mesh_skin_tone_penalty(c);
     }
 
     let vibrancy_reward = c_mean * 5.0;
@@ -1246,6 +1279,7 @@ fn evaluate_mesh_combo(combo: &[&PaletteColor; 4], max_pop: f64, tuning: MeshSco
         + role_assignment.score * (0.7 * tuning.harmony_strength + 0.3 * tuning.contrast_strength)
         - clash_penalty
         - muddy_penalty
+        - skin_tone_penalty
         - cohesion_penalty * tuning.harmony_strength
         - over_chroma_penalty * tuning.vibrancy_strength
         - underexposed_penalty * tuning.vibrancy_strength
@@ -1795,7 +1829,7 @@ mod tests {
             0x08, 0x18, 0x28, 0xff, 0x08, 0x18, 0x28, 0xff, 0x30, 0x40, 0x50, 0xff,
         ];
 
-        let (palette, _) = quantize_palette_colors(&pixels, 4, PALETTE_MAX_COLORS);
+        let (palette, _) = quantize_palette_colors(&pixels, 4, PALETTE_MAX_COLORS, ThemePaletteOptions::default());
 
         assert_eq!(palette.len(), 2);
         assert_eq!(palette[0].rgb, pack_rgb(0x08, 0x18, 0x28));
@@ -2005,7 +2039,7 @@ mod tests {
         let vivid_combo = [
             PaletteColor::new(pack_rgb(0xe8, 0x18, 0x3f), 100),
             PaletteColor::new(pack_rgb(0x16, 0x2f, 0xea), 95),
-            PaletteColor::new(pack_rgb(0x1b, 0x1b, 0x24), 88),
+            PaletteColor::new(pack_rgb(240, 150, 160), 88),
             PaletteColor::new(pack_rgb(0xd8, 0xd8, 0xe2), 82),
         ];
         let muddy_combo = [
@@ -2153,5 +2187,32 @@ mod tests {
         assert_eq!(selection.debug.colors[2].role, "accent");
         assert_eq!(selection.debug.colors[3].role, "light");
         assert!(selection.colors[0].oklch.l <= selection.colors[3].oklch.l);
+    }
+
+    #[test]
+    fn mesh_selection_avoids_skin_tones_when_alternatives_exist() {
+        // A typical skin tone color (warm tan/peach: Hue 24, Saturation 59%, Lightness 67%)
+        let skin_color = PaletteColor::new(pack_rgb(220, 160, 120), 100);
+        // Three other colors that form a cool cluster of 3 (Hues 211, 226, 223)
+        let color1 = PaletteColor::new(pack_rgb(30, 110, 200), 90);
+        let color2 = PaletteColor::new(pack_rgb(30, 70, 200), 80);
+        let color3 = PaletteColor::new(pack_rgb(170, 190, 240), 70); // Lightness 80% (good light role candidate)
+        // An alternative clean/vibrant color with slightly lower population (Hue 6)
+        let alternative = PaletteColor::new(pack_rgb(220, 60, 40), 75);
+
+        let palette_colors = vec![
+            skin_color.clone(),
+            color1.clone(),
+            color2.clone(),
+            color3.clone(),
+            alternative.clone(),
+        ];
+
+        let tuning = MeshScoringTuning::from_options(ThemePaletteOptions::default());
+        let selection = select_mesh_colors(&palette_colors, tuning).expect("mesh selection");
+
+        // Remove the temporary print statements and assert that skin tone is avoided
+        assert!(selection.colors.iter().all(|c| c.rgb != skin_color.rgb), "Skin tone should be avoided");
+        assert!(selection.colors.iter().any(|c| c.rgb == alternative.rgb), "Alternative color should be selected");
     }
 }
