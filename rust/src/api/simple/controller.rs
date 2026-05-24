@@ -11,13 +11,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
-use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
-use symphonia::core::errors::Error as SymphoniaError;
-use symphonia::core::formats::FormatOptions;
-use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 struct FfmpegAudioSource {
@@ -854,137 +847,43 @@ pub fn get_audio_pcm(path: Option<String>, sample_stride: usize) -> Result<Vec<f
         }
     };
 
-    let mut ffmpeg_decoded = None;
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    {
-        if let Ok(mut source) = CoreAudioSource::open(&target_path) {
-            let channels = source.channels() as usize;
-            let sample_rate = source.sample_rate();
-            let mut pcm = Vec::new();
-            let sample_stride = sample_stride.max(1);
-            if sample_stride <= 1 {
-                for sample in source {
-                    pcm.push(sample);
+    let mut source = CoreAudioSource::open(&target_path)
+        .map_err(|e| format!("open audio source failed: {}", e))?;
+    let channels = source.channels() as usize;
+    let sample_rate = source.sample_rate();
+    let mut pcm = Vec::new();
+    let sample_stride = sample_stride.max(1);
+    if sample_stride <= 1 {
+        for sample in source {
+            pcm.push(sample);
+        }
+    } else {
+        let frame_size = 1024;
+        let mut count = 0;
+        'outer: loop {
+            let should_read = count % sample_stride == 0;
+            count += 1;
+            if should_read {
+                for _ in 0..frame_size {
+                    for _ in 0..channels {
+                        if let Some(s) = source.next() {
+                            pcm.push(s);
+                        } else {
+                            break 'outer;
+                        }
+                    }
                 }
             } else {
-                let frame_size = 1024;
-                let mut count = 0;
-                'outer: loop {
-                    let should_read = count % sample_stride == 0;
-                    count += 1;
-                    if should_read {
-                        for _ in 0..frame_size {
-                            for _ in 0..channels {
-                                if let Some(s) = source.next() {
-                                    pcm.push(s);
-                                } else {
-                                    break 'outer;
-                                }
-                            }
-                        }
-                    } else {
-                        for _ in 0..frame_size {
-                            for _ in 0..channels {
-                                if source.next().is_none() {
-                                    break 'outer;
-                                }
-                            }
+                for _ in 0..frame_size {
+                    for _ in 0..channels {
+                        if source.next().is_none() {
+                            break 'outer;
                         }
                     }
                 }
             }
-            ffmpeg_decoded = Some((pcm, channels, sample_rate));
         }
     }
-
-    let (pcm, channels, sample_rate) = if let Some(decoded) = ffmpeg_decoded {
-        decoded
-    } else {
-        let file = File::open(&target_path)
-            .map_err(|e| format!("open file failed: {} - {}", target_path, e))?;
-        let mut hint = Hint::new();
-        if let Some(ext) = std::path::Path::new(&target_path)
-            .extension()
-            .and_then(|e| e.to_str())
-        {
-            hint.with_extension(ext);
-        }
-
-        let mss = MediaSourceStream::new(Box::new(file), Default::default());
-        let mut format = symphonia::default::get_probe()
-            .format(
-                &hint,
-                mss,
-                &FormatOptions::default(),
-                &MetadataOptions::default(),
-            )
-            .map_err(|e| format!("probe format failed: {}", e))?
-            .format;
-
-        let track = format
-            .tracks()
-            .iter()
-            .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-            .or_else(|| format.default_track())
-            .ok_or_else(|| "No audio track found in loaded file".to_string())?;
-
-        let track_id = track.id;
-        let channels = track
-            .codec_params
-            .channels
-            .map(|c| c.count() as usize)
-            .unwrap_or(1);
-        let sample_rate = track.codec_params.sample_rate.unwrap_or(0);
-        let mut decoder = symphonia::default::get_codecs()
-            .make(&track.codec_params, &DecoderOptions::default())
-            .map_err(|e| format!("create decoder failed: {}", e))?;
-
-        let sample_stride = sample_stride.max(1);
-        let mut sample_buf: Option<SampleBuffer<f32>> = None;
-        let mut pcm: Vec<f32> = Vec::new();
-        let mut track_packet_index = 0usize;
-
-        loop {
-            let packet = match format.next_packet() {
-                Ok(packet) => packet,
-                Err(SymphoniaError::IoError(_)) => break,
-                Err(SymphoniaError::ResetRequired) => {
-                    return Err("stream reset required during pcm decode".to_string());
-                }
-                Err(err) => return Err(format!("read packet failed: {}", err)),
-            };
-
-            if packet.track_id() != track_id {
-                continue;
-            }
-
-            let should_sample = sample_stride == 1 || track_packet_index % sample_stride == 0;
-            track_packet_index = track_packet_index.saturating_add(1);
-            if !should_sample {
-                continue;
-            }
-
-            let decoded = match decoder.decode(&packet) {
-                Ok(decoded) => decoded,
-                Err(SymphoniaError::DecodeError(_)) => continue,
-                Err(SymphoniaError::IoError(_)) => continue,
-                Err(err) => return Err(format!("decode packet failed: {}", err)),
-            };
-
-            if sample_buf.is_none() {
-                sample_buf = Some(SampleBuffer::<f32>::new(
-                    decoded.capacity() as u64,
-                    *decoded.spec(),
-                ));
-            }
-
-            if let Some(buf) = sample_buf.as_mut() {
-                buf.copy_interleaved_ref(decoded);
-                pcm.extend_from_slice(buf.samples());
-            }
-        }
-        (pcm, channels, sample_rate)
-    };
 
     if verify_loaded_path {
         let current_loaded_path = controller()
@@ -1043,51 +942,9 @@ pub fn get_audio_pcm_channel_count(path: Option<String>) -> Result<i32, String> 
         }
     };
 
-    let mut ffmpeg_channels = None;
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    {
-        if let Ok(source) = CoreAudioSource::open(&target_path) {
-            ffmpeg_channels = Some(source.channels() as i32);
-        }
-    }
-
-    if let Some(channels) = ffmpeg_channels {
-        return Ok(channels);
-    }
-
-    let file = File::open(&target_path)
-        .map_err(|e| format!("open file failed: {} - {}", target_path, e))?;
-    let mut hint = Hint::new();
-    if let Some(ext) = std::path::Path::new(&target_path)
-        .extension()
-        .and_then(|e| e.to_str())
-    {
-        hint.with_extension(ext);
-    }
-
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
-    let format = symphonia::default::get_probe()
-        .format(
-            &hint,
-            mss,
-            &FormatOptions::default(),
-            &MetadataOptions::default(),
-        )
-        .map_err(|e| format!("probe format failed: {}", e))?
-        .format;
-
-    let track = format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-        .or_else(|| format.default_track())
-        .ok_or_else(|| "No audio track found in loaded file".to_string())?;
-
-    Ok(track
-        .codec_params
-        .channels
-        .map(|c| c.count() as i32)
-        .unwrap_or(1))
+    let source = CoreAudioSource::open(&target_path)
+        .map_err(|e| format!("open audio source failed: {}", e))?;
+    Ok(source.channels() as i32)
 }
 
 fn drive_crossfade(generation: u64, duration: Duration) {
