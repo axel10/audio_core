@@ -2,7 +2,7 @@ use super::equalizer::{EqSource, EqualizerConfig, EqualizerShared};
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use ffmpeg_core::AudioSource as CoreAudioSource;
 use super::fft::{clear_fft_buffer, FftSource, RAW_FFT_BINS};
-use log::info;
+use log::{info, warn, error};
 use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use std::fs::File;
@@ -59,11 +59,32 @@ enum DecoderBackend {
 impl DecoderBackend {
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     fn open(path: &str, file: File) -> Result<Self, String> {
-        if let Ok(ffmpeg_source) = FfmpegAudioSource::open(path) {
-            return Ok(Self::Ffmpeg(ffmpeg_source));
+        info!("[DecoderBackend] Attempting to open audio path: {}", path);
+        match FfmpegAudioSource::open(path) {
+            Ok(ffmpeg_source) => {
+                info!("[DecoderBackend] Successfully opened via FFmpeg backend");
+                Ok(Self::Ffmpeg(ffmpeg_source))
+            }
+            Err(ffmpeg_error) => {
+                warn!(
+                    "[DecoderBackend] FFmpeg backend failed to open (error: {}). Falling back to Symphonia",
+                    ffmpeg_error
+                );
+                match Self::open_symphonia(file) {
+                    Ok(symphonia_source) => {
+                        info!("[DecoderBackend] Successfully opened via Symphonia backend");
+                        Ok(symphonia_source)
+                    }
+                    Err(symphonia_error) => {
+                        error!(
+                            "[DecoderBackend] Symphonia backend also failed to open (error: {})",
+                            symphonia_error
+                        );
+                        Err(symphonia_error)
+                    }
+                }
+            }
         }
-
-        Self::open_symphonia(file)
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
