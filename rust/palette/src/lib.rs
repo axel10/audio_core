@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
+use std::collections::{BTreeMap, BinaryHeap, HashSet};
 
 use serde::Serialize;
 
@@ -72,9 +72,10 @@ fn quantize_palette_colors(
         return (Vec::new(), Vec::new());
     }
 
-    let mut histogram = HashMap::<u32, usize>::new();
-    let mut ignored_histogram = HashMap::<u32, usize>::new();
+    let mut histogram = vec![0usize; 32768];
+    let mut ignored_histogram = vec![0usize; 32768];
     let mut colors = Vec::<u32>::new();
+    let mut colors_seen = vec![false; 32768];
 
     for pixel in pixels.chunks_exact(channels_per_pixel) {
         let alpha = if channels_per_pixel >= 4 {
@@ -87,29 +88,37 @@ fn quantize_palette_colors(
         }
 
         let quantized = quantize_rgb(pixel[0], pixel[1], pixel[2]);
+        let idx = quantized_to_index(quantized);
         if should_hard_ignore_color(quantized) {
-            *ignored_histogram.entry(quantized).or_insert(0) += 1;
+            ignored_histogram[idx] += 1;
         } else {
-            if !histogram.contains_key(&quantized) {
+            if !colors_seen[idx] {
+                colors_seen[idx] = true;
                 colors.push(quantized);
             }
-            *histogram.entry(quantized).or_insert(0) += 1;
+            histogram[idx] += 1;
         }
     }
 
-    let theme_colors = if histogram.is_empty() {
+    let theme_colors = if colors.is_empty() {
         Vec::new()
     } else if colors.len() <= max_colors {
         colors
             .into_iter()
-            .map(|color| PaletteColor::new(color, histogram[&color]))
+            .map(|color| PaletteColor::new(color, histogram[quantized_to_index(color)]))
             .collect()
     } else {
-        quantize_histogram(histogram.clone(), colors, max_colors)
+        quantize_histogram(&histogram, colors, max_colors)
     };
 
     let mut mesh_colors = theme_colors.clone();
-    let mut ignored_counts: Vec<_> = ignored_histogram.into_iter().collect();
+    
+    let mut ignored_counts = Vec::new();
+    for (index, &count) in ignored_histogram.iter().enumerate() {
+        if count > 0 {
+            ignored_counts.push((index_to_quantized(index), count));
+        }
+    }
     ignored_counts.sort_unstable_by(|a, b| b.1.cmp(&a.1));
     for (color, pop) in ignored_counts.into_iter().take(8) {
         mesh_colors.push(PaletteColor::new(color, pop));
@@ -117,24 +126,27 @@ fn quantize_palette_colors(
 
     if options.mesh_style_preset.is_expressive() {
         let theme_color_set = theme_colors.iter().map(|color| color.rgb).collect::<HashSet<_>>();
-        let mut expressive_candidates = histogram
-            .iter()
-            .filter_map(|(&color, &pop)| {
-                if theme_color_set.contains(&color) || should_hard_ignore_color(color) {
-                    return None;
-                }
+        let mut expressive_candidates = Vec::new();
+        for (index, &pop) in histogram.iter().enumerate() {
+            if pop == 0 {
+                continue;
+            }
+            let color = index_to_quantized(index);
+            if theme_color_set.contains(&color) || should_hard_ignore_color(color) {
+                continue;
+            }
 
-                let candidate = PaletteColor::new(color, pop);
-                let vividness = candidate.hsl.saturation.max(candidate.oklch.c);
-                if vividness < 0.30 && !is_red_hue(candidate.oklch.h) && !is_blue_hue(candidate.oklch.h)
-                {
-                    return None;
-                }
+            let candidate = PaletteColor::new(color, pop);
+            let vividness = candidate.hsl.saturation.max(candidate.oklch.c);
+            if vividness < 0.30 && !is_red_hue(candidate.oklch.h) && !is_blue_hue(candidate.oklch.h)
+            {
+                continue;
+            }
 
-                let score = expressive_candidate_score(&candidate);
-                Some((candidate, score))
-            })
-            .collect::<Vec<_>>();
+            let score = expressive_candidate_score(&candidate);
+            expressive_candidates.push((candidate, score));
+        }
+
         expressive_candidates.sort_by(|a, b| {
             b.1.partial_cmp(&a.1)
                 .unwrap_or(Ordering::Equal)
@@ -144,7 +156,7 @@ fn quantize_palette_colors(
             mesh_colors.push(candidate);
         }
 
-        let max_population = histogram.values().copied().max().unwrap_or(1);
+        let max_population = histogram.iter().copied().max().unwrap_or(1);
         let boosted_population = (max_population as f64 * 0.72).round().max(1.0) as usize;
         if let Some(red_anchor) =
             pick_expressive_anchor(&histogram, &theme_color_set, is_red_hue, boosted_population)
@@ -175,41 +187,46 @@ fn expressive_candidate_score(color: &PaletteColor) -> f64 {
 }
 
 fn pick_expressive_anchor(
-    histogram: &HashMap<u32, usize>,
+    histogram: &[usize],
     theme_color_set: &HashSet<u32>,
     hue_predicate: fn(f64) -> bool,
     boosted_population: usize,
 ) -> Option<PaletteColor> {
-    histogram
-        .iter()
-        .filter_map(|(&color, &pop)| {
-            if theme_color_set.contains(&color) || should_hard_ignore_color(color) {
-                return None;
-            }
+    let mut best_candidate = None;
+    let mut best_score = f64::MIN;
 
-            let candidate = PaletteColor::new(color, pop);
-            if candidate.oklch.c < 0.12 || candidate.hsl.saturation < 0.35 {
-                return None;
-            }
-            if !hue_predicate(candidate.oklch.h) {
-                return None;
-            }
+    for (index, &pop) in histogram.iter().enumerate() {
+        if pop == 0 {
+            continue;
+        }
+        let color = index_to_quantized(index);
+        if theme_color_set.contains(&color) || should_hard_ignore_color(color) {
+            continue;
+        }
 
-            Some(candidate)
-        })
-        .max_by(|a, b| {
-            expressive_candidate_score(a)
-                .partial_cmp(&expressive_candidate_score(b))
-                .unwrap_or(Ordering::Equal)
-        })
-        .map(|mut candidate| {
-            candidate.population = boosted_population;
-            candidate
-        })
+        let candidate = PaletteColor::new(color, pop);
+        if candidate.oklch.c < 0.12 || candidate.hsl.saturation < 0.35 {
+            continue;
+        }
+        if !hue_predicate(candidate.oklch.h) {
+            continue;
+        }
+
+        let score = expressive_candidate_score(&candidate);
+        if score > best_score {
+            best_score = score;
+            best_candidate = Some(candidate);
+        }
+    }
+
+    best_candidate.map(|mut candidate| {
+        candidate.population = boosted_population;
+        candidate
+    })
 }
 
 fn quantize_histogram(
-    histogram: HashMap<u32, usize>,
+    histogram: &[usize],
     mut colors: Vec<u32>,
     max_colors: usize,
 ) -> Vec<PaletteColor> {
@@ -222,7 +239,7 @@ fn quantize_histogram(
         0,
         colors.len() - 1,
         &colors,
-        &histogram,
+        histogram,
     )));
 
     while priority_queue.len() < max_colors {
@@ -235,14 +252,14 @@ fn quantize_histogram(
             break;
         }
 
-        let new_box = color_box.split_box(&mut colors, &histogram);
+        let new_box = color_box.split_box(&mut colors, histogram);
         priority_queue.push(PriorityColorBox::from_box(new_box));
         priority_queue.push(PriorityColorBox::from_box(color_box));
     }
 
     let mut palette_colors = Vec::with_capacity(priority_queue.len());
     while let Some(color_box) = priority_queue.pop().map(PriorityColorBox::into_inner) {
-        let average_color = color_box.average_color(&colors, &histogram);
+        let average_color = color_box.average_color(&colors, histogram);
         if !should_hard_ignore_color(average_color.rgb) {
             palette_colors.push(average_color);
         }
@@ -464,6 +481,20 @@ fn unpack_rgb(color: u32) -> (u8, u8, u8) {
         ((color >> 8) & 0xff) as u8,
         (color & 0xff) as u8,
     )
+}
+
+fn quantized_to_index(color: u32) -> usize {
+    let r = ((color >> 16) & 0xff) as usize;
+    let g = ((color >> 8) & 0xff) as usize;
+    let b = (color & 0xff) as usize;
+    ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3)
+}
+
+fn index_to_quantized(index: usize) -> u32 {
+    let r = (((index >> 10) & 0x1f) << 3) as u8;
+    let g = (((index >> 5) & 0x1f) << 3) as u8;
+    let b = ((index & 0x1f) << 3) as u8;
+    pack_rgb(r, g, b)
 }
 
 fn rgb_to_hsl(color: u32) -> HslColor {
@@ -724,7 +755,7 @@ impl ColorVolumeBox {
         lower_index: usize,
         upper_index: usize,
         colors: &[u32],
-        histogram: &HashMap<u32, usize>,
+        histogram: &[usize],
     ) -> Self {
         let mut color_box = Self {
             lower_index,
@@ -755,7 +786,7 @@ impl ColorVolumeBox {
         self.upper_index + 1 - self.lower_index
     }
 
-    fn split_box(&mut self, colors: &mut [u32], histogram: &HashMap<u32, usize>) -> ColorVolumeBox {
+    fn split_box(&mut self, colors: &mut [u32], histogram: &[usize]) -> ColorVolumeBox {
         let split_point = self.find_split_point(colors, histogram);
         let new_box = ColorVolumeBox::new(split_point + 1, self.upper_index, colors, histogram);
         self.upper_index = split_point;
@@ -763,14 +794,14 @@ impl ColorVolumeBox {
         new_box
     }
 
-    fn average_color(&self, colors: &[u32], histogram: &HashMap<u32, usize>) -> PaletteColor {
+    fn average_color(&self, colors: &[u32], histogram: &[usize]) -> PaletteColor {
         let mut red_sum = 0usize;
         let mut green_sum = 0usize;
         let mut blue_sum = 0usize;
         let mut total_population = 0usize;
 
         for color in &colors[self.lower_index..=self.upper_index] {
-            let population = histogram.get(color).copied().unwrap_or_default();
+            let population = histogram[quantized_to_index(*color)];
             let (red, green, blue) = unpack_rgb(*color);
             red_sum += population * usize::from(red);
             green_sum += population * usize::from(green);
@@ -785,7 +816,7 @@ impl ColorVolumeBox {
         PaletteColor::new(pack_rgb(red_mean, green_mean, blue_mean), total_population)
     }
 
-    fn fit_minimum_box(&mut self, colors: &[u32], histogram: &HashMap<u32, usize>) {
+    fn fit_minimum_box(&mut self, colors: &[u32], histogram: &[usize]) {
         let mut min_red = u8::MAX;
         let mut min_green = u8::MAX;
         let mut min_blue = u8::MAX;
@@ -796,7 +827,7 @@ impl ColorVolumeBox {
 
         for color in &colors[self.lower_index..=self.upper_index] {
             let (red, green, blue) = unpack_rgb(*color);
-            population += histogram.get(color).copied().unwrap_or_default();
+            population += histogram[quantized_to_index(*color)];
             min_red = min_red.min(red);
             min_green = min_green.min(green);
             min_blue = min_blue.min(blue);
@@ -814,7 +845,7 @@ impl ColorVolumeBox {
         self.max_blue = max_blue;
     }
 
-    fn find_split_point(&self, colors: &mut [u32], histogram: &HashMap<u32, usize>) -> usize {
+    fn find_split_point(&self, colors: &mut [u32], histogram: &[usize]) -> usize {
         let longest_dimension = self.longest_dimension();
         colors[self.lower_index..=self.upper_index].sort_by_key(|color| {
             let (red, green, blue) = unpack_rgb(*color);
@@ -837,7 +868,7 @@ impl ColorVolumeBox {
             .iter()
             .enumerate()
         {
-            cumulative_population += histogram.get(color).copied().unwrap_or_default();
+            cumulative_population += histogram[quantized_to_index(*color)];
             if cumulative_population >= median_population {
                 return (self.lower_index + index).min(self.upper_index - 1);
             }
