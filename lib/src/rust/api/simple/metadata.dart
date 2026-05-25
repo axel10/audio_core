@@ -7,7 +7,7 @@ import '../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `build_square_thumbnail`, `current_time_millis`, `extract_embedded_artwork_with_id3`, `extract_embedded_artwork_with_lofty`, `extract_embedded_artwork`, `file_token`, `first_extended_text_value`, `first_tag_value`, `first_text_frame_value`, `id3_picture_type_to_label`, `lofty_picture_type_to_label`, `path_to_string`, `read_track_metadata_with_id3`, `read_track_metadata_with_lofty`, `replace_id3_pictures`, `replace_lofty_pictures`, `should_use_id3`, `update_track_metadata_with_id3`, `update_track_metadata_with_lofty`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`
 
 Future<void> updateTrackMetadata({
   required String path,
@@ -19,6 +19,9 @@ Future<void> updateTrackMetadata({
 
 Future<TrackMetadataUpdate> getTrackMetadata({required String path}) =>
     RustLib.instance.api.crateApiSimpleMetadataGetTrackMetadata(path: path);
+
+Future<AudioDetails> getAudioDetails({required String path}) =>
+    RustLib.instance.api.crateApiSimpleMetadataGetAudioDetails(path: path);
 
 Future<TrackArtworkResult> generateTrackArtwork({
   required String path,
@@ -50,6 +53,60 @@ Future<TrackArtworkResult> generateTrackArtwork({
 
 Future<void> removeAllTags({required String path}) =>
     RustLib.instance.api.crateApiSimpleMetadataRemoveAllTags(path: path);
+
+class AudioDetails {
+  final String formatName;
+  final String codecName;
+  final PlatformInt64 durationMs;
+  final int bitrate;
+  final int sampleRate;
+  final int channels;
+  final int? bitDepth;
+  final String bitrateMode;
+  final PlatformInt64 fileSize;
+
+  const AudioDetails({
+    required this.formatName,
+    required this.codecName,
+    required this.durationMs,
+    required this.bitrate,
+    required this.sampleRate,
+    required this.channels,
+    this.bitDepth,
+    required this.bitrateMode,
+    required this.fileSize,
+  });
+
+  static Future<AudioDetails> default_() =>
+      RustLib.instance.api.crateApiSimpleMetadataAudioDetailsDefault();
+
+  @override
+  int get hashCode =>
+      formatName.hashCode ^
+      codecName.hashCode ^
+      durationMs.hashCode ^
+      bitrate.hashCode ^
+      sampleRate.hashCode ^
+      channels.hashCode ^
+      bitDepth.hashCode ^
+      bitrateMode.hashCode ^
+      fileSize.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AudioDetails &&
+          runtimeType == other.runtimeType &&
+          formatName == other.formatName &&
+          codecName == other.codecName &&
+          durationMs == other.durationMs &&
+          bitrate == other.bitrate &&
+          sampleRate == other.sampleRate &&
+          channels == other.channels &&
+          bitDepth == other.bitDepth &&
+          bitrateMode == other.bitrateMode &&
+          fileSize == other.fileSize;
+}
 
 class TrackArtworkResult {
   final bool artworkFound;

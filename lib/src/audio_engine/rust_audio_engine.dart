@@ -5,6 +5,7 @@ import '../rust/api/simple_api.dart' as rust;
 import '../rust/api/simple/equalizer.dart';
 import '../track_metadata.dart';
 import '../track_metadata_update.dart';
+import '../audio_details.dart';
 import 'audio_engine_interface.dart';
 import 'pcm_waveform_support.dart';
 import 'rust_metadata_bridge.dart';
@@ -273,6 +274,14 @@ class RustAudioEngine
   }) async {
     final metadata = await rust.getTrackMetadata(path: path);
     return trackMetadataFromRust(metadata);
+  }
+
+  @override
+  Future<AudioDetails> getAudioDetails({
+    required String path,
+  }) async {
+    final details = await rust.getAudioDetails(path: path);
+    return AudioDetails.fromRust(details);
   }
 
   @override

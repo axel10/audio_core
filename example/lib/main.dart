@@ -129,6 +129,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
   String? _mediaLibraryError;
   String? _playbackDecodeEngine;
   String? _converterEngine;
+  bool _showCurrentPlayingDetails = false;
 
   final GlobalKey<RandomLabTabState> _randomLabKey =
       GlobalKey<RandomLabTabState>();
@@ -438,8 +439,10 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                     animation: _controller,
                     builder: (context, _) => _buildPlayerControls(),
                   ),
-                  const SizedBox(height: 8),
+                   const SizedBox(height: 8),
                   _buildEngineInfo(context),
+                  const SizedBox(height: 8),
+                  _buildAudioDetailsControls(context),
                   if (Platform.isAndroid)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
@@ -597,6 +600,107 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
         ),
       ),
     );
+  }
+
+  Widget _buildAudioDetailsControls(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            ElevatedButton.icon(
+              onPressed: _handleGetAudioDetails,
+              icon: const Icon(Icons.info),
+              label: Text(_showCurrentPlayingDetails ? 'Get Current Playing Details' : 'Select File Details'),
+            ),
+            const SizedBox(width: 12),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Checkbox(
+                  value: _showCurrentPlayingDetails,
+                  onChanged: (val) {
+                    setState(() {
+                      _showCurrentPlayingDetails = val ?? false;
+                    });
+                  },
+                ),
+                const Text('Current Playing'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handleGetAudioDetails() async {
+    String? path;
+    if (_showCurrentPlayingDetails) {
+      path = _controller.player.currentPath;
+      if (path == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No song is currently playing.')),
+        );
+        return;
+      }
+    } else {
+      // Pick a file
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: _audioFileExtensions,
+        allowMultiple: false,
+      );
+      if (result == null || result.files.isEmpty) {
+        return;
+      }
+      path = result.files.first.path;
+      if (path == null || path.isEmpty) {
+        return;
+      }
+    }
+
+    try {
+      final details = await _controller.engine.getAudioDetails(path: path);
+      if (!mounted) return;
+
+      await showDialog<void>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('Audio Details'),
+            content: SingleChildScrollView(
+              child: ListBody(
+                children: [
+                  Text('File Path: $path'),
+                  const SizedBox(height: 8),
+                  Text('Format: ${details.formatName}'),
+                  Text('Codec: ${details.codecName}'),
+                  Text('Duration: ${details.duration.inMinutes}:${(details.duration.inSeconds % 60).toString().padLeft(2, '0')} (${details.duration.inMilliseconds} ms)'),
+                  Text('Bitrate: ${(details.bitrate / 1000).toStringAsFixed(1)} kbps'),
+                  Text('Sample Rate: ${details.sampleRate} Hz'),
+                  Text('Channels: ${details.channels}'),
+                  Text('Bit Depth: ${details.bitDepth != null ? "${details.bitDepth} bit" : "N/A"}'),
+                  Text('Bitrate Mode: ${details.bitrateMode}'),
+                  Text('File Size: ${(details.fileSize / 1024 / 1024).toStringAsFixed(2)} MB (${details.fileSize} bytes)'),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to retrieve audio details: $e')),
+      );
+    }
   }
 
   Widget _buildFileAndWaveform() {

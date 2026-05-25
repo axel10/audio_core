@@ -11,6 +11,7 @@ import '../rust/api/simple_api.dart' as rust;
 import '../track_artwork.dart';
 import '../track_metadata.dart';
 import '../track_metadata_update.dart';
+import '../audio_details.dart';
 import 'audio_engine_interface.dart';
 import 'track_artwork_support.dart';
 
@@ -543,6 +544,17 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
       );
     });
     return metadata;
+  }
+
+  @override
+  Future<AudioDetails> getAudioDetails({
+    required String path,
+  }) async {
+    final targetPath = _normalizePath(path);
+    final details = await _withAppleFileReadAccess(targetPath, () async {
+      return rust.getAudioDetails(path: targetPath);
+    });
+    return AudioDetails.fromRust(details);
   }
 
   @override

@@ -168,6 +168,7 @@ pub use controller::{
 pub use metadata::{
     generate_track_artwork, get_track_metadata, remove_all_tags, update_track_metadata,
     TrackArtworkResult, TrackMetadataUpdate, TrackPicture,
+    get_audio_details, AudioDetails,
 };
 
 const PLAYBACK_STATE_PUSH_INTERVAL: Duration = Duration::from_millis(500);

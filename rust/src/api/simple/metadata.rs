@@ -65,6 +65,19 @@ pub struct TrackArtworkResult {
     pub mesh_debug_blob: Option<Vec<u8>>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct AudioDetails {
+    pub format_name: String,
+    pub codec_name: String,
+    pub duration_ms: i64,
+    pub bitrate: i32,
+    pub sample_rate: i32,
+    pub channels: i32,
+    pub bit_depth: Option<i32>,
+    pub bitrate_mode: String,
+    pub file_size: i64,
+}
+
 pub fn update_track_metadata(path: String, metadata: TrackMetadataUpdate) -> anyhow::Result<()> {
     if should_use_id3(&path) {
         return update_track_metadata_with_id3(path, metadata);
@@ -79,6 +92,40 @@ pub fn get_track_metadata(path: String) -> TrackMetadataUpdate {
     }
 
     read_track_metadata_with_lofty(&path)
+}
+
+pub fn get_audio_details(path: String) -> anyhow::Result<AudioDetails> {
+    let path_ref = Path::new(&path);
+    let file_size = fs::metadata(path_ref)?.len() as i64;
+
+    let tagged_file = Probe::open(path_ref)?.read()?;
+    let properties = tagged_file.properties();
+
+    let duration_ms = properties.duration().as_millis() as i64;
+    let sample_rate = properties.sample_rate().unwrap_or(0) as i32;
+    let channels = properties.channels().unwrap_or(0) as i32;
+    let bit_depth = properties.bit_depth().map(|d| d as i32);
+    let bitrate = (properties.audio_bitrate().or(properties.overall_bitrate()).unwrap_or(0) as i32) * 1000;
+
+    let format_name = format!("{:?}", tagged_file.file_type()).to_lowercase();
+
+    let bitrate_mode = match format_name.as_str() {
+        "flac" | "opus" | "vorbis" => "VBR",
+        "wav" | "aiff" => "CBR",
+        _ => "unknown",
+    }.to_string();
+
+    Ok(AudioDetails {
+        format_name: format_name.clone(),
+        codec_name: format_name,
+        duration_ms,
+        bitrate,
+        sample_rate,
+        channels,
+        bit_depth,
+        bitrate_mode,
+        file_size,
+    })
 }
 
 pub fn generate_track_artwork(

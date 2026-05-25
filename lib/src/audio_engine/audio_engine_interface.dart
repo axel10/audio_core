@@ -5,6 +5,7 @@ import '../track_artwork.dart';
 import '../rust/api/simple/equalizer.dart';
 import '../track_metadata.dart';
 import '../track_metadata_update.dart';
+import '../audio_details.dart';
 
 /// Define a snapshot for highly accurate position synchronization.
 class PositionSnapshot {
@@ -134,6 +135,14 @@ abstract class AudioEngine {
   }) async {
     throw UnimplementedError(
       'getTrackMetadata is not implemented on this platform.',
+    );
+  }
+
+  Future<AudioDetails> getAudioDetails({
+    required String path,
+  }) async {
+    throw UnimplementedError(
+      'getAudioDetails is not implemented on this platform.',
     );
   }
 

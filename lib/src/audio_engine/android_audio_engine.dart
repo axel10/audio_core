@@ -5,6 +5,8 @@ import '../fft_processor.dart';
 import '../rust/api/simple/equalizer.dart';
 import '../track_metadata.dart';
 import '../track_metadata_update.dart';
+import '../audio_details.dart';
+import '../rust/api/simple_api.dart' as rust;
 import 'audio_engine_interface.dart';
 import 'track_artwork_support.dart';
 
@@ -510,6 +512,14 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
         pictures: const [],
       );
     }
+  }
+
+  @override
+  Future<AudioDetails> getAudioDetails({
+    required String path,
+  }) async {
+    final details = await rust.getAudioDetails(path: path);
+    return AudioDetails.fromRust(details);
   }
 
   @override
