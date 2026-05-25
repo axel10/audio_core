@@ -3,11 +3,9 @@ use std::path::Path;
 use std::slice;
 use std::time::Duration;
 
-use ffmpeg_next as ffmpeg;
 use ffmpeg::util::mathematics::{rescale::TIME_BASE, Rescale};
-use ffmpeg::{
-    codec, frame, media, software, util::format::sample::Type as SampleType,
-};
+use ffmpeg::{codec, frame, media, software, util::format::sample::Type as SampleType};
+use ffmpeg_next as ffmpeg;
 
 use crate::{ensure_initialized, AudioProbe, Error, Result};
 
@@ -49,6 +47,25 @@ fn build_resampler(
     .map_err(Error::from)
 }
 
+fn frame_layout(frame: &frame::Audio) -> ffmpeg::ChannelLayout {
+    if frame.channel_layout().is_empty() {
+        ffmpeg::ChannelLayout::default(i32::from(frame.channels()))
+    } else {
+        frame.channel_layout()
+    }
+}
+
+fn normalize_input_frame(frame: &mut frame::Audio, fallback_rate: u32) -> ffmpeg::ChannelLayout {
+    let layout = frame_layout(frame);
+    if frame.channel_layout().is_empty() {
+        frame.set_channel_layout(layout);
+    }
+    if frame.rate() == 0 && fallback_rate != 0 {
+        frame.set_rate(fallback_rate);
+    }
+    layout
+}
+
 pub struct AudioSource {
     probe: AudioProbe,
     input: ffmpeg::format::context::Input,
@@ -71,19 +88,41 @@ impl AudioSource {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         ensure_initialized()?;
 
-        let input = ffmpeg::format::input(path.as_ref()).map_err(Error::from)?;
-        let stream = input
-            .streams()
-            .best(media::Type::Audio)
-            .ok_or(Error::NoAudioStream)?;
+        let path_ref = path.as_ref();
+        let input = ffmpeg::format::input(path_ref).map_err(|e| {
+            let err = Error::from(e);
+            eprintln!(
+                "[ffmpeg_core][AudioSource] open format input failed for {:?}: {}",
+                path_ref, err
+            );
+            err
+        })?;
+        let stream = input.streams().best(media::Type::Audio).ok_or_else(|| {
+            eprintln!(
+                "[ffmpeg_core][AudioSource] no audio stream found for {:?}",
+                path_ref
+            );
+            Error::NoAudioStream
+        })?;
 
         let stream_index = stream.index();
-        let context = codec::context::Context::from_parameters(stream.parameters())
-            .map_err(Error::from)?;
-        let mut decoder = context.decoder().audio().map_err(Error::from)?;
-        decoder
-            .set_parameters(stream.parameters())
-            .map_err(Error::from)?;
+        let context =
+            codec::context::Context::from_parameters(stream.parameters()).map_err(|e| {
+                let err = Error::from(e);
+                eprintln!(
+                    "[ffmpeg_core][AudioSource] codec context creation failed: {}",
+                    err
+                );
+                err
+            })?;
+        let mut decoder = context.decoder().audio().map_err(|e| {
+            let err = Error::from(e);
+            eprintln!(
+                "[ffmpeg_core][AudioSource] decoder creation failed: {}",
+                err
+            );
+            err
+        })?;
         decoder.set_packet_time_base(stream.time_base());
 
         let source_layout = if decoder.channel_layout().is_empty() {
@@ -111,7 +150,14 @@ impl AudioSource {
             target_format,
             target_layout,
             target_rate,
-        )?;
+        )
+        .map_err(|e| {
+            eprintln!(
+                "[ffmpeg_core][AudioSource] resampler creation failed: {}",
+                e
+            );
+            e
+        })?;
 
         let total_duration = input_duration(&input, source_rate);
         let probe = AudioProbe {
@@ -170,7 +216,9 @@ impl AudioSource {
         }
 
         let target_ts = position.as_micros().min(i64::MAX as u128) as i64;
-        self.input.seek(target_ts, ..target_ts).map_err(Error::from)?;
+        self.input
+            .seek(target_ts, ..target_ts)
+            .map_err(Error::from)?;
         self.decoder.flush();
         self.resampler = build_resampler(
             self.source_format,
@@ -185,9 +233,53 @@ impl AudioSource {
         Ok(())
     }
 
-    fn push_resampled_frame(&mut self, input: &frame::Audio) -> Result<()> {
+    fn push_resampled_frame(&mut self, input: &mut frame::Audio) -> Result<()> {
+        let input_layout = normalize_input_frame(input, self.source_rate);
+        let input_rate = input.rate();
+        let input_format = input.format();
+        let input_changed = input_format != self.source_format
+            || input_layout != self.source_layout
+            || input_rate != self.source_rate;
+
+        if input_changed {
+            eprintln!(
+                "[ffmpeg_core][AudioSource] reconfiguring resampler: format {} -> {}, layout {}ch -> {}ch, rate {} -> {}",
+                self.source_format.name(),
+                input_format.name(),
+                self.source_layout.channels(),
+                input_layout.channels(),
+                self.source_rate,
+                input_rate
+            );
+
+            self.source_format = input_format;
+            self.source_layout = input_layout;
+            self.source_rate = input_rate;
+            self.target_layout = input_layout;
+            self.target_rate = input_rate;
+            self.probe.channels = input_layout.channels() as u16;
+            self.probe.sample_rate = input_rate;
+            self.resampler = build_resampler(
+                self.source_format,
+                self.source_layout,
+                self.source_rate,
+                self.target_format,
+                self.target_layout,
+                self.target_rate,
+            )?;
+        }
+
         let mut output = frame::Audio::empty();
-        self.resampler.run(input, &mut output).map_err(Error::from)?;
+        self.resampler.run(input, &mut output).map_err(|error| {
+            eprintln!(
+                "[ffmpeg_core][AudioSource] resampler.run failed: {} (frame format={} rate={} layout={}ch)",
+                error,
+                input.format().name(),
+                input.rate(),
+                input_layout.channels()
+            );
+            Error::from(error)
+        })?;
         self.push_audio_frame(&output);
         Ok(())
     }
@@ -202,9 +294,8 @@ impl AudioSource {
             return;
         }
 
-        let samples = unsafe {
-            slice::from_raw_parts(frame.data(0).as_ptr() as *const f32, sample_count)
-        };
+        let samples =
+            unsafe { slice::from_raw_parts(frame.data(0).as_ptr() as *const f32, sample_count) };
         self.pending_samples.extend(samples.iter().copied());
     }
 
@@ -213,11 +304,17 @@ impl AudioSource {
         loop {
             match self.decoder.receive_frame(&mut decoded) {
                 Ok(()) => {
-                    self.push_resampled_frame(&decoded)?;
+                    self.push_resampled_frame(&mut decoded)?;
                 }
                 Err(error) if is_again(&error) => break,
                 Err(ffmpeg::Error::Eof) => break,
-                Err(error) => return Err(Error::from(error)),
+                Err(error) => {
+                    eprintln!(
+                        "[ffmpeg_core][AudioSource] decoder.receive_frame failed: {}",
+                        error
+                    );
+                    return Err(Error::from(error));
+                }
             }
         }
         Ok(())
@@ -225,14 +322,26 @@ impl AudioSource {
 
     fn drain_resampler(&mut self) -> Result<()> {
         let mut output = frame::Audio::empty();
+        unsafe {
+            output.alloc(self.target_format, 1024, self.target_layout);
+        }
         loop {
             match self.resampler.flush(&mut output) {
                 Ok(Some(_)) => {
                     self.push_audio_frame(&output);
                     output = frame::Audio::empty();
+                    unsafe {
+                        output.alloc(self.target_format, 1024, self.target_layout);
+                    }
                 }
                 Ok(None) => break,
-                Err(error) => return Err(Error::from(error)),
+                Err(error) => {
+                    eprintln!(
+                        "[ffmpeg_core][AudioSource] drain_resampler failed: {}",
+                        error
+                    );
+                    return Err(Error::from(error));
+                }
             }
         }
         Ok(())
@@ -251,18 +360,43 @@ impl AudioSource {
                         continue;
                     }
 
-                    self.decoder.send_packet(&packet).map_err(Error::from)?;
-                    self.drain_decoder()?;
+                    if let Err(e) = self.decoder.send_packet(&packet) {
+                        eprintln!(
+                            "[ffmpeg_core][AudioSource] decoder.send_packet failed: {}",
+                            e
+                        );
+                        return Err(Error::from(e));
+                    }
+                    if let Err(e) = self.drain_decoder() {
+                        eprintln!("[ffmpeg_core][AudioSource] drain_decoder failed: {}", e);
+                        return Err(e);
+                    }
                 }
                 Err(error) if is_again(&error) => continue,
                 Err(ffmpeg::Error::Eof) => {
-                    self.decoder.send_eof().map_err(Error::from)?;
-                    self.drain_decoder()?;
-                    self.drain_resampler()?;
+                    if let Err(e) = self.decoder.send_eof() {
+                        if e != ffmpeg::Error::Eof {
+                            eprintln!("[ffmpeg_core][AudioSource] decoder.send_eof warning: {}", e);
+                        }
+                    }
+                    if let Err(e) = self.drain_decoder() {
+                        eprintln!(
+                            "[ffmpeg_core][AudioSource] drain_decoder on EOF failed: {}",
+                            e
+                        );
+                        return Err(e);
+                    }
+                    if let Err(e) = self.drain_resampler() {
+                        eprintln!("[ffmpeg_core][AudioSource] drain_resampler failed: {}", e);
+                        return Err(e);
+                    }
                     self.finished = true;
                     break;
                 }
-                Err(error) => return Err(Error::from(error)),
+                Err(error) => {
+                    eprintln!("[ffmpeg_core][AudioSource] packet.read failed: {}", error);
+                    return Err(Error::from(error));
+                }
             }
         }
 
@@ -275,9 +409,13 @@ impl Iterator for AudioSource {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pending_samples.is_empty() {
-            let has_more = self.refill().ok()?;
-            if !has_more {
-                return None;
+            match self.refill() {
+                Ok(true) => {}
+                Ok(false) => return None,
+                Err(error) => {
+                    eprintln!("[ffmpeg_core][AudioSource] refill error: {}", error);
+                    return None;
+                }
             }
         }
 

@@ -787,4 +787,41 @@ mod tests {
             lofty::picture::PictureType::CoverFront
         );
     }
+
+    #[test]
+    fn test_lofty_m4a_hdlr() {
+        let mut src = PathBuf::from("example/assets/test_music/01 Summer drop.m4a");
+        if !src.exists() {
+            src = PathBuf::from("../example/assets/test_music/01 Summer drop.m4a");
+        }
+        if !src.exists() {
+            println!("Asset file not found at {:?}, skipping test", src);
+            return;
+        }
+        let temp_path = "test_temp_hdlr.m4a";
+        let _ = fs::remove_file(temp_path);
+        fs::copy(&src, temp_path).unwrap();
+
+        // 1. Remove all tags
+        remove_all_tags(temp_path.to_string()).unwrap();
+
+        // 2. Write metadata
+        update_track_metadata(
+            temp_path.to_string(),
+            TrackMetadataUpdate {
+                title: Some("Test Title".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        // 3. Read bytes and check if "hdlr" is present
+        let bytes = fs::read(temp_path).unwrap();
+        let has_hdlr = bytes.windows(4).any(|w| w == b"hdlr");
+        
+        let _ = fs::remove_file(temp_path);
+
+        assert!(has_hdlr, "Output M4A is missing the hdlr atom!");
+    }
 }
+

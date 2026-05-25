@@ -2,22 +2,13 @@ use super::equalizer::{EqSource, EqualizerConfig, EqualizerShared};
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use ffmpeg_core::AudioSource as CoreAudioSource;
 use super::fft::{clear_fft_buffer, FftSource, RAW_FFT_BINS};
-use log::info;
+use log::{info, warn, error};
 use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
-use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
-use symphonia::core::errors::Error as SymphoniaError;
-use symphonia::core::formats::FormatOptions;
-use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 struct FfmpegAudioSource {
@@ -67,33 +58,43 @@ enum DecoderBackend {
 
 impl DecoderBackend {
     #[cfg(any(target_os = "windows", target_os = "linux"))]
-    fn open(path: &str, file: File, file_size: u64) -> Result<Self, String> {
-        if let Ok(ffmpeg_source) = FfmpegAudioSource::open(path) {
-            return Ok(Self::Ffmpeg(ffmpeg_source));
+    fn open(path: &str, file: File) -> Result<Self, String> {
+        info!("[DecoderBackend] Attempting to open audio path: {}", path);
+        match FfmpegAudioSource::open(path) {
+            Ok(ffmpeg_source) => {
+                info!("[DecoderBackend] Successfully opened via FFmpeg backend");
+                Ok(Self::Ffmpeg(ffmpeg_source))
+            }
+            Err(ffmpeg_error) => {
+                warn!(
+                    "[DecoderBackend] FFmpeg backend failed to open (error: {}). Falling back to Symphonia",
+                    ffmpeg_error
+                );
+                match Self::open_symphonia(file) {
+                    Ok(symphonia_source) => {
+                        info!("[DecoderBackend] Successfully opened via Symphonia backend");
+                        Ok(symphonia_source)
+                    }
+                    Err(symphonia_error) => {
+                        error!(
+                            "[DecoderBackend] Symphonia backend also failed to open (error: {})",
+                            symphonia_error
+                        );
+                        Err(symphonia_error)
+                    }
+                }
+            }
         }
-
-        Self::open_symphonia(file, file_size)
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-    fn open(_path: &str, file: File, file_size: u64) -> Result<Self, String> {
-        Self::open_symphonia(file, file_size)
+    fn open(_path: &str, file: File) -> Result<Self, String> {
+        Self::open_symphonia(file)
     }
 
-    fn open_symphonia(file: File, file_size: u64) -> Result<Self, String> {
-        let source: Box<dyn Source<Item = f32> + Send> = if file_size < 60 * 1024 * 1024 {
-            let lazy_source = LazyMemorySource::new(file, file_size);
-            let decoder = Decoder::builder()
-                .with_data(lazy_source)
-                .with_byte_len(file_size)
-                .with_seekable(true)
-                .build()
-                .map_err(|e| format!("decode failed: {e}"))?;
-            Box::new(decoder)
-        } else {
-            let decoder = Decoder::try_from(file).map_err(|e| format!("decode failed: {e}"))?;
-            Box::new(decoder)
-        };
+    fn open_symphonia(file: File) -> Result<Self, String> {
+        let decoder = Decoder::try_from(file).map_err(|e| format!("decode failed: {e}"))?;
+        let source: Box<dyn Source<Item = f32> + Send> = Box::new(decoder);
 
         Ok(Self::Symphonia {
             source,
@@ -450,12 +451,8 @@ impl PlayerController {
 
         // 耗时操作：打开文件、构建系统层级组件 (大约耗时几十毫秒以上)
         let file = File::open(path).map_err(|e| format!("open file failed: {e}"))?;
-        let metadata = file
-            .metadata()
-            .map_err(|e| format!("get metadata failed: {e}"))?;
-        let file_size = metadata.len();
 
-        let backend = DecoderBackend::open(path, file, file_size)?;
+        let backend = DecoderBackend::open(path, file)?;
         let total = backend.total_duration().unwrap_or(Duration::ZERO);
         let clamped_offset = if total.is_zero() {
             start_offset
@@ -854,87 +851,41 @@ pub fn get_audio_pcm(path: Option<String>, sample_stride: usize) -> Result<Vec<f
         }
     };
 
-    let file = File::open(&target_path)
-        .map_err(|e| format!("open file failed: {} - {}", target_path, e))?;
-    let mut hint = Hint::new();
-    if let Some(ext) = std::path::Path::new(&target_path)
-        .extension()
-        .and_then(|e| e.to_str())
-    {
-        hint.with_extension(ext);
-    }
-
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
-    let mut format = symphonia::default::get_probe()
-        .format(
-            &hint,
-            mss,
-            &FormatOptions::default(),
-            &MetadataOptions::default(),
-        )
-        .map_err(|e| format!("probe format failed: {}", e))?
-        .format;
-
-    let track = format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-        .or_else(|| format.default_track())
-        .ok_or_else(|| "No audio track found in loaded file".to_string())?;
-
-    let track_id = track.id;
-    let channels = track
-        .codec_params
-        .channels
-        .map(|c| c.count() as usize)
-        .unwrap_or(1);
-    let sample_rate = track.codec_params.sample_rate.unwrap_or(0);
-    let mut decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &DecoderOptions::default())
-        .map_err(|e| format!("create decoder failed: {}", e))?;
-
+    let mut source = CoreAudioSource::open(&target_path)
+        .map_err(|e| format!("open audio source failed: {}", e))?;
+    let channels = source.channels() as usize;
+    let sample_rate = source.sample_rate();
+    let mut pcm = Vec::new();
     let sample_stride = sample_stride.max(1);
-    let mut sample_buf: Option<SampleBuffer<f32>> = None;
-    let mut pcm: Vec<f32> = Vec::new();
-    let mut track_packet_index = 0usize;
-
-    loop {
-        let packet = match format.next_packet() {
-            Ok(packet) => packet,
-            Err(SymphoniaError::IoError(_)) => break,
-            Err(SymphoniaError::ResetRequired) => {
-                return Err("stream reset required during pcm decode".to_string());
+    if sample_stride <= 1 {
+        for sample in source {
+            pcm.push(sample);
+        }
+    } else {
+        let frame_size = 1024;
+        let mut count = 0;
+        'outer: loop {
+            let should_read = count % sample_stride == 0;
+            count += 1;
+            if should_read {
+                for _ in 0..frame_size {
+                    for _ in 0..channels {
+                        if let Some(s) = source.next() {
+                            pcm.push(s);
+                        } else {
+                            break 'outer;
+                        }
+                    }
+                }
+            } else {
+                for _ in 0..frame_size {
+                    for _ in 0..channels {
+                        if source.next().is_none() {
+                            break 'outer;
+                        }
+                    }
+                }
             }
-            Err(err) => return Err(format!("read packet failed: {}", err)),
-        };
-
-        if packet.track_id() != track_id {
-            continue;
-        }
-
-        let should_sample = sample_stride == 1 || track_packet_index % sample_stride == 0;
-        track_packet_index = track_packet_index.saturating_add(1);
-        if !should_sample {
-            continue;
-        }
-
-        let decoded = match decoder.decode(&packet) {
-            Ok(decoded) => decoded,
-            Err(SymphoniaError::DecodeError(_)) => continue,
-            Err(SymphoniaError::IoError(_)) => continue,
-            Err(err) => return Err(format!("decode packet failed: {}", err)),
-        };
-
-        if sample_buf.is_none() {
-            sample_buf = Some(SampleBuffer::<f32>::new(
-                decoded.capacity() as u64,
-                *decoded.spec(),
-            ));
-        }
-
-        if let Some(buf) = sample_buf.as_mut() {
-            buf.copy_interleaved_ref(decoded);
-            pcm.extend_from_slice(buf.samples());
         }
     }
 
@@ -995,39 +946,9 @@ pub fn get_audio_pcm_channel_count(path: Option<String>) -> Result<i32, String> 
         }
     };
 
-    let file = File::open(&target_path)
-        .map_err(|e| format!("open file failed: {} - {}", target_path, e))?;
-    let mut hint = Hint::new();
-    if let Some(ext) = std::path::Path::new(&target_path)
-        .extension()
-        .and_then(|e| e.to_str())
-    {
-        hint.with_extension(ext);
-    }
-
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
-    let format = symphonia::default::get_probe()
-        .format(
-            &hint,
-            mss,
-            &FormatOptions::default(),
-            &MetadataOptions::default(),
-        )
-        .map_err(|e| format!("probe format failed: {}", e))?
-        .format;
-
-    let track = format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-        .or_else(|| format.default_track())
-        .ok_or_else(|| "No audio track found in loaded file".to_string())?;
-
-    Ok(track
-        .codec_params
-        .channels
-        .map(|c| c.count() as i32)
-        .unwrap_or(1))
+    let source = CoreAudioSource::open(&target_path)
+        .map_err(|e| format!("open audio source failed: {}", e))?;
+    Ok(source.channels() as i32)
 }
 
 fn drive_crossfade(generation: u64, duration: Duration) {
@@ -1327,108 +1248,4 @@ pub fn finish_file_write() -> Result<(), String> {
     c.finish_file_write()
 }
 
-/// 延迟内存读取 Source
-/// 允许在后台读取文件的同时进行播放，读取完成后自动关闭文件句柄
-struct LazyMemorySource {
-    inner: Arc<Mutex<LazyMemoryInner>>,
-    cond: Arc<Condvar>,
-    pos: u64,
-    abort: Arc<AtomicBool>,
-}
 
-struct LazyMemoryInner {
-    buffer: Vec<u8>,
-    total_size: u64,
-    is_finished: bool,
-}
-
-impl LazyMemorySource {
-    fn new(mut file: File, size: u64) -> Self {
-        let inner = Arc::new(Mutex::new(LazyMemoryInner {
-            buffer: Vec::with_capacity(size as usize),
-            total_size: size,
-            is_finished: false,
-        }));
-        let cond = Arc::new(Condvar::new());
-        let abort = Arc::new(AtomicBool::new(false));
-
-        let inner_clone = inner.clone();
-        let cond_clone = cond.clone();
-        let abort_clone = abort.clone();
-
-        // 启动后台线程读取文件
-        thread::spawn(move || {
-            let mut buf = [0u8; 64 * 1024]; // 64KB 缓冲区
-            loop {
-                if abort_clone.load(Ordering::SeqCst) {
-                    info!("[LazyMemorySource] Background read aborted.");
-                    break;
-                }
-
-                match file.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        let mut inner = inner_clone.lock().unwrap();
-                        inner.buffer.extend_from_slice(&buf[..n]);
-                        cond_clone.notify_all();
-                    }
-                    Err(_) => break,
-                }
-            }
-            let mut inner = inner_clone.lock().unwrap();
-            inner.is_finished = true;
-            cond_clone.notify_all();
-            // file 在此处离开作用域，句柄被自动释放
-            info!("[LazyMemorySource] Background thread finished, reader handle released.");
-        });
-
-        Self {
-            inner,
-            cond,
-            pos: 0,
-            abort,
-        }
-    }
-}
-
-impl Drop for LazyMemorySource {
-    fn drop(&mut self) {
-        // 当 LazyMemorySource (及其包装层 Decoder) 被销毁时，中止后台线程
-        self.abort.store(true, Ordering::SeqCst);
-        self.cond.notify_all();
-    }
-}
-
-impl Read for LazyMemorySource {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let mut inner = self.inner.lock().unwrap();
-        // 如果请求的位置还没有数据，且文件还没读完，则等待
-        while inner.buffer.len() as u64 <= self.pos && !inner.is_finished {
-            inner = self.cond.wait(inner).unwrap();
-        }
-
-        let available = inner.buffer.len() as u64;
-        if self.pos >= available {
-            return Ok(0); // EOF
-        }
-
-        let start = self.pos as usize;
-        let end = (start + buf.len()).min(available as usize);
-        let n = end - start;
-        buf[..n].copy_from_slice(&inner.buffer[start..end]);
-        self.pos += n as u64;
-        Ok(n)
-    }
-}
-
-impl Seek for LazyMemorySource {
-    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
-        let total = self.inner.lock().unwrap().total_size;
-        match pos {
-            SeekFrom::Start(p) => self.pos = p,
-            SeekFrom::Current(p) => self.pos = (self.pos as i64 + p) as u64,
-            SeekFrom::End(p) => self.pos = (total as i64 + p) as u64,
-        }
-        Ok(self.pos)
-    }
-}
