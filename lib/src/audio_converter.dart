@@ -33,16 +33,16 @@ AudioFormat audioFormatFromValue(String value) {
   );
 }
 
-enum AacEncoder { builtinAac, fdkaac }
+enum AacEncoder { ffmpeg, fdkaac }
 
 extension AacEncoderX on AacEncoder {
   String get value => switch (this) {
-    AacEncoder.builtinAac => 'builtinAac',
+    AacEncoder.ffmpeg => 'ffmpeg',
     AacEncoder.fdkaac => 'fdkaac',
   };
 
   String get label => switch (this) {
-    AacEncoder.builtinAac => 'Built-in AAC',
+    AacEncoder.ffmpeg => 'FFmpeg AAC',
     AacEncoder.fdkaac => 'FDK-AAC',
   };
 }

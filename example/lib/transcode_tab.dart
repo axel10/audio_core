@@ -23,6 +23,18 @@ class _TranscodeTabState extends State<TranscodeTab> {
   ConvertResult? _result;
   String? _status;
   bool _busy = false;
+  BitRateMode _bitRateMode = BitRateMode.vbr;
+  int _bitRate = 192000;
+  AacEncoder _aacEncoder = AacEncoder.ffmpeg;
+
+  bool get _supportsBitRate => switch (_outputFormat) {
+        AudioFormat.alac ||
+        AudioFormat.aiff ||
+        AudioFormat.flac ||
+        AudioFormat.wav =>
+          false,
+        _ => true,
+      };
 
   @override
   void initState() {
@@ -97,6 +109,10 @@ class _TranscodeTabState extends State<TranscodeTab> {
     });
 
     try {
+      final hasAacEncoder = _supportsBitRate &&
+          !_useSystemEncoder &&
+          !(Platform.isIOS || Platform.isMacOS);
+
       if (Platform.isAndroid && _androidDirectory != null) {
         final result = await widget.audioConverter
             .convertAndSaveToAndroidDirectory(
@@ -105,6 +121,9 @@ class _TranscodeTabState extends State<TranscodeTab> {
                 outputDirectory: _androidDirectory!.displayPath,
                 outputFormat: _outputFormat,
                 useSystemEncoder: _useSystemEncoder,
+                bitRate: _supportsBitRate ? _bitRate : null,
+                bitRateMode: _supportsBitRate ? _bitRateMode : null,
+                aacEncoder: hasAacEncoder ? _aacEncoder : null,
               ),
               _androidDirectory!,
               onProgress: (progress) {
@@ -136,6 +155,9 @@ class _TranscodeTabState extends State<TranscodeTab> {
           outputDirectory: outputDirectory,
           outputFormat: _outputFormat,
           useSystemEncoder: _useSystemEncoder,
+          bitRate: _supportsBitRate ? _bitRate : null,
+          bitRateMode: _supportsBitRate ? _bitRateMode : null,
+          aacEncoder: hasAacEncoder ? _aacEncoder : null,
           onProgress: (progress) {
             if (!mounted) return;
             setState(() {
@@ -252,24 +274,118 @@ class _TranscodeTabState extends State<TranscodeTab> {
                           if (value == null) return;
                           setState(() {
                             _outputFormat = value;
+                            if (_outputFormat != AudioFormat.m4a) {
+                              _useSystemEncoder = false;
+                            }
                           });
                         },
                 ),
                 if (Platform.isAndroid && _outputFormat == AudioFormat.m4a) ...[
                   const SizedBox(height: 8),
-                  CheckboxListTile(
-                    title: const Text('使用系统内置编码器 (Media3)'),
-                    value: _useSystemEncoder,
+                  DropdownButtonFormField<bool>(
+                    decoration: const InputDecoration(
+                      labelText: 'Encoding Engine',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: false,
+                        child: Text('FFmpeg (Rust)'),
+                      ),
+                      DropdownMenuItem(
+                        value: true,
+                        child: Text('Media3 (System)'),
+                      ),
+                    ],
+                    initialValue: _useSystemEncoder,
                     onChanged: _busy
                         ? null
                         : (value) {
+                            if (value == null) return;
                             setState(() {
-                              _useSystemEncoder = value ?? false;
+                              _useSystemEncoder = value;
                             });
                           },
-                    controlAffinity: ListTileControlAffinity.leading,
-                    contentPadding: EdgeInsets.zero,
                   ),
+                ],
+                if (_supportsBitRate) ...[
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<BitRateMode>(
+                    decoration: const InputDecoration(
+                      labelText: 'Bitrate Mode',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: BitRateMode.values
+                        .map(
+                          (mode) => DropdownMenuItem(
+                            value: mode,
+                            child: Text(mode == BitRateMode.cbr ? 'CBR' : 'VBR'),
+                          ),
+                        )
+                        .toList(),
+                    initialValue: _bitRateMode,
+                    onChanged: _busy
+                        ? null
+                        : (value) {
+                            if (value == null) return;
+                            setState(() {
+                              _bitRateMode = value;
+                            });
+                          },
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<int>(
+                    decoration: const InputDecoration(
+                      labelText: 'Bitrate',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 128000, child: Text('128 kbps')),
+                      DropdownMenuItem(value: 192000, child: Text('192 kbps')),
+                      DropdownMenuItem(value: 256000, child: Text('256 kbps')),
+                      DropdownMenuItem(value: 320000, child: Text('320 kbps')),
+                    ],
+                    initialValue: _bitRate,
+                    onChanged: _busy
+                        ? null
+                        : (value) {
+                            if (value == null) return;
+                            setState(() {
+                              _bitRate = value;
+                            });
+                          },
+                  ),
+                  if (!(Platform.isIOS || Platform.isMacOS) &&
+                      !_useSystemEncoder &&
+                      (_outputFormat == AudioFormat.aac ||
+                          _outputFormat == AudioFormat.m4a ||
+                          _outputFormat == AudioFormat.m4b ||
+                          _outputFormat == AudioFormat.caf)) ...[
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<AacEncoder>(
+                      decoration: const InputDecoration(
+                        labelText: 'AAC Encoder',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: AacEncoder.values
+                          .map(
+                            (enc) => DropdownMenuItem(
+                              value: enc,
+                              child: Text(enc.label),
+                            ),
+                          )
+                          .toList(),
+                      initialValue: _aacEncoder,
+                      onChanged: _busy
+                          ? null
+                          : (value) {
+                              if (value == null) return;
+                              setState(() {
+                                _aacEncoder = value;
+                              });
+                            },
+                    ),
+                  ],
                 ],
                 const SizedBox(height: 8),
                 Text(_outputDirectory ?? 'No output directory selected'),
