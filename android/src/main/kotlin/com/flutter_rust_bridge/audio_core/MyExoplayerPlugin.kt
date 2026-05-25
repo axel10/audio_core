@@ -459,7 +459,19 @@ class MyExoplayerPlugin :
                     ?: return result.error("INVALID_ARGUMENT", "Input path is null", null)
                 val outputPath = call.argument<String>("outputPath")
                     ?: return result.error("INVALID_ARGUMENT", "Output path is null", null)
-                handleConvertFileWithTransformer(inputPath, outputPath, result)
+                val bitRate = call.argument<Int>("bitRate")
+                val bitRateMode = call.argument<String>("bitRateMode")
+                val sampleRate = call.argument<Int>("sampleRate")
+                val channels = call.argument<Int>("channels")
+                handleConvertFileWithTransformer(
+                    inputPath = inputPath,
+                    outputPath = outputPath,
+                    bitRate = bitRate,
+                    bitRateMode = bitRateMode,
+                    sampleRate = sampleRate,
+                    channels = channels,
+                    result = result
+                )
                 return
             }
             "ensureAudioPermission" -> {
@@ -1942,9 +1954,14 @@ class MyExoplayerPlugin :
         }
     }
 
+    @OptIn(UnstableApi::class)
     private fun handleConvertFileWithTransformer(
         inputPath: String,
         outputPath: String,
+        bitRate: Int?,
+        bitRateMode: String?,
+        sampleRate: Int?,
+        channels: Int?,
         result: Result
     ) {
         val safeContext = context ?: run {
@@ -1981,8 +1998,30 @@ class MyExoplayerPlugin :
                 .setRemoveVideo(true)
                 .build()
 
+            val defaultEncoderFactory = androidx.media3.transformer.DefaultEncoderFactory.Builder(safeContext).build()
+
             val transformerBuilder = Transformer.Builder(safeContext)
                 .setAudioMimeType(MimeTypes.AUDIO_AAC)
+                .setEncoderFactory(object : androidx.media3.transformer.Codec.EncoderFactory {
+                    override fun createForAudioEncoding(format: Format, logSessionId: android.media.metrics.LogSessionId?): androidx.media3.transformer.Codec {
+                        val targetBitrate = if (bitRate != null && bitRate > 0) bitRate else 192000
+                        val formatBuilder = format.buildUpon()
+                            .setAverageBitrate(targetBitrate)
+                        
+                        if (sampleRate != null && sampleRate > 0) {
+                            formatBuilder.setSampleRate(sampleRate)
+                        }
+                        if (channels != null && channels > 0) {
+                            formatBuilder.setChannelCount(channels)
+                        }
+                        
+                        return defaultEncoderFactory.createForAudioEncoding(formatBuilder.build(), logSessionId)
+                    }
+
+                    override fun createForVideoEncoding(format: Format, logSessionId: android.media.metrics.LogSessionId?): androidx.media3.transformer.Codec {
+                        return defaultEncoderFactory.createForVideoEncoding(format, logSessionId)
+                    }
+                })
 
             val listener = object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, exportResult: ExportResult) {

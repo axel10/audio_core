@@ -17,6 +17,7 @@ pub(crate) struct AndroidConvertRequest {
     pub channels: Option<u16>,
     pub bit_rate: Option<u32>,
     pub bit_rate_mode: Option<String>,
+    pub aac_encoder: Option<String>,
     pub ffmpeg_path: Option<String>,
     pub allow_fallback_to_ffmpeg: Option<bool>,
     pub extra_options: Option<HashMap<String, String>>,

@@ -61,13 +61,22 @@ pub(crate) fn unsupported_output_format_error(request: &AndroidConvertRequest) -
     }
 }
 
-pub(crate) fn codec_spec_for_format(format: &str) -> Option<AudioCodecSpec> {
+pub(crate) fn codec_spec_for_format(format: &str, aac_encoder: Option<&str>) -> Option<AudioCodecSpec> {
     let format = output_format_key(format);
     Some(match format.as_str() {
-        "aac" => AudioCodecSpec {
-            preferred_name: "aac",
-            fallback_id: ffmpeg::codec::Id::AAC,
-        },
+        "aac" | "caf" | "m4a" | "m4b" => {
+            if aac_encoder == Some("fdkaac") {
+                AudioCodecSpec {
+                    preferred_name: "libfdk_aac",
+                    fallback_id: ffmpeg::codec::Id::AAC,
+                }
+            } else {
+                AudioCodecSpec {
+                    preferred_name: "aac",
+                    fallback_id: ffmpeg::codec::Id::AAC,
+                }
+            }
+        }
         "alac" => AudioCodecSpec {
             preferred_name: "alac",
             fallback_id: ffmpeg::codec::Id::ALAC,
@@ -76,17 +85,9 @@ pub(crate) fn codec_spec_for_format(format: &str) -> Option<AudioCodecSpec> {
             preferred_name: "pcm_s16be",
             fallback_id: ffmpeg::codec::Id::PCM_S16BE,
         },
-        "caf" => AudioCodecSpec {
-            preferred_name: "aac",
-            fallback_id: ffmpeg::codec::Id::AAC,
-        },
         "flac" => AudioCodecSpec {
             preferred_name: "flac",
             fallback_id: ffmpeg::codec::Id::FLAC,
-        },
-        "m4a" | "m4b" => AudioCodecSpec {
-            preferred_name: "aac",
-            fallback_id: ffmpeg::codec::Id::AAC,
         },
         "mp3" => AudioCodecSpec {
             preferred_name: "libmp3lame",

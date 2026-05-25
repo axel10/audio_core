@@ -73,7 +73,7 @@ fn build_transcoder<'a>(
     decoder.set_packet_time_base(decoder_time_base);
 
     let output_format_key = output_format_key(&request.output_format);
-    let codec_spec = codec_spec_for_format(&output_format_key)
+    let codec_spec = codec_spec_for_format(&output_format_key, request.aac_encoder.as_deref())
         .ok_or_else(|| format!("unsupported output format: {}", request.output_format))?;
     let codec = codec_spec.find().ok_or_else(|| {
         format!(
@@ -114,38 +114,96 @@ fn build_transcoder<'a>(
     }
     encoder.set_format(sample_format);
     encoder.set_time_base((1, sample_rate as i32));
+    let is_vbr = matches!(output_bitrate_mode(request), Some("vbr"));
     if uses_lossy_bitrate_controls(&output_format_key) {
-        encoder.set_bit_rate(
-            request
-                .bit_rate
-                .map(|bit_rate| bit_rate as usize)
-                .unwrap_or_else(|| decoder.bit_rate()),
-        );
+        if !is_vbr || output_format_key == "opus" {
+            encoder.set_bit_rate(
+                request
+                    .bit_rate
+                    .map(|bit_rate| bit_rate as usize)
+                    .unwrap_or_else(|| decoder.bit_rate()),
+            );
+        }
 
-        if output_format_key != "opus" {
-            if let Some(mode) = output_bitrate_mode(request) {
-                if mode == "vbr" {
-                    if let Some(bit_rate) = request.bit_rate {
-                        if let Some(quality) = encoder_quality_for_bitrate(bit_rate) {
+        if is_vbr && output_format_key != "opus" {
+            let is_fdkaac = request.aac_encoder.as_deref() == Some("fdkaac")
+                && (output_format_key == "aac" || output_format_key == "m4a" || output_format_key == "m4b" || output_format_key == "caf");
+
+            if !is_fdkaac {
+                encoder.set_flags(codec::flag::Flags::QSCALE);
+                if let Some(bit_rate) = request.bit_rate {
+                    const FF_QP2LAMBDA: i32 = 118;
+                    match output_format_key.as_str() {
+                        "mp3" => {
+                            let quality = if bit_rate <= 128_000 {
+                                6
+                            } else if bit_rate <= 192_000 {
+                                4
+                            } else if bit_rate <= 256_000 {
+                                2
+                            } else {
+                                0
+                            };
                             encoder.set_quality(quality);
                         }
+                        "aac" | "m4a" | "m4b" | "caf" => {
+                            let q_val = if bit_rate <= 128_000 {
+                                0.8
+                            } else if bit_rate <= 192_000 {
+                                1.2
+                            } else if bit_rate <= 256_000 {
+                                1.6
+                            } else {
+                                2.0
+                            };
+                            let q = (q_val * FF_QP2LAMBDA as f64).round() as usize;
+                            encoder.set_quality(q);
+                        }
+                        "ogg" => {
+                            let q_val = if bit_rate <= 128_000 {
+                                0.3
+                            } else if bit_rate <= 192_000 {
+                                0.6
+                            } else if bit_rate <= 256_000 {
+                                0.8
+                            } else {
+                                1.0
+                            };
+                            let q = (q_val * FF_QP2LAMBDA as f64).round() as usize;
+                            encoder.set_quality(q);
+                        }
+                        _ => {}
                     }
                 }
             }
         }
     }
 
-    let use_opus_vbr =
-        output_format_key == "opus" && matches!(output_bitrate_mode(request), Some("vbr"));
-    let encoder = if use_opus_vbr {
-        let mut options = Dictionary::new();
+    let mut options = Dictionary::new();
+    if output_format_key == "opus" && is_vbr {
         options.set("vbr", "on");
-        encoder
-            .open_as_with(codec, options)
-            .map_err(|error| error.to_string())?
-    } else {
-        encoder.open_as(codec).map_err(|error| error.to_string())?
-    };
+    }
+    if (output_format_key == "aac" || output_format_key == "m4a" || output_format_key == "m4b" || output_format_key == "caf")
+        && is_vbr
+        && request.aac_encoder.as_deref() == Some("fdkaac")
+    {
+        if let Some(bit_rate) = request.bit_rate {
+            let vbr_mode = if bit_rate <= 128_000 {
+                "3"
+            } else if bit_rate <= 192_000 {
+                "4"
+            } else {
+                "5"
+            };
+            options.set("vbr", vbr_mode);
+        } else {
+            options.set("vbr", "4");
+        }
+    }
+
+    let encoder = encoder
+        .open_as_with(codec, options)
+        .map_err(|error| error.to_string())?;
     stream.set_time_base((1, sample_rate as i32));
     stream.set_parameters(&encoder);
 

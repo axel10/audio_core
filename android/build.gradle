@@ -167,7 +167,6 @@ task downloadFFmpeg {
         }
     }
 }
-
 tasks.configureEach { task ->
     if (task.name.startsWith("cargokitCargoBuild") || task.name == "preBuild") {
         task.dependsOn downloadFFmpeg
