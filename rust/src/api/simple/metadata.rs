@@ -109,10 +109,15 @@ pub fn get_audio_details(path: String) -> anyhow::Result<AudioDetails> {
 
     let format_name = format!("{:?}", tagged_file.file_type()).to_lowercase();
 
-    let bitrate_mode = match format_name.as_str() {
-        "flac" | "opus" | "vorbis" => "VBR",
-        "wav" | "aiff" => "CBR",
-        _ => "unknown",
+    let bitrate_mode = match properties.bitrate_mode() {
+        Some(lofty::properties::BitrateMode::Cbr) => "CBR",
+        Some(lofty::properties::BitrateMode::Vbr) => "VBR",
+        Some(_) => "unknown",
+        None => match format_name.as_str() {
+            "flac" | "opus" | "vorbis" => "VBR",
+            "wav" | "aiff" => "CBR",
+            _ => "unknown",
+        },
     }.to_string();
 
     Ok(AudioDetails {
@@ -869,6 +874,26 @@ mod tests {
         let _ = fs::remove_file(temp_path);
 
         assert!(has_hdlr, "Output M4A is missing the hdlr atom!");
+    }
+
+    #[test]
+    fn test_mp3_bitrate_mode() {
+        let mut path = PathBuf::from("lofty-rs/lofty/tests/files/assets/minimal/full_test.mp3");
+        if !path.exists() {
+            path = PathBuf::from("rust/lofty-rs/lofty/tests/files/assets/minimal/full_test.mp3");
+        }
+        if !path.exists() {
+            path = PathBuf::from("../rust/lofty-rs/lofty/tests/files/assets/minimal/full_test.mp3");
+        }
+        if !path.exists() {
+            println!("Test MP3 file not found at {:?}", path);
+            return;
+        }
+
+        let details = get_audio_details(path.to_str().unwrap().to_string()).unwrap();
+        assert_eq!(details.format_name, "mpeg");
+        assert!(details.bitrate_mode == "CBR" || details.bitrate_mode == "VBR");
+        println!("bitrate_mode for full_test.mp3: {}", details.bitrate_mode);
     }
 }
 
