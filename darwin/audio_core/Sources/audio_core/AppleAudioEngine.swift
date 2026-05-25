@@ -31,6 +31,7 @@ final class AppleAudioEngine: NSObject {
     var url: URL?
     var gain: Double = 1.0
     var storedPositionMs: Int = 0
+    var isSeekPendingOnLoad = false
 
 #if canImport(SFBAudioEngine)
     let player = AudioPlayer()
@@ -114,6 +115,7 @@ final class AppleAudioEngine: NSObject {
       stop()
       self.url = url
       storedPositionMs = 0
+      isSeekPendingOnLoad = false
 #if canImport(SFBAudioEngine)
       file = try? AudioFile(readingPropertiesAndMetadataFrom: url)
       _ = try player.enqueue(url, immediate: true)
@@ -167,7 +169,8 @@ final class AppleAudioEngine: NSObject {
       let clamped = max(0, positionMs)
       storedPositionMs = clamped
 #if canImport(SFBAudioEngine)
-      _ = player.seek(time: Double(clamped) / 1000.0)
+      let success = player.seek(time: Double(clamped) / 1000.0)
+      isSeekPendingOnLoad = !success
 #else
       player?.currentTime = Double(clamped) / 1000.0
 #endif
@@ -1370,6 +1373,19 @@ extension AppleAudioEngine {
 }
 
 extension AppleAudioEngine: AudioPlayer.Delegate {
+  func audioPlayer(_ audioPlayer: AudioPlayer, decodingStarted decoder: PCMDecoding) {
+    syncOnStateQueue {
+      if let slot = slot(matching: audioPlayer), slot.isSeekPendingOnLoad {
+        slot.isSeekPendingOnLoad = false
+        do {
+          try slot.seek(positionMs: slot.storedPositionMs)
+        } catch {
+          debugPrint("[AppleAudioEngine] Failed to apply stored seek position in decodingStarted: \(error.localizedDescription)")
+        }
+      }
+    }
+  }
+
   func audioPlayer(_ audioPlayer: AudioPlayer, playbackStateChanged playbackState: AudioPlayer.PlaybackState) {
     syncOnStateQueue {
       let matchedSlot = slot(matching: audioPlayer)
