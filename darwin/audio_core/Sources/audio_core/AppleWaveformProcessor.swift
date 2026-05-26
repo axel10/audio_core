@@ -28,6 +28,94 @@ enum AppleWaveformProcessor {
       "framesPerPacket=\(processingDescription.mFramesPerPacket)"
     )
 
+    let totalFrames = decoder.length
+    let supportsSeeking = decoder.supportsSeeking
+
+    if supportsSeeking && totalFrames > 0 {
+      debugPrint("[AppleAudioEngine] Using step/stride sampling. totalFrames=\(totalFrames)")
+      let windowSize = min(AVAudioFrameCount(8192), max(AVAudioFrameCount(512), AVAudioFrameCount(totalFrames / AVAudioFramePosition(expectedChunks))))
+      let bufferCapacity = max(4096, windowSize)
+
+      guard let sourceBuffer = AVAudioPCMBuffer(
+        pcmFormat: sourceFormat,
+        frameCapacity: bufferCapacity
+      ) else {
+        return Array(repeating: 0.0, count: expectedChunks)
+      }
+      guard let waveformFormat = AVAudioFormat(
+        commonFormat: .pcmFormatFloat32,
+        sampleRate: sourceFormat.sampleRate,
+        channels: sourceFormat.channelCount,
+        interleaved: false
+      ) else {
+        return Array(repeating: 0.0, count: expectedChunks)
+      }
+      let convertedCapacity = max(bufferCapacity, AVAudioFrameCount(8192))
+      guard let convertedBuffer = AVAudioPCMBuffer(
+        pcmFormat: waveformFormat,
+        frameCapacity: convertedCapacity
+      ) else {
+        return Array(repeating: 0.0, count: expectedChunks)
+      }
+      let converter = AVAudioConverter(from: sourceFormat, to: waveformFormat)
+
+      var output = Array(repeating: 0.0, count: expectedChunks)
+      let stepFrames = Double(totalFrames) / Double(expectedChunks)
+
+      for chunk in 0..<expectedChunks {
+        let targetFrame = AVAudioFramePosition(Double(chunk) * stepFrames)
+        do {
+          try decoder.seek(to: targetFrame)
+          sourceBuffer.frameLength = 0
+          try decoder.decode(into: sourceBuffer, length: windowSize)
+          guard sourceBuffer.frameLength > 0 else {
+            continue
+          }
+
+          let waveformBuffer: AVAudioPCMBuffer
+          if let converter {
+            convertedBuffer.frameLength = 0
+            var converterConsumedSource = false
+            var converterError: NSError?
+            let status = converter.convert(to: convertedBuffer, error: &converterError) { _, outStatus in
+              if converterConsumedSource {
+                outStatus.pointee = .noDataNow
+                return nil
+              }
+              converterConsumedSource = true
+              outStatus.pointee = .haveData
+              return sourceBuffer
+            }
+            if let converterError {
+              debugPrint("[AppleAudioEngine] converter error for chunk \(chunk): \(converterError.localizedDescription)")
+              continue
+            }
+            if status == .error {
+              continue
+            }
+            waveformBuffer = convertedBuffer
+          } else {
+            waveformBuffer = sourceBuffer
+          }
+
+          var chunkMonoSamples: [Double] = []
+          appendMonoSamples(from: waveformBuffer, into: &chunkMonoSamples)
+
+          if !chunkMonoSamples.isEmpty {
+            let rms = computeRms(samples: chunkMonoSamples, start: 0, end: chunkMonoSamples.count)
+            output[chunk] = roundWaveformPrecision(max(0.0, min(rms, 1.0)))
+          }
+        } catch {
+          debugPrint("[AppleAudioEngine] seek/decode failed for chunk \(chunk) at frame \(targetFrame): \(error.localizedDescription)")
+        }
+      }
+
+      debugPrint("[AppleAudioEngine] Step/stride sampling complete. Output count = \(output.count)")
+      return output
+    }
+
+    // Fallback: full linear decoding
+    debugPrint("[AppleAudioEngine] Step/stride sampling not supported or length is invalid. Falling back to full decoding.")
     let bufferCapacity: AVAudioFrameCount = 4096
     guard let sourceBuffer = AVAudioPCMBuffer(
       pcmFormat: sourceFormat,
