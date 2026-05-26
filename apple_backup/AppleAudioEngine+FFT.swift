@@ -262,18 +262,18 @@ extension AppleAudioEngine {
     let queueDepth = pendingFftFrames.count
     fftResultLock.unlock()
 
-    if fftTapCount <= 5 || fftTapCount % 30 == 0 {
-      debugPrint(
-        "[AppleAudioEngine] fft tap count=\(fftTapCount) " +
-        "frameLength=\(frameLength.map(String.init) ?? "nil") " +
-        "producedFrames=\(queuedFrames.count) " +
-        "queueDepth=\(queueDepth) " +
-        "deltaMs=\(tapDeltaMs.map { String(format: "%.1f", $0) } ?? "nil") " +
-        "rawDelta=\(String(format: "%.6f", rawDelta)) " +
-        "magnitudeDelta=\(String(format: "%.6f", magnitudeDelta)) " +
-        "first=\(latestMagnitudes.first.map { String(format: "%.6f", $0) } ?? "nil")"
-      )
-    }
+    // if fftTapCount <= 5 || fftTapCount % 30 == 0 {
+      // debugPrint(
+      //   "[AppleAudioEngine] fft tap count=\(fftTapCount) " +
+      //   "frameLength=\(frameLength.map(String.init) ?? "nil") " +
+      //   "producedFrames=\(queuedFrames.count) " +
+      //   "queueDepth=\(queueDepth) " +
+      //   "deltaMs=\(tapDeltaMs.map { String(format: "%.1f", $0) } ?? "nil") " +
+      //   "rawDelta=\(String(format: "%.6f", rawDelta)) " +
+      //   "magnitudeDelta=\(String(format: "%.6f", magnitudeDelta)) " +
+      //   "first=\(latestMagnitudes.first.map { String(format: "%.6f", $0) } ?? "nil")"
+      // )
+    // }
   }
 
   func currentFftProcessingGeneration() -> UInt64 {

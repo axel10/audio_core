@@ -511,6 +511,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     eventSink events: @escaping FlutterEventSink
   ) -> FlutterError? {
     fftEventSink = events
+    engine.setFftCaptureEnabled(true)
     startFftTimerIfNeeded()
     emitLatestFftSnapshot()
     return nil
@@ -519,6 +520,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
   public func onCancel(withArguments arguments: Any?) -> FlutterError? {
     stopFftTimer()
     fftEventSink = nil
+    engine.setFftCaptureEnabled(false)
     return nil
   }
 

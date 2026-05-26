@@ -279,6 +279,7 @@ final class AppleAudioEngine: NSObject {
   private var fftLastFetchAtMs: Double?
   private var fftTapSlotKind: SlotKind?
   private var isFftTapInstalled = false
+  private var isFftCaptureEnabled = false
   private var fftProcessingGeneration: UInt64 = 0
   private let waveformRmsWindowsPerChunk = 8
   private let waveformPrecisionScale = 100.0
@@ -528,6 +529,19 @@ final class AppleAudioEngine: NSObject {
   func getLatestFft() throws -> [Double] {
     return syncOnStateQueue {
       consumeLatestFftSnapshot()
+    }
+  }
+
+  func setFftCaptureEnabled(_ enabled: Bool) {
+    syncOnStateQueue {
+      guard isFftCaptureEnabled != enabled else { return }
+      isFftCaptureEnabled = enabled
+      debugPrint("[AppleAudioEngine] fft capture enabled=\(enabled)")
+      if enabled {
+        refreshFftCapture(for: activeSlotKind)
+      } else {
+        removeFftCaptureTap()
+      }
     }
   }
 
@@ -1163,6 +1177,11 @@ final class AppleFftRingBuffer {
 
 extension AppleAudioEngine {
   private func refreshFftCapture(for slotKind: SlotKind) {
+    guard isFftCaptureEnabled else {
+      removeFftCaptureTap()
+      return
+    }
+
     guard let slot = slotIfLoaded(slotKind) else {
       removeFftCaptureTap()
       return
@@ -1181,7 +1200,7 @@ extension AppleAudioEngine {
     slot.player.modifyProcessingGraph { engine in
       engine.mainMixerNode.installTap(
         onBus: 0,
-        bufferSize: AVAudioFrameCount(self.fftSize / 2),
+        bufferSize: AVAudioFrameCount(self.fftSize),
         format: nil
       ) { [weak self] buffer, _ in
         self?.handleFftTapBuffer(buffer, slotKind: slotKind)
@@ -1304,18 +1323,18 @@ extension AppleAudioEngine {
     let queueDepth = pendingFftFrames.count
     fftResultLock.unlock()
 
-    if fftTapCount <= 5 || fftTapCount % 30 == 0 {
-      debugPrint(
-        "[AppleAudioEngine] fft tap count=\(fftTapCount) " +
-        "frameLength=\(frameLength.map(String.init) ?? "nil") " +
-        "producedFrames=\(queuedFrames.count) " +
-        "queueDepth=\(queueDepth) " +
-        "deltaMs=\(tapDeltaMs.map { String(format: "%.1f", $0) } ?? "nil") " +
-        "rawDelta=\(String(format: "%.6f", rawDelta)) " +
-        "magnitudeDelta=\(String(format: "%.6f", magnitudeDelta)) " +
-        "first=\(latestMagnitudes.first.map { String(format: "%.6f", $0) } ?? "nil")"
-      )
-    }
+    // if fftTapCount <= 5 || fftTapCount % 30 == 0 {
+    //   debugPrint(
+    //     "[AppleAudioEngine] fft tap count=\(fftTapCount) " +
+    //     "frameLength=\(frameLength.map(String.init) ?? "nil") " +
+    //     "producedFrames=\(queuedFrames.count) " +
+    //     "queueDepth=\(queueDepth) " +
+    //     "deltaMs=\(tapDeltaMs.map { String(format: "%.1f", $0) } ?? "nil") " +
+    //     "rawDelta=\(String(format: "%.6f", rawDelta)) " +
+    //     "magnitudeDelta=\(String(format: "%.6f", magnitudeDelta)) " +
+    //     "first=\(latestMagnitudes.first.map { String(format: "%.6f", $0) } ?? "nil")"
+    //   )
+    // }
   }
 
   private func currentFftProcessingGeneration() -> UInt64 {
