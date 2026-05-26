@@ -220,9 +220,14 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         return
       }
       let expectedChunks = Self.readInt(call.arguments, key: "expectedChunks") ?? 0
+      let sampleStride = Self.readInt(call.arguments, key: "sampleStride") ?? 0
       DispatchQueue.global(qos: .userInitiated).async {
         do {
-          let waveform = try self.engine.getWaveform(path: path, expectedChunks: expectedChunks)
+          let waveform = try self.engine.getWaveform(
+            path: path,
+            expectedChunks: expectedChunks,
+            sampleStride: sampleStride
+          )
           DispatchQueue.main.async {
             result(waveform)
           }

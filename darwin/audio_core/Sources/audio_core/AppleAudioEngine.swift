@@ -531,11 +531,15 @@ final class AppleAudioEngine: NSObject {
     }
   }
 
-  func getWaveform(path: String, expectedChunks: Int) throws -> [Double] {
+  func getWaveform(path: String, expectedChunks: Int, sampleStride: Int) throws -> [Double] {
     guard expectedChunks > 0 else { return [] }
     let normalizedPath = normalizedFilePath(path)
     return try fileAccess.withTemporaryAccess(for: normalizedPath) { url in
-      try AppleWaveformProcessor.decodeWaveform(url: url, expectedChunks: expectedChunks)
+      try AppleWaveformProcessor.decodeWaveform(
+        url: url,
+        expectedChunks: expectedChunks,
+        sampleStride: sampleStride
+      )
     }
   }
 

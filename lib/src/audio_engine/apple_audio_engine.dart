@@ -271,7 +271,7 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   Future<List<double>> getWaveform({
     required String path,
     required int expectedChunks,
-    int sampleStride = 0,
+    int sampleStride = 4,
   }) async {
     final targetPath = _resolvePath(path);
     debugPrint(
@@ -280,7 +280,11 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     try {
       final List<dynamic>? result = await _channel.invokeMethod(
         'getWaveform',
-        <String, Object?>{'path': targetPath, 'expectedChunks': expectedChunks},
+        <String, Object?>{
+          'path': targetPath,
+          'expectedChunks': expectedChunks,
+          'sampleStride': sampleStride,
+        },
       );
       if (result == null) {
         return const <double>[];

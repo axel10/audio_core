@@ -7,7 +7,7 @@ enum AppleWaveformProcessor {
   private static let waveformRmsWindowsPerChunk = 8
   private static let waveformPrecisionScale = 100.0
 
-  static func decodeWaveform(url: URL, expectedChunks: Int) throws -> [Double] {
+  static func decodeWaveform(url: URL, expectedChunks: Int, sampleStride: Int) throws -> [Double] {
     let decoder = try AudioDecoder(url: url, detectContentType: true)
     defer { _ = try? decoder.close() }
 
@@ -32,8 +32,10 @@ enum AppleWaveformProcessor {
     let supportsSeeking = decoder.supportsSeeking
 
     if supportsSeeking && totalFrames > 0 {
-      debugPrint("[AppleAudioEngine] Using step/stride sampling. totalFrames=\(totalFrames)")
-      let windowSize = min(AVAudioFrameCount(8192), max(AVAudioFrameCount(512), AVAudioFrameCount(totalFrames / AVAudioFramePosition(expectedChunks))))
+      let stride = max(1, sampleStride)
+      let baseWindowSize = max(512, 8192 / stride)
+      debugPrint("[AppleAudioEngine] Using step/stride sampling. totalFrames=\(totalFrames) stride=\(stride) baseWindowSize=\(baseWindowSize)")
+      let windowSize = min(AVAudioFrameCount(baseWindowSize), max(AVAudioFrameCount(512), AVAudioFrameCount(totalFrames / AVAudioFramePosition(expectedChunks))))
       let bufferCapacity = max(4096, windowSize)
 
       guard let sourceBuffer = AVAudioPCMBuffer(
