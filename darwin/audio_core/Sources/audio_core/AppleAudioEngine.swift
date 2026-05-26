@@ -112,13 +112,27 @@ final class AppleAudioEngine: NSObject {
     }
 
     func load(url: URL) throws {
+      print("[AppleAudioEngine] PlaybackSlot load url: \(url.path)")
       stop()
       self.url = url
       storedPositionMs = 0
       isSeekPendingOnLoad = false
 #if canImport(SFBAudioEngine)
-      file = try? AudioFile(readingPropertiesAndMetadataFrom: url)
-      _ = try player.enqueue(url, immediate: true)
+      do {
+        let audioFile = try AudioFile(readingPropertiesAndMetadataFrom: url)
+        file = audioFile
+        print("[AppleAudioEngine] PlaybackSlot AudioFile read success: duration=\(audioFile.properties.duration)s, sampleRate=\(audioFile.properties.sampleRate)Hz, frameLength=\(audioFile.properties.frameLength)")
+      } catch {
+        print("[AppleAudioEngine] PlaybackSlot AudioFile read failed: \(error.localizedDescription)")
+        file = nil
+      }
+      do {
+        let enqueued = try player.enqueue(url, immediate: true)
+        print("[AppleAudioEngine] PlaybackSlot player.enqueue result: \(enqueued)")
+      } catch {
+        print("[AppleAudioEngine] PlaybackSlot player.enqueue failed: \(error.localizedDescription)")
+        throw error
+      }
       applyBaseVolume(1.0)
 #else
       player = try AVAudioPlayer(contentsOf: url)
@@ -129,35 +143,48 @@ final class AppleAudioEngine: NSObject {
     }
 
     func play() throws {
+      let fileDesc = url?.lastPathComponent ?? "nil"
 #if canImport(SFBAudioEngine)
+      print("[AppleAudioEngine] PlaybackSlot play called for \(fileDesc). Current player playbackState: \(player.playbackState)")
       switch player.playbackState {
       case .paused:
-        _ = player.resume()
+        let resumed = player.resume()
+        print("[AppleAudioEngine] PlaybackSlot resume result for \(fileDesc): \(resumed)")
       case .playing:
+        print("[AppleAudioEngine] PlaybackSlot already playing for \(fileDesc)")
         break
       case .stopped:
-        _ = try player.play()
+        let played = try player.play()
+        print("[AppleAudioEngine] PlaybackSlot play result for \(fileDesc): \(played)")
       @unknown default:
-        _ = try player.play()
+        let played = try player.play()
+        print("[AppleAudioEngine] PlaybackSlot play default result for \(fileDesc): \(played)")
       }
 #else
+      print("[AppleAudioEngine] PlaybackSlot (AVAudioPlayer) play called for \(fileDesc)")
       _ = player?.play()
 #endif
     }
 
     func pause() {
+      let fileDesc = url?.lastPathComponent ?? "nil"
 #if canImport(SFBAudioEngine)
-      _ = player.pause()
+      let paused = player.pause()
+      print("[AppleAudioEngine] PlaybackSlot pause result for \(fileDesc): \(paused)")
 #else
+      print("[AppleAudioEngine] PlaybackSlot (AVAudioPlayer) pause called for \(fileDesc)")
       player?.pause()
 #endif
       storedPositionMs = currentPositionMs
     }
 
     func stop() {
+      let fileDesc = url?.lastPathComponent ?? "nil"
 #if canImport(SFBAudioEngine)
-      player.stop()
+      let stopped = player.stop()
+      print("[AppleAudioEngine] PlaybackSlot stop result for \(fileDesc): \(stopped)")
 #else
+      print("[AppleAudioEngine] PlaybackSlot (AVAudioPlayer) stop called for \(fileDesc)")
       player?.stop()
       player?.currentTime = 0
 #endif
@@ -168,10 +195,13 @@ final class AppleAudioEngine: NSObject {
     func seek(positionMs: Int) throws {
       let clamped = max(0, positionMs)
       storedPositionMs = clamped
+      let fileDesc = url?.lastPathComponent ?? "nil"
 #if canImport(SFBAudioEngine)
       let success = player.seek(time: Double(clamped) / 1000.0)
+      print("[AppleAudioEngine] PlaybackSlot seek for \(fileDesc) to \(Double(clamped) / 1000.0)s, success: \(success)")
       isSeekPendingOnLoad = !success
 #else
+      print("[AppleAudioEngine] PlaybackSlot (AVAudioPlayer) seek for \(fileDesc) to \(Double(clamped) / 1000.0)s")
       player?.currentTime = Double(clamped) / 1000.0
 #endif
     }
@@ -296,9 +326,11 @@ final class AppleAudioEngine: NSObject {
   }
 
   func crossfade(path: String, durationMs: Int, positionMs: Int? = nil) throws {
+    print("[AppleAudioEngine] crossfade start path=\(path) durationMs=\(durationMs) positionMs=\(positionMs.map(String.init) ?? "nil")")
     try syncOnStateQueue {
       let fadeDurationMs = max(0, durationMs)
       guard let outgoingSlot = publicSlot(), outgoingSlot.isLoaded, outgoingSlot.isPlaying, fadeDurationMs > 0 else {
+        print("[AppleAudioEngine] crossfade: fallback to load and play because publicSlot isLoaded=\(publicSlot()?.isLoaded ?? false), isPlaying=\(publicSlot()?.isPlaying ?? false)")
         try load(path: path)
         if let positionMs, positionMs > 0 {
           try seek(positionMs: positionMs)
@@ -309,16 +341,20 @@ final class AppleAudioEngine: NSObject {
 
       let incomingKind = activeSlotKind.opposite
       let incomingSlot = slot(for: incomingKind)
+      print("[AppleAudioEngine] crossfade: outgoingKind=\(activeSlotKind) (url: \(outgoingSlot.url?.lastPathComponent ?? "nil")), incomingKind=\(incomingKind)")
       if let oldURL = incomingSlot.url {
+        print("[AppleAudioEngine] crossfade: release access for old url: \(oldURL.path)")
         fileAccess.releaseAccess(for: oldURL)
       }
       incomingSlot.clear()
 
       let normalizedPath = normalizedFilePath(path)
+      print("[AppleAudioEngine] crossfade: acquireAccess for: \(normalizedPath)")
       let url = try fileAccess.acquireAccess(for: normalizedPath)
       try incomingSlot.load(url: url)
 
       if let positionMs, positionMs > 0 {
+        print("[AppleAudioEngine] crossfade: seeking incoming slot to \(positionMs)ms")
         try incomingSlot.seek(positionMs: positionMs)
       }
 
@@ -327,10 +363,12 @@ final class AppleAudioEngine: NSObject {
       outgoingSlot.applyBaseVolume(latestVolume)
       incomingSlot.applyBaseVolume(latestVolume)
 
+      print("[AppleAudioEngine] crossfade: starting incoming slot playback")
       try incomingSlot.play()
       incomingSlot.gain = 0.0
       incomingSlot.applyBaseVolume(latestVolume)
 
+      print("[AppleAudioEngine] crossfade: starting crossfade timer with durationMs=\(fadeDurationMs)")
       startCrossfadeTimer(
         outgoingKind: activeSlotKind,
         incomingKind: incomingKind,
@@ -814,6 +852,7 @@ final class AppleAudioEngine: NSObject {
     incomingKind: SlotKind,
     durationMs: Int
   ) {
+    print("[AppleAudioEngine] startCrossfadeTimer: outgoingKind=\(outgoingKind), incomingKind=\(incomingKind), durationMs=\(durationMs)")
     cancelFadeTimer()
     fadeGeneration &+= 1
     let generation = fadeGeneration
@@ -828,6 +867,7 @@ final class AppleAudioEngine: NSObject {
     timer.setEventHandler { [weak self] in
       guard let self else { return }
       guard self.fadeGeneration == generation else {
+        print("[AppleAudioEngine] startCrossfadeTimer block: generation mismatch (\(self.fadeGeneration) != \(generation)), cancelling")
         self.cancelFadeTimer()
         return
       }
@@ -843,6 +883,7 @@ final class AppleAudioEngine: NSObject {
       incomingSlot.applyBaseVolume(self.latestVolume)
 
       if progress >= 1.0 {
+        print("[AppleAudioEngine] startCrossfadeTimer block: finished crossfade, settling")
         self.cancelFadeTimer()
         self.settleCrossfade(outgoingKind: outgoingKind, incomingKind: incomingKind)
       }
@@ -858,6 +899,8 @@ final class AppleAudioEngine: NSObject {
     durationMs: Int,
     completion: (() -> Void)? = nil
   ) {
+    let fileDesc = slot.url?.lastPathComponent ?? "nil"
+    print("[AppleAudioEngine] startVolumeFade for \(fileDesc): from=\(from), to=\(to), durationMs=\(durationMs)")
     cancelFadeTimer()
     fadeGeneration &+= 1
     let generation = fadeGeneration
@@ -870,6 +913,7 @@ final class AppleAudioEngine: NSObject {
     timer.setEventHandler { [weak self] in
       guard let self else { return }
       guard self.fadeGeneration == generation else {
+        print("[AppleAudioEngine] startVolumeFade block: generation mismatch (\(self.fadeGeneration) != \(generation)), cancelling")
         self.cancelFadeTimer()
         return
       }
@@ -881,6 +925,7 @@ final class AppleAudioEngine: NSObject {
       slot.applyVolume(nextVolume)
 
       if progress >= 1.0 {
+        print("[AppleAudioEngine] startVolumeFade block: finished fade for \(fileDesc)")
         self.cancelFadeTimer()
         completion?()
       }
@@ -892,14 +937,22 @@ final class AppleAudioEngine: NSObject {
   private func settleCrossfade(outgoingKind: SlotKind, incomingKind: SlotKind) {
     let outgoingSlot = slot(for: outgoingKind)
     let incomingSlot = slot(for: incomingKind)
+    print("[AppleAudioEngine] settleCrossfade: outgoingKind=\(outgoingKind) (\(outgoingSlot.url?.lastPathComponent ?? "nil")), incomingKind=\(incomingKind) (\(incomingSlot.url?.lastPathComponent ?? "nil"))")
     if let oldURL = outgoingSlot.url {
+      print("[AppleAudioEngine] settleCrossfade: releasing old URL: \(oldURL.path)")
       fileAccess.releaseAccess(for: oldURL)
     }
+    
+    // Update activeSlotKind BEFORE stopping the outgoing slot so that delegate events 
+    // triggered by stop() resolve currentPlaybackState() on the new incoming slot.
+    activeSlotKind = incomingKind
+    print("[AppleAudioEngine] settleCrossfade: updated activeSlotKind to \(incomingKind)")
+    
     outgoingSlot.stop()
     outgoingSlot.clear()
     incomingSlot.gain = 1.0
     incomingSlot.applyBaseVolume(latestVolume)
-    activeSlotKind = incomingKind
+    
     refreshFftCapture(for: incomingKind)
     emitPlayerState(playbackState: "PLAYING")
   }
@@ -916,6 +969,11 @@ final class AppleAudioEngine: NSObject {
   }
 
   private func cancelFadeTimer() {
+    if fadeTimer != nil {
+      print("[AppleAudioEngine] cancelFadeTimer called (timer was active)")
+    } else {
+      print("[AppleAudioEngine] cancelFadeTimer called (timer was nil)")
+    }
     fadeTimer?.cancel()
     fadeTimer = nil
   }
@@ -1374,6 +1432,9 @@ extension AppleAudioEngine {
 
 extension AppleAudioEngine: AudioPlayer.Delegate {
   func audioPlayer(_ audioPlayer: AudioPlayer, decodingStarted decoder: PCMDecoding) {
+    let slotName = slot(matching: audioPlayer) === primarySlot ? "primary" : "secondary"
+    let fileDesc = slot(matching: audioPlayer)?.url?.lastPathComponent ?? "nil"
+    print("[AppleAudioEngine] Delegate decodingStarted for \(slotName) slot (\(fileDesc))")
     syncOnStateQueue {
       if let slot = slot(matching: audioPlayer), slot.isSeekPendingOnLoad {
         slot.isSeekPendingOnLoad = false
@@ -1387,8 +1448,15 @@ extension AppleAudioEngine: AudioPlayer.Delegate {
   }
 
   func audioPlayer(_ audioPlayer: AudioPlayer, playbackStateChanged playbackState: AudioPlayer.PlaybackState) {
+    let slotName = slot(matching: audioPlayer) === primarySlot ? "primary" : "secondary"
+    let fileDesc = slot(matching: audioPlayer)?.url?.lastPathComponent ?? "nil"
+    print("[AppleAudioEngine] Delegate playbackStateChanged to \(playbackState) for \(slotName) slot (\(fileDesc))")
     syncOnStateQueue {
-      let matchedSlot = slot(matching: audioPlayer)
+      guard let matchedSlot = slot(matching: audioPlayer) else { return }
+      guard matchedSlot === publicSlot() else {
+        print("[AppleAudioEngine] Delegate playbackStateChanged: Ignoring state change because \(slotName) slot (\(fileDesc)) is not the public slot")
+        return
+      }
       let state: String
       switch playbackState {
       case .playing:
@@ -1396,7 +1464,7 @@ extension AppleAudioEngine: AudioPlayer.Delegate {
       case .paused:
         state = "PAUSED"
       case .stopped:
-        if let matchedSlot, isPlaybackComplete(matchedSlot) {
+        if isPlaybackComplete(matchedSlot) {
           matchedSlot.storedPositionMs = matchedSlot.durationMs
           state = "ENDED"
         } else {
@@ -1405,26 +1473,31 @@ extension AppleAudioEngine: AudioPlayer.Delegate {
       @unknown default:
         state = currentPlaybackState()
       }
+      print("[AppleAudioEngine] Delegate playbackStateChanged mapping resolved state: \(state) (currentPlaybackState is \(currentPlaybackState()))")
       emitPlayerState(playbackState: state)
     }
   }
 
   func audioPlayerEndOfAudio(_ audioPlayer: AudioPlayer) {
+    let slotName = slot(matching: audioPlayer) === primarySlot ? "primary" : "secondary"
+    let fileDesc = slot(matching: audioPlayer)?.url?.lastPathComponent ?? "nil"
+    print("[AppleAudioEngine] Delegate audioPlayerEndOfAudio for \(slotName) slot (\(fileDesc))")
     syncOnStateQueue {
-      if let slot = slot(matching: audioPlayer) {
-        // Set storedPositionMs BEFORE calling stop():
-        // stop() triggers playbackStateChanged(.stopped) synchronously,
-        // and isPlaybackComplete() must see the final position at that point.
-        // (SFBAudioEngine source: audioPlayerEndOfAudio → shouldStop=false,
-        //  engine stays in paused state; we must stop it ourselves.)
-        slot.storedPositionMs = slot.durationMs
-        audioPlayer.stop()
+      guard let matchedSlot = slot(matching: audioPlayer) else { return }
+      guard matchedSlot === publicSlot() else {
+        print("[AppleAudioEngine] Delegate audioPlayerEndOfAudio: Ignoring end of audio because \(slotName) slot (\(fileDesc)) is not the public slot")
+        return
       }
+      matchedSlot.storedPositionMs = matchedSlot.durationMs
+      audioPlayer.stop()
       emitPlayerState(playbackState: "ENDED")
     }
   }
 
   func audioPlayer(_ audioPlayer: AudioPlayer, encounteredError error: Error) {
+    let slotName = slot(matching: audioPlayer) === primarySlot ? "primary" : "secondary"
+    let fileDesc = slot(matching: audioPlayer)?.url?.lastPathComponent ?? "nil"
+    print("[AppleAudioEngine] Delegate encounteredError: \(error.localizedDescription) for \(slotName) slot (\(fileDesc))")
     syncOnStateQueue {
       emitPlayerState(error: error.localizedDescription)
     }
