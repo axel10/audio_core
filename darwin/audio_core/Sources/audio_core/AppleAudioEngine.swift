@@ -150,6 +150,11 @@ final class AppleAudioEngine: NSObject {
       case .paused:
         let resumed = player.resume()
         print("[AppleAudioEngine] PlaybackSlot resume result for \(fileDesc): \(resumed)")
+        if !resumed {
+          print("[AppleAudioEngine] PlaybackSlot resume failed, falling back to play()")
+          let played = try player.play()
+          print("[AppleAudioEngine] PlaybackSlot fallback play result for \(fileDesc): \(played)")
+        }
       case .playing:
         print("[AppleAudioEngine] PlaybackSlot already playing for \(fileDesc)")
         break
