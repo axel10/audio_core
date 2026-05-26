@@ -652,6 +652,10 @@ final class AppleAudioEngine: NSObject {
     try syncOnStateQueue {
       if let path {
         let normalizedPath = normalizedFilePath(path)
+        if let pendingEdit, pendingEdit.path == normalizedPath {
+          try restorePendingEdit(pendingEdit)
+          return
+        }
         if publicSlot()?.url?.path != normalizedPath {
           fileAccess.releaseAccess(for: normalizedPath)
           removePreparedAccessPath(normalizedPath)
@@ -660,14 +664,7 @@ final class AppleAudioEngine: NSObject {
       }
 
       guard let pendingEdit else { return }
-      try load(path: pendingEdit.path)
-      try seek(positionMs: pendingEdit.positionMs)
-      try setVolume(pendingEdit.volume)
-      if pendingEdit.wasPlaying {
-        try play(fadeDurationMs: 0, targetVolume: pendingEdit.volume)
-      }
-      self.pendingEdit = nil
-      removePreparedAccessPath(pendingEdit.path)
+      try restorePendingEdit(pendingEdit)
     }
   }
 
@@ -1040,6 +1037,17 @@ final class AppleAudioEngine: NSObject {
     preparedAccessPathsLock.lock()
     preparedAccessPaths.removeAll()
     preparedAccessPathsLock.unlock()
+  }
+
+  private func restorePendingEdit(_ pendingEdit: PendingEdit) throws {
+    try load(path: pendingEdit.path)
+    try seek(positionMs: pendingEdit.positionMs)
+    try setVolume(pendingEdit.volume)
+    if pendingEdit.wasPlaying {
+      try play(fadeDurationMs: 0, targetVolume: pendingEdit.volume)
+    }
+    self.pendingEdit = nil
+    removePreparedAccessPath(pendingEdit.path)
   }
 
   private func applyEqualizerConfig(_ config: AppleEqualizerConfig) {
