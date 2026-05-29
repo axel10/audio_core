@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:audio_core/audio_core.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 
 class TranscodeTab extends StatefulWidget {
   const TranscodeTab({super.key, required this.audioConverter});
@@ -16,7 +17,7 @@ class _TranscodeTabState extends State<TranscodeTab> {
   AudioFormat _outputFormat = AudioFormat.m4a;
   bool _useSystemEncoder = false;
   ConverterCapabilities? _capabilities;
-  String? _inputPath;
+  List<String> _inputPaths = [];
   String? _outputDirectory;
   AndroidOutputDirectory? _androidDirectory;
   ConversionProgress? _progress;
@@ -58,13 +59,15 @@ class _TranscodeTabState extends State<TranscodeTab> {
   }
 
   Future<void> _pickInputFile() async {
-    final path = await widget.audioConverter.pickInputFile();
+    final paths = await widget.audioConverter.pickInputFiles();
     if (!mounted) return;
     setState(() {
-      _inputPath = path;
+      _inputPaths = paths ?? [];
       _result = null;
       _progress = null;
-      _status = path == null ? 'Input selection cancelled.' : null;
+      _status = (paths == null || paths.isEmpty)
+          ? 'Input selection cancelled.'
+          : 'Selected ${paths.length} file(s).';
     });
   }
 
@@ -93,10 +96,9 @@ class _TranscodeTabState extends State<TranscodeTab> {
   }
 
   Future<void> _startConversion() async {
-    final inputPath = _inputPath;
-    if (inputPath == null || inputPath.isEmpty) {
+    if (_inputPaths.isEmpty) {
       setState(() {
-        _status = 'Please pick an input file first.';
+        _status = 'Please pick input files first.';
       });
       return;
     }
@@ -114,32 +116,46 @@ class _TranscodeTabState extends State<TranscodeTab> {
           !(Platform.isIOS || Platform.isMacOS);
 
       if (Platform.isAndroid && _androidDirectory != null) {
-        final result = await widget.audioConverter
-            .convertAndSaveToAndroidDirectory(
-              ConvertRequest.forOutputDirectory(
-                inputPath: inputPath,
-                outputDirectory: _androidDirectory!.displayPath,
-                outputFormat: _outputFormat,
-                useSystemEncoder: _useSystemEncoder,
-                bitRate: _supportsBitRate ? _bitRate : null,
-                bitRateMode: _supportsBitRate ? _bitRateMode : null,
-                aacEncoder: hasAacEncoder ? _aacEncoder : null,
-              ),
-              _androidDirectory!,
-              onProgress: (progress) {
-                if (!mounted) return;
-                setState(() {
-                  _progress = progress;
-                });
-              },
-            );
+        final results = <ConvertResult>[];
+        for (var index = 0; index < _inputPaths.length; index++) {
+          final inputPath = _inputPaths[index];
+          final result = await widget.audioConverter
+              .convertAndSaveToAndroidDirectory(
+                ConvertRequest.forOutputDirectory(
+                  inputPath: inputPath,
+                  outputDirectory: _androidDirectory!.displayPath,
+                  outputFormat: _outputFormat,
+                  useSystemEncoder: _useSystemEncoder,
+                  bitRate: _supportsBitRate ? _bitRate : null,
+                  bitRateMode: _supportsBitRate ? _bitRateMode : null,
+                  aacEncoder: hasAacEncoder ? _aacEncoder : null,
+                ),
+                _androidDirectory!,
+                onProgress: (progress) {
+                  if (!mounted) return;
+                  setState(() {
+                    _progress = ConversionProgress(
+                      completedFiles: index,
+                      totalFiles: _inputPaths.length,
+                      currentFilePath: progress.currentFilePath,
+                      currentFileProgress: progress.currentFileProgress,
+                      currentPosition: progress.currentPosition,
+                      totalDuration: progress.totalDuration,
+                      message: progress.message,
+                    );
+                  });
+                },
+              );
+          results.add(result.conversionResult);
+        }
 
         if (!mounted) return;
+        final allSuccess = results.every((r) => r.success);
         setState(() {
-          _result = result.conversionResult;
-          _status = result.success
-              ? 'Saved to ${result.outputPath ?? '(unknown)'}'
-              : result.errorMessage;
+          _result = results.firstWhere((r) => !r.success, orElse: () => results.last);
+          _status = allSuccess
+              ? 'All ${_inputPaths.length} files saved successfully.'
+              : 'Some conversions failed.';
         });
       } else {
         final outputDirectory = _outputDirectory;
@@ -150,8 +166,8 @@ class _TranscodeTabState extends State<TranscodeTab> {
           return;
         }
 
-        final result = await widget.audioConverter.convertToOutputDirectory(
-          inputPath: inputPath,
+        final results = await widget.audioConverter.convertFilesToOutputDirectory(
+          inputPaths: _inputPaths,
           outputDirectory: outputDirectory,
           outputFormat: _outputFormat,
           useSystemEncoder: _useSystemEncoder,
@@ -167,11 +183,12 @@ class _TranscodeTabState extends State<TranscodeTab> {
         );
 
         if (!mounted) return;
+        final allSuccess = results.every((r) => r.success);
         setState(() {
-          _result = result;
-          _status = result.success
-              ? 'Output created at ${result.outputPath ?? '(unknown)'}'
-              : result.errorMessage;
+          _result = results.firstWhere((r) => !r.success, orElse: () => results.last);
+          _status = allSuccess
+              ? 'All ${_inputPaths.length} files transcoded successfully. Output created at $outputDirectory'
+              : 'Some conversions failed.';
         });
       }
     } catch (error) {
@@ -236,12 +253,48 @@ class _TranscodeTabState extends State<TranscodeTab> {
               children: [
                 Text('Source', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
-                SelectableText(_inputPath ?? 'No input selected'),
+                if (_inputPaths.isEmpty)
+                  const SelectableText('No inputs selected')
+                else ...[
+                  Text(
+                    'Selected ${_inputPaths.length} file(s):',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  Container(
+                    constraints: const BoxConstraints(maxHeight: 150),
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: _inputPaths.length,
+                      itemBuilder: (context, index) {
+                        return ListTile(
+                          dense: true,
+                          title: Text(
+                            p.basename(_inputPaths[index]),
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                          subtitle: Text(
+                            _inputPaths[index],
+                            style: const TextStyle(fontSize: 11),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 ElevatedButton.icon(
                   onPressed: _busy ? null : _pickInputFile,
                   icon: const Icon(Icons.audio_file),
-                  label: const Text('Pick Input File'),
+                  label: const Text('Pick Input Files'),
                 ),
               ],
             ),
@@ -420,8 +473,9 @@ class _TranscodeTabState extends State<TranscodeTab> {
                   LinearProgressIndicator(value: _progress!.overallProgress),
                   const SizedBox(height: 8),
                   Text(
-                    '${(_progress!.overallProgress ?? 0).toStringAsFixed(2)} '
-                    ' | ${_progress!.currentFileProgress?.toStringAsFixed(2) ?? 'n/a'}',
+                    'Overall: ${((_progress!.overallProgress ?? 0) * 100).toStringAsFixed(1)}% '
+                    '(${_progress!.completedFiles}/${_progress!.totalFiles})'
+                    ' | Current: ${((_progress!.currentFileProgress ?? 0) * 100).toStringAsFixed(1)}%',
                   ),
                   Text('Current file: ${_progress!.currentFilePath}'),
                   if (_progress!.message != null) Text(_progress!.message!),

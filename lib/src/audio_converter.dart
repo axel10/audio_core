@@ -612,6 +612,70 @@ class AudioConverter {
     }
   }
 
+  Future<List<ConvertResult>> convertFilesToOutputDirectory({
+    required List<String> inputPaths,
+    required String outputDirectory,
+    required AudioFormat outputFormat,
+    int? sampleRate,
+    int? channels,
+    int? bitRate,
+    BitRateMode? bitRateMode,
+    String? ffmpegPath,
+    AacEncoder? aacEncoder,
+    bool allowFallbackToFfmpeg = true,
+    Map<String, String>? extraOptions,
+    List<String>? customArgs,
+    AndroidOutputDirectory? androidOutputDirectory,
+    bool useSystemEncoder = false,
+    AudioConverterProgressCallback? onProgress,
+  }) async {
+    final requests = inputPaths.map((inputPath) {
+      return ConvertRequest.forOutputDirectory(
+        inputPath: inputPath,
+        outputDirectory: outputDirectory,
+        outputFormat: outputFormat,
+        sampleRate: sampleRate,
+        channels: channels,
+        bitRate: bitRate,
+        bitRateMode: bitRateMode,
+        ffmpegPath: ffmpegPath,
+        aacEncoder: aacEncoder,
+        allowFallbackToFfmpeg: allowFallbackToFfmpeg,
+        extraOptions: extraOptions,
+        customArgs: customArgs,
+        useSystemEncoder: useSystemEncoder,
+      );
+    }).toList();
+
+    if (!Platform.isIOS && !Platform.isMacOS) {
+      return convertFiles(requests, onProgress: onProgress);
+    }
+
+    final scopedOutputDirectory = outputDirectory.trim();
+    if (scopedOutputDirectory.isEmpty) {
+      return convertFiles(requests, onProgress: onProgress);
+    }
+
+    final beganOutputAccess = await _beginScopedAccess(scopedOutputDirectory);
+    final beganInputAccesses = <String, bool>{};
+    for (final inputPath in inputPaths) {
+      beganInputAccesses[inputPath] = await _beginScopedAccess(inputPath);
+    }
+
+    try {
+      return await convertFiles(requests, onProgress: onProgress);
+    } finally {
+      if (beganOutputAccess) {
+        await _endScopedAccess(scopedOutputDirectory);
+      }
+      for (final entry in beganInputAccesses.entries) {
+        if (entry.value) {
+          await _endScopedAccess(entry.key);
+        }
+      }
+    }
+  }
+
   Future<List<ConvertResult>> convertFiles(
     List<ConvertRequest> requests, {
     AudioConverterProgressCallback? onProgress,
@@ -619,7 +683,24 @@ class AudioConverter {
     final results = <ConvertResult>[];
     for (var index = 0; index < requests.length; index++) {
       final request = requests[index];
-      final result = await convertFile(request, onProgress: onProgress);
+      final result = await convertFile(
+        request,
+        onProgress: onProgress == null
+            ? null
+            : (progress) {
+                onProgress(
+                  ConversionProgress(
+                    completedFiles: index,
+                    totalFiles: requests.length,
+                    currentFilePath: progress.currentFilePath,
+                    currentFileProgress: progress.currentFileProgress,
+                    currentPosition: progress.currentPosition,
+                    totalDuration: progress.totalDuration,
+                    message: progress.message,
+                  ),
+                );
+              },
+      );
       results.add(result);
     }
     return results;
@@ -648,6 +729,31 @@ class AudioConverter {
       withData: false,
     );
     return result?.files.single.path;
+  }
+
+  Future<List<String>?> pickInputFiles({List<String>? allowedExtensions}) async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions:
+          allowedExtensions ??
+          <String>[
+            'aac',
+            'aif',
+            'aiff',
+            'caf',
+            'flac',
+            'm4a',
+            'm4b',
+            'mp4',
+            'mp3',
+            'ogg',
+            'opus',
+            'wav',
+          ],
+      allowMultiple: true,
+      withData: false,
+    );
+    return result?.files.map((file) => file.path).whereType<String>().toList();
   }
 
   Future<String?> pickOutputDirectory() async {
