@@ -103,6 +103,14 @@ class _TranscodeTabState extends State<TranscodeTab> {
       return;
     }
 
+    final outputDirectory = _outputDirectory;
+    if (outputDirectory == null || outputDirectory.isEmpty) {
+      setState(() {
+        _status = 'Please pick an output directory first.';
+      });
+      return;
+    }
+
     setState(() {
       _busy = true;
       _result = null;
@@ -115,82 +123,32 @@ class _TranscodeTabState extends State<TranscodeTab> {
           !_useSystemEncoder &&
           !(Platform.isIOS || Platform.isMacOS);
 
-      if (Platform.isAndroid && _androidDirectory != null) {
-        final results = <ConvertResult>[];
-        for (var index = 0; index < _inputPaths.length; index++) {
-          final inputPath = _inputPaths[index];
-          final result = await widget.audioConverter
-              .convertAndSaveToAndroidDirectory(
-                ConvertRequest.forOutputDirectory(
-                  inputPath: inputPath,
-                  outputDirectory: _androidDirectory!.displayPath,
-                  outputFormat: _outputFormat,
-                  useSystemEncoder: _useSystemEncoder,
-                  bitRate: _supportsBitRate ? _bitRate : null,
-                  bitRateMode: _supportsBitRate ? _bitRateMode : null,
-                  aacEncoder: hasAacEncoder ? _aacEncoder : null,
-                ),
-                _androidDirectory!,
-                onProgress: (progress) {
-                  if (!mounted) return;
-                  setState(() {
-                    _progress = ConversionProgress(
-                      completedFiles: index,
-                      totalFiles: _inputPaths.length,
-                      currentFilePath: progress.currentFilePath,
-                      currentFileProgress: progress.currentFileProgress,
-                      currentPosition: progress.currentPosition,
-                      totalDuration: progress.totalDuration,
-                      message: progress.message,
-                    );
-                  });
-                },
-              );
-          results.add(result.conversionResult);
-        }
-
-        if (!mounted) return;
-        final allSuccess = results.every((r) => r.success);
-        setState(() {
-          _result = results.firstWhere((r) => !r.success, orElse: () => results.last);
-          _status = allSuccess
-              ? 'All ${_inputPaths.length} files saved successfully.'
-              : 'Some conversions failed.';
-        });
-      } else {
-        final outputDirectory = _outputDirectory;
-        if (outputDirectory == null || outputDirectory.isEmpty) {
+      final results = await widget.audioConverter.convertFilesToOutputDirectory(
+        inputPaths: _inputPaths,
+        outputDirectory: outputDirectory,
+        outputFormat: _outputFormat,
+        useSystemEncoder: _useSystemEncoder,
+        bitRate: _supportsBitRate ? _bitRate : null,
+        bitRateMode: _supportsBitRate ? _bitRateMode : null,
+        aacEncoder: hasAacEncoder ? _aacEncoder : null,
+        androidOutputDirectory: Platform.isAndroid ? _androidDirectory : null,
+        onProgress: (progress) {
+          if (!mounted) return;
           setState(() {
-            _status = 'Please pick an output directory first.';
+            _progress = progress;
           });
-          return;
-        }
+        },
+      );
 
-        final results = await widget.audioConverter.convertFilesToOutputDirectory(
-          inputPaths: _inputPaths,
-          outputDirectory: outputDirectory,
-          outputFormat: _outputFormat,
-          useSystemEncoder: _useSystemEncoder,
-          bitRate: _supportsBitRate ? _bitRate : null,
-          bitRateMode: _supportsBitRate ? _bitRateMode : null,
-          aacEncoder: hasAacEncoder ? _aacEncoder : null,
-          onProgress: (progress) {
-            if (!mounted) return;
-            setState(() {
-              _progress = progress;
-            });
-          },
-        );
-
-        if (!mounted) return;
-        final allSuccess = results.every((r) => r.success);
-        setState(() {
-          _result = results.firstWhere((r) => !r.success, orElse: () => results.last);
-          _status = allSuccess
-              ? 'All ${_inputPaths.length} files transcoded successfully. Output created at $outputDirectory'
-              : 'Some conversions failed.';
-        });
-      }
+      if (!mounted) return;
+      final allSuccess = results.every((r) => r.success);
+      setState(() {
+        _result =
+            results.firstWhere((r) => !r.success, orElse: () => results.last);
+        _status = allSuccess
+            ? 'All ${_inputPaths.length} files transcoded successfully. Output created at $outputDirectory'
+            : 'Some conversions failed.';
+      });
     } catch (error) {
       if (!mounted) return;
       setState(() {

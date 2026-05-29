@@ -5,6 +5,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
+import 'package:flutter/foundation.dart';
+import 'visualizer_player_controller.dart';
 import 'rust/api/simple.dart' as rust_api;
 
 enum AudioFormat { aac, alac, aiff, caf, flac, m4a, m4b, mp3, ogg, opus, wav }
@@ -628,6 +630,9 @@ class AudioConverter {
     AndroidOutputDirectory? androidOutputDirectory,
     bool useSystemEncoder = false,
     AudioConverterProgressCallback? onProgress,
+    List<String>? metadataSourcePaths,
+    bool copyMetadata = false,
+    AudioCoreController? audioCoreController,
   }) async {
     final requests = inputPaths.map((inputPath) {
       return ConvertRequest.forOutputDirectory(
@@ -647,32 +652,107 @@ class AudioConverter {
       );
     }).toList();
 
-    if (!Platform.isIOS && !Platform.isMacOS) {
-      return convertFiles(requests, onProgress: onProgress);
-    }
+    final List<ConvertResult> results;
 
-    final scopedOutputDirectory = outputDirectory.trim();
-    if (scopedOutputDirectory.isEmpty) {
-      return convertFiles(requests, onProgress: onProgress);
-    }
-
-    final beganOutputAccess = await _beginScopedAccess(scopedOutputDirectory);
-    final beganInputAccesses = <String, bool>{};
-    for (final inputPath in inputPaths) {
-      beganInputAccesses[inputPath] = await _beginScopedAccess(inputPath);
-    }
-
-    try {
-      return await convertFiles(requests, onProgress: onProgress);
-    } finally {
-      if (beganOutputAccess) {
-        await _endScopedAccess(scopedOutputDirectory);
+    if (Platform.isAndroid && androidOutputDirectory != null) {
+      results = <ConvertResult>[];
+      for (var index = 0; index < requests.length; index++) {
+        final request = requests[index];
+        final result = await convertAndSaveToAndroidDirectory(
+          request,
+          androidOutputDirectory,
+          onProgress: onProgress == null
+              ? null
+              : (progress) {
+                  onProgress(
+                    ConversionProgress(
+                      completedFiles: index,
+                      totalFiles: requests.length,
+                      currentFilePath: progress.currentFilePath,
+                      currentFileProgress: progress.currentFileProgress,
+                      currentPosition: progress.currentPosition,
+                      totalDuration: progress.totalDuration,
+                      message: progress.message,
+                    ),
+                  );
+                },
+        );
+        results.add(
+          result.conversionResult.copyWith(
+            success: result.success,
+            outputPath: result.outputPath ?? result.conversionResult.outputPath,
+            errorMessage: result.errorMessage,
+          ),
+        );
       }
-      for (final entry in beganInputAccesses.entries) {
-        if (entry.value) {
-          await _endScopedAccess(entry.key);
+    } else if (Platform.isIOS || Platform.isMacOS) {
+      final scopedOutputDirectory = outputDirectory.trim();
+      if (scopedOutputDirectory.isEmpty) {
+        results = await convertFiles(requests, onProgress: onProgress);
+      } else {
+        final beganOutputAccess = await _beginScopedAccess(scopedOutputDirectory);
+        final beganInputAccesses = <String, bool>{};
+        for (final inputPath in inputPaths) {
+          beganInputAccesses[inputPath] = await _beginScopedAccess(inputPath);
+        }
+
+        try {
+          results = await convertFiles(requests, onProgress: onProgress);
+        } finally {
+          if (beganOutputAccess) {
+            await _endScopedAccess(scopedOutputDirectory);
+          }
+          for (final entry in beganInputAccesses.entries) {
+            if (entry.value) {
+              await _endScopedAccess(entry.key);
+            }
+          }
         }
       }
+    } else {
+      results = await convertFiles(requests, onProgress: onProgress);
+    }
+
+    if (copyMetadata && metadataSourcePaths != null) {
+      for (var index = 0; index < results.length; index++) {
+        final result = results[index];
+        final metadataPath = (metadataSourcePaths.length > index)
+            ? metadataSourcePaths[index]
+            : null;
+
+        if (result.success && metadataPath != null) {
+          final targetPath = result.outputPath ?? requests[index].outputPath;
+          await _copyMetadataInternal(
+            sourcePath: metadataPath,
+            targetPath: targetPath,
+            controller: audioCoreController,
+          );
+        }
+      }
+    }
+
+    return results;
+  }
+
+  Future<void> _copyMetadataInternal({
+    required String sourcePath,
+    required String targetPath,
+    AudioCoreController? controller,
+  }) async {
+    if (sourcePath.trim().isEmpty || targetPath.trim().isEmpty) {
+      return;
+    }
+    try {
+      final activeController = controller ?? AudioCoreController();
+      if (!activeController.isInitialized) {
+        await activeController.initialize();
+      }
+      await activeController.copyMetadataPairs(
+        [AudioTrack(id: sourcePath, uri: sourcePath)],
+        [AudioTrack(id: targetPath, uri: targetPath)],
+      );
+    } catch (e) {
+      debugPrint('[AudioConverter] Failed to copy metadata from $sourcePath to $targetPath: $e');
     }
   }
 
