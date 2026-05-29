@@ -2145,52 +2145,54 @@ class MyExoplayerPlugin :
         }
 
         val treeUri = Uri.parse(treeUriString)
-        val tree = DocumentFile.fromTreeUri(safeActivity, treeUri)
-        if (tree == null) {
-            result.error("save_failed", "Failed to resolve the selected directory.", null)
-            return
-        }
+        val resolver = safeActivity.contentResolver
 
-        try {
-            val existing = tree.findFile(fileName)
-            existing?.delete()
-
-            val created = tree.createFile(mimeTypeForFileName(fileName), fileName)
-            if (created == null) {
-                result.error("save_failed", "Failed to create the output file.", null)
-                return
-            }
-
+        Thread {
             try {
-                FileInputStream(sourcePath).use { input ->
-                    safeActivity.contentResolver.openOutputStream(created.uri, "w").use { output ->
-                        if (output == null) {
-                            result.error("save_failed", "Failed to open the output stream.", null)
-                            return
-                        }
-
-                        val buffer = ByteArray(8192)
-                        var read: Int
-                        while (input.read(buffer).also { read = it } != -1) {
-                            output.write(buffer, 0, read)
-                        }
-                        output.flush()
-                    }
+                val tree = DocumentFile.fromTreeUri(safeActivity, treeUri)
+                if (tree == null) {
+                    result.error("save_failed", "Failed to resolve the selected directory.", null)
+                    return@Thread
                 }
-            } catch (e: Exception) {
-                result.error("save_failed", e.message, null)
-                return
-            }
 
-            val response = mapOf(
-                "savedUri" to created.uri.toString(),
-                "displayPath" to resolveDisplayPath(treeUri) + "/" + fileName
-            )
-            result.success(response)
-        } catch (error: java.io.IOException) {
-            NativeLog.e("AudioCore", "Failed to copy output file into SAF directory", error)
-            result.error("save_failed", error.message, null)
-        }
+                val existing = tree.findFile(fileName)
+                existing?.delete()
+
+                val created = tree.createFile(mimeTypeForFileName(fileName), fileName)
+                if (created == null) {
+                    result.error("save_failed", "Failed to create the output file.", null)
+                    return@Thread
+                }
+
+                try {
+                    val sourceFile = java.io.File(sourcePath)
+                    FileInputStream(sourceFile).use { fileIn ->
+                        resolver.openFileDescriptor(created.uri, "w")?.use { pfd ->
+                            java.io.FileOutputStream(pfd.fileDescriptor).use { fileOut ->
+                                val inChannel = fileIn.channel
+                                val outChannel = fileOut.channel
+                                inChannel.transferTo(0, inChannel.size(), outChannel)
+                            }
+                        } ?: throw java.io.IOException("Failed to open output file descriptor.")
+                    }
+                } catch (e: Exception) {
+                    result.error("save_failed", e.message, null)
+                    return@Thread
+                }
+
+                val response = mapOf(
+                    "savedUri" to created.uri.toString(),
+                    "displayPath" to resolveDisplayPath(treeUri) + "/" + fileName
+                )
+                result.success(response)
+            } catch (error: java.io.IOException) {
+                NativeLog.e("AudioCore", "Failed to copy output file into SAF directory", error)
+                result.error("save_failed", error.message, null)
+            } catch (error: Exception) {
+                NativeLog.e("AudioCore", "Unexpected error copying output file into SAF directory", error)
+                result.error("save_failed", error.message, null)
+            }
+        }.start()
     }
 
     private fun resolveDisplayPath(treeUri: Uri): String {
