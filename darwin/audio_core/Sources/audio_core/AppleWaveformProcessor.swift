@@ -117,7 +117,8 @@ enum AppleWaveformProcessor {
     }
 
     // Fallback: full linear decoding
-    debugPrint("[AppleAudioEngine] Step/stride sampling not supported or length is invalid. Falling back to full decoding.")
+    let reason = !supportsSeeking ? "seeking not supported" : "invalid totalFrames (\(totalFrames))"
+    debugPrint("[AppleAudioEngine] Fallback to full linear decoding for \(url.lastPathComponent) at \(url.path) (Reason: \(reason))")
     let bufferCapacity: AVAudioFrameCount = 4096
     guard let sourceBuffer = AVAudioPCMBuffer(
       pcmFormat: sourceFormat,
