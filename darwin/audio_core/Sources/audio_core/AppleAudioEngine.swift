@@ -112,7 +112,7 @@ final class AppleAudioEngine: NSObject {
     }
 
     func load(url: URL) throws {
-      print("[AppleAudioEngine] PlaybackSlot load url: \(url.path)")
+      print("[AppleAudioEngine] PlaybackSlot load url: \(url.path), player.delegate is nil: \(player.delegate == nil)")
       stop()
       self.url = url
       storedPositionMs = 0
@@ -144,6 +144,7 @@ final class AppleAudioEngine: NSObject {
 
     func play() throws {
       let fileDesc = url?.lastPathComponent ?? "nil"
+      print("[AppleAudioEngine] PlaybackSlot play called for \(fileDesc), player.delegate is nil: \(player.delegate == nil)")
 #if canImport(SFBAudioEngine)
       print("[AppleAudioEngine] PlaybackSlot play called for \(fileDesc). Current player playbackState: \(player.playbackState)")
       switch player.playbackState {
@@ -201,10 +202,16 @@ final class AppleAudioEngine: NSObject {
       let clamped = max(0, positionMs)
       storedPositionMs = clamped
       let fileDesc = url?.lastPathComponent ?? "nil"
+      print("[AppleAudioEngine] PlaybackSlot seek called for \(fileDesc) to \(positionMs), player.delegate is nil: \(player.delegate == nil)")
 #if canImport(SFBAudioEngine)
-      let success = player.seek(time: Double(clamped) / 1000.0)
-      print("[AppleAudioEngine] PlaybackSlot seek for \(fileDesc) to \(Double(clamped) / 1000.0)s, success: \(success)")
-      isSeekPendingOnLoad = !success
+      if player.isReady {
+        let success = player.seek(time: Double(clamped) / 1000.0)
+        print("[AppleAudioEngine] PlaybackSlot seek for \(fileDesc) to \(Double(clamped) / 1000.0)s, success: \(success)")
+        isSeekPendingOnLoad = !success
+      } else {
+        print("[AppleAudioEngine] PlaybackSlot seek for \(fileDesc) to \(Double(clamped) / 1000.0)s made pending (player is not ready)")
+        isSeekPendingOnLoad = true
+      }
 #else
       print("[AppleAudioEngine] PlaybackSlot (AVAudioPlayer) seek for \(fileDesc) to \(Double(clamped) / 1000.0)s")
       player?.currentTime = Double(clamped) / 1000.0
@@ -231,14 +238,15 @@ final class AppleAudioEngine: NSObject {
 
     func clear() {
       stop()
-      url = nil
-      storedPositionMs = 0
 #if canImport(SFBAudioEngine)
+      player.reset()
       file = nil
 #else
       player = nil
       durationOverrideMs = 0
 #endif
+      url = nil
+      storedPositionMs = 0
     }
   }
 
@@ -704,7 +712,7 @@ final class AppleAudioEngine: NSObject {
     fileAccess.releaseAccess(for: path)
   }
 
-  func dispose() {
+  func softReset() {
     syncOnStateQueue {
       cancelTimers()
       pendingEdit = nil
@@ -713,6 +721,10 @@ final class AppleAudioEngine: NSObject {
       removeFftCaptureTap()
       fileAccess.releaseAllAccess()
     }
+  }
+
+  func dispose() {
+    softReset()
   }
 
   func currentTimestampMs() -> Double {

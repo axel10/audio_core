@@ -8,6 +8,7 @@ import FlutterMacOS
 #endif
 
 public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
+  private static var shared: AudioCorePlugin?
   private let fileAccess = SecurityScopedFileAccessCoordinator()
   private let engine: AppleAudioEngine
   private var channel: FlutterMethodChannel?
@@ -46,6 +47,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     #else
     let messenger = registrar.messenger
     #endif
+    
     let channel = FlutterMethodChannel(
       name: "audio_core.player",
       binaryMessenger: messenger
@@ -58,16 +60,30 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       name: "audio_core.player/fft",
       binaryMessenger: messenger
     )
-    let instance = AudioCorePlugin()
+    
+    let instance: AudioCorePlugin
+    if let oldInstance = shared {
+      debugPrint("[AudioCorePlugin] register: Hot restart detected. Reusing existing plugin instance \(Unmanaged.passUnretained(oldInstance).toOpaque()).")
+      oldInstance.softCleanup()
+      instance = oldInstance
+    } else {
+      let newInstance = AudioCorePlugin()
+      debugPrint("[AudioCorePlugin] register: Created new plugin instance \(Unmanaged.passUnretained(newInstance).toOpaque()).")
+      instance = newInstance
+      shared = instance
+    }
+    
     instance.channel = channel
     instance.converterChannel = converterChannel
     instance.fftEventChannel = fftChannel
     registrar.addMethodCallDelegate(instance, channel: channel)
     registrar.addMethodCallDelegate(instance, channel: converterChannel)
     fftChannel.setStreamHandler(instance)
+    debugPrint("[AudioCorePlugin] register: Completed registration for instance \(Unmanaged.passUnretained(instance).toOpaque()).")
   }
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    debugPrint("[AudioCorePlugin] handle method=\(call.method) on instance \(Unmanaged.passUnretained(self).toOpaque())")
     switch call.method {
     case "sayHello":
       engine.ensureReady()
@@ -492,6 +508,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       result(nil)
 
     case "dispose":
+      debugPrint("[AudioCorePlugin] handle method=dispose on instance \(Unmanaged.passUnretained(self).toOpaque())")
       engine.dispose()
       result(nil)
 
@@ -524,11 +541,40 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     return nil
   }
 
+  deinit {
+    debugPrint("[AudioCorePlugin] deinit for instance \(Unmanaged.passUnretained(self).toOpaque())")
+    cleanup()
+  }
+
+  private func cleanup() {
+    debugPrint("[AudioCorePlugin] cleanup called for instance \(Unmanaged.passUnretained(self).toOpaque())")
+    stopFftTimer()
+    engine.onPlayerStateChanged = nil
+    engine.dispose()
+    channel = nil
+    converterChannel = nil
+    fftEventChannel = nil
+    fftEventSink = nil
+  }
+
+  private func softCleanup() {
+    debugPrint("[AudioCorePlugin] softCleanup called for instance \(Unmanaged.passUnretained(self).toOpaque())")
+    stopFftTimer()
+    engine.softReset()
+    channel = nil
+    converterChannel = nil
+    fftEventChannel = nil
+    fftEventSink = nil
+  }
+
   private func sendPlayerState(playbackState: String? = nil, error: String? = nil) {
-    channel?.invokeMethod(
-      "onPlayerStateChanged",
-      arguments: engine.statusPayload(playbackState: playbackState, error: error)
-    )
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.channel?.invokeMethod(
+        "onPlayerStateChanged",
+        arguments: self.engine.statusPayload(playbackState: playbackState, error: error)
+      )
+    }
   }
 
   private func emitLatestFftSnapshot() {
