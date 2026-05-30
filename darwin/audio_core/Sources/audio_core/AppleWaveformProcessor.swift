@@ -112,9 +112,8 @@ enum AppleWaveformProcessor {
         }
       }
 
-      let smoothedOutput = smoothWaveform(output, windowSize: 3)
-      debugPrint("[AppleAudioEngine] Step/stride sampling complete. Output count = \(smoothedOutput.count)")
-      return smoothedOutput
+      debugPrint("[AppleAudioEngine] Step/stride sampling complete. Output count = \(output.count)")
+      return output
     }
 
     // Fallback: full linear decoding
@@ -639,25 +638,6 @@ enum AppleWaveformProcessor {
 
   private static func roundWaveformPrecision(_ value: Double) -> Double {
     (value * waveformPrecisionScale).rounded() / waveformPrecisionScale
-  }
-
-  private static func smoothWaveform(_ input: [Double], windowSize: Int = 3) -> [Double] {
-    guard input.count >= windowSize else { return input }
-    var output = input
-    let half = windowSize / 2
-    for i in 0..<input.count {
-      var sum = 0.0
-      var count = 0
-      for j in -half...half {
-        let index = i + j
-        if index >= 0 && index < input.count {
-          sum += input[index]
-          count += 1
-        }
-      }
-      output[i] = sum / Double(count)
-    }
-    return output
   }
 
   private static func signedIntegerScale(bitsPerChannel: Int, fallbackBitsPerChannel: Int) -> Double {
