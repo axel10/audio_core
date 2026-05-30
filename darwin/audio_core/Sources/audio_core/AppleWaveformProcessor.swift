@@ -33,9 +33,10 @@ enum AppleWaveformProcessor {
 
     if supportsSeeking && totalFrames > 0 {
       let stride = max(1, sampleStride)
-      let baseWindowSize = max(512, 8192 / stride)
-      debugPrint("[AppleAudioEngine] Using step/stride sampling. totalFrames=\(totalFrames) stride=\(stride) baseWindowSize=\(baseWindowSize)")
-      let windowSize = min(AVAudioFrameCount(baseWindowSize), max(AVAudioFrameCount(512), AVAudioFrameCount(totalFrames / AVAudioFramePosition(expectedChunks))))
+      let stepFrames = Double(totalFrames) / Double(expectedChunks)
+      let coverageRatio = 0.5 / Double(stride)
+      let windowSize = max(AVAudioFrameCount(512), min(AVAudioFrameCount(stepFrames), AVAudioFrameCount(stepFrames * coverageRatio)))
+      debugPrint("[AppleAudioEngine] Using step/stride sampling. totalFrames=\(totalFrames) stride=\(stride) stepFrames=\(stepFrames) windowSize=\(windowSize)")
       let bufferCapacity = max(4096, windowSize)
 
       guard let sourceBuffer = AVAudioPCMBuffer(
@@ -62,7 +63,6 @@ enum AppleWaveformProcessor {
       let converter = AVAudioConverter(from: sourceFormat, to: waveformFormat)
 
       var output = Array(repeating: 0.0, count: expectedChunks)
-      let stepFrames = Double(totalFrames) / Double(expectedChunks)
 
       for chunk in 0..<expectedChunks {
         let targetFrame = AVAudioFramePosition(Double(chunk) * stepFrames)
@@ -112,8 +112,9 @@ enum AppleWaveformProcessor {
         }
       }
 
-      debugPrint("[AppleAudioEngine] Step/stride sampling complete. Output count = \(output.count)")
-      return output
+      let smoothedOutput = smoothWaveform(output, windowSize: 3)
+      debugPrint("[AppleAudioEngine] Step/stride sampling complete. Output count = \(smoothedOutput.count)")
+      return smoothedOutput
     }
 
     // Fallback: full linear decoding
@@ -638,6 +639,25 @@ enum AppleWaveformProcessor {
 
   private static func roundWaveformPrecision(_ value: Double) -> Double {
     (value * waveformPrecisionScale).rounded() / waveformPrecisionScale
+  }
+
+  private static func smoothWaveform(_ input: [Double], windowSize: Int = 3) -> [Double] {
+    guard input.count >= windowSize else { return input }
+    var output = input
+    let half = windowSize / 2
+    for i in 0..<input.count {
+      var sum = 0.0
+      var count = 0
+      for j in -half...half {
+        let index = i + j
+        if index >= 0 && index < input.count {
+          sum += input[index]
+          count += 1
+        }
+      }
+      output[i] = sum / Double(count)
+    }
+    return output
   }
 
   private static func signedIntegerScale(bitsPerChannel: Int, fallbackBitsPerChannel: Int) -> Double {
