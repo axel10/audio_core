@@ -1042,7 +1042,8 @@ class AudioCoreController extends ChangeNotifier
       return false;
     }
 
-    final needsSync = managePlaybackSync && _needsMetadataWriteSyncForPath(path);
+    final needsSync =
+        managePlaybackSync && _needsMetadataWriteSyncForPath(path);
 
     try {
       if (needsSync) {
@@ -1063,11 +1064,7 @@ class AudioCoreController extends ChangeNotifier
         },
       );
       if (!success) {
-        throw StateError(
-          Platform.isAndroid
-              ? 'Android native metadata update failed.'
-              : 'Rust metadata update failed.',
-        );
+        throw StateError('Metadata update failed.');
       }
 
       if (needsSync) {

@@ -8,6 +8,7 @@ import '../track_metadata_update.dart';
 import '../audio_details.dart';
 import '../rust/api/simple_api.dart' as rust;
 import 'audio_engine_interface.dart';
+import 'flutter_taglib_metadata_bridge.dart';
 import 'track_artwork_support.dart';
 
 class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
@@ -433,61 +434,31 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
     required String path,
     required Map<String, Object?> metadata,
   }) async {
-    final success = await _channel.invokeMethod<bool>('updateTrackMetadata', {
-      'path': path,
-      'metadata': metadata,
-    });
-    return success ?? false;
+    final fallbackMediaUri = metadata['fallbackMediaUri'] as String?;
+    return updateTrackMetadataWithFlutterTaglib(
+      path: path,
+      fallbackMediaUri: fallbackMediaUri,
+      metadata: metadata,
+    );
   }
 
   @override
   Future<List<bool>> updateTrackMetadataBatch({
     required List<TrackMetadataWriteRequest> requests,
   }) async {
-    final List<dynamic>? rawResults = await _channel
-        .invokeMethod<List<dynamic>>(
-          'updateTrackMetadataBatch',
-          <String, Object?>{
-            'updates': requests
-                .map((request) => request.toMap())
-                .toList(growable: false),
-          },
-        );
-    if (rawResults == null) {
-      return List<bool>.filled(requests.length, false, growable: false);
-    }
-    return rawResults.map((entry) => entry == true).toList(growable: false);
+    return updateTrackMetadataBatchWithFlutterTaglib(requests: requests);
   }
 
   @override
   Future<bool> supportsBatchMetadataWrite() async {
-    try {
-      final bool? result = await _channel.invokeMethod<bool>(
-        'supportsBatchMetadataWrite',
-      );
-      return result ?? true;
-    } catch (_) {
-      return true;
-    }
+    return true;
   }
 
   @override
   Future<List<bool>> copyTrackMetadataBatch({
     required List<TrackMetadataCopyRequest> requests,
   }) async {
-    final List<dynamic>? rawResults = await _channel
-        .invokeMethod<List<dynamic>>(
-          'copyTrackMetadataBatch',
-          <String, Object?>{
-            'requests': requests
-                .map((request) => request.toMap())
-                .toList(growable: false),
-          },
-        );
-    if (rawResults == null) {
-      return List<bool>.filled(requests.length, false, growable: false);
-    }
-    return rawResults.map((entry) => entry == true).toList(growable: false);
+    return copyTrackMetadataBatchWithFlutterTaglib(requests: requests);
   }
 
   @override
@@ -496,15 +467,16 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
     String? fallbackMediaUri,
   }) async {
     try {
-      final Map<dynamic, dynamic>? result = await _channel
-          .invokeMethod<Map<dynamic, dynamic>>('getTrackMetadata', {
-            'path': path,
-            if (fallbackMediaUri != null && fallbackMediaUri.trim().isNotEmpty)
-              'fallbackMediaUri': fallbackMediaUri.trim(),
-          });
-      return TrackMetadata.fromMap(
-        result?.cast<String, Object?>() ?? <String, Object?>{},
+      final metadata = await readTrackMetadataWithFlutterTaglib(
+        path,
+        fallbackMediaUri: fallbackMediaUri,
       );
+      return metadata ??
+          TrackMetadata(
+            error: 'Failed to read metadata via flutter_taglib.',
+            genres: const <String>[],
+            pictures: const [],
+          );
     } catch (e) {
       return TrackMetadata(
         error: e.toString(),
@@ -515,16 +487,22 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
-  Future<AudioDetails> getAudioDetails({
-    required String path,
-  }) async {
+  Future<AudioDetails> getAudioDetails({required String path}) async {
     final details = await rust.getAudioDetails(path: path);
     return AudioDetails.fromRust(details);
   }
 
   @override
-  Future<void> removeAllTags({String? path}) {
-    throw UnimplementedError('removeAllTags is not implemented on Android yet');
+  Future<void> removeAllTags({String? path}) async {
+    final targetPath = path?.trim();
+    if (targetPath == null || targetPath.isEmpty) {
+      throw ArgumentError.value(path, 'path', 'Path is required here.');
+    }
+
+    final success = await removeAllTagsWithFlutterTaglib(targetPath);
+    if (!success) {
+      throw StateError('Failed to remove tags via flutter_taglib.');
+    }
   }
 }
 

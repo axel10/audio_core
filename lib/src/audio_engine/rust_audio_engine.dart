@@ -7,8 +7,8 @@ import '../track_metadata.dart';
 import '../track_metadata_update.dart';
 import '../audio_details.dart';
 import 'audio_engine_interface.dart';
+import 'flutter_taglib_metadata_bridge.dart';
 import 'pcm_waveform_support.dart';
-import 'rust_metadata_bridge.dart';
 import 'track_artwork_support.dart';
 
 class RustAudioEngine
@@ -216,31 +216,18 @@ class RustAudioEngine
     required String path,
     required Map<String, Object?> metadata,
   }) async {
-    await rust.updateTrackMetadata(
+    return updateTrackMetadataWithFlutterTaglib(
       path: path,
-      metadata: trackMetadataUpdateFromMap(metadata),
+      fallbackMediaUri: metadata['fallbackMediaUri'] as String?,
+      metadata: metadata,
     );
-    return true;
   }
 
   @override
   Future<List<bool>> updateTrackMetadataBatch({
     required List<TrackMetadataWriteRequest> requests,
   }) async {
-    final results = <bool>[];
-    for (final request in requests) {
-      try {
-        final metadata = trackMetadataUpdateFromUpdate(
-          request.metadata,
-          includeEmptyCollections: request.clearBeforeWrite,
-        );
-        await rust.updateTrackMetadata(path: request.path, metadata: metadata);
-        results.add(true);
-      } catch (_) {
-        results.add(false);
-      }
-    }
-    return results;
+    return updateTrackMetadataBatchWithFlutterTaglib(requests: requests);
   }
 
   @override
@@ -250,21 +237,7 @@ class RustAudioEngine
   Future<List<bool>> copyTrackMetadataBatch({
     required List<TrackMetadataCopyRequest> requests,
   }) async {
-    final results = <bool>[];
-    for (final request in requests) {
-      try {
-        final metadata = await rust.getTrackMetadata(path: request.sourcePath);
-        await rust.removeAllTags(path: request.targetPath);
-        await rust.updateTrackMetadata(
-          path: request.targetPath,
-          metadata: metadata,
-        );
-        results.add(true);
-      } catch (_) {
-        results.add(false);
-      }
-    }
-    return results;
+    return copyTrackMetadataBatchWithFlutterTaglib(requests: requests);
   }
 
   @override
@@ -272,14 +245,28 @@ class RustAudioEngine
     required String path,
     String? fallbackMediaUri,
   }) async {
-    final metadata = await rust.getTrackMetadata(path: path);
-    return trackMetadataFromRust(metadata);
+    try {
+      final metadata = await readTrackMetadataWithFlutterTaglib(
+        path,
+        fallbackMediaUri: fallbackMediaUri,
+      );
+      return metadata ??
+          TrackMetadata(
+            error: 'Failed to read metadata via flutter_taglib.',
+            genres: const <String>[],
+            pictures: const [],
+          );
+    } catch (e) {
+      return TrackMetadata(
+        error: e.toString(),
+        genres: const <String>[],
+        pictures: const [],
+      );
+    }
   }
 
   @override
-  Future<AudioDetails> getAudioDetails({
-    required String path,
-  }) async {
+  Future<AudioDetails> getAudioDetails({required String path}) async {
     final details = await rust.getAudioDetails(path: path);
     return AudioDetails.fromRust(details);
   }
@@ -290,6 +277,9 @@ class RustAudioEngine
     if (targetPath == null || targetPath.isEmpty) {
       throw ArgumentError.value(path, 'path', 'Path is required here.');
     }
-    await rust.removeAllTags(path: targetPath);
+    final success = await removeAllTagsWithFlutterTaglib(targetPath);
+    if (!success) {
+      throw StateError('Failed to remove tags via flutter_taglib.');
+    }
   }
 }
