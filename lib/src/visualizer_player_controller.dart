@@ -980,12 +980,26 @@ class AudioCoreController extends ChangeNotifier
   }
 
   String _resolveTrackPath(AudioTrack track) {
-    final filePath = track.metadataValue<String>('filePath');
-    final mediaUri = track.metadataValue<String>('mediaUri');
-    if (filePath?.trim().isNotEmpty == true) {
-      return filePath!;
+    final mediaUri = track.metadataValue<String>('mediaUri')?.trim();
+    final filePath = track.metadataValue<String>('filePath')?.trim();
+
+    if (Platform.isAndroid) {
+      if (mediaUri != null && mediaUri.isNotEmpty) {
+        return mediaUri;
+      }
+      if (filePath != null && filePath.isNotEmpty) {
+        return filePath;
+      }
+      return track.uri;
     }
-    return mediaUri ?? track.uri;
+
+    if (filePath != null && filePath.isNotEmpty) {
+      return filePath;
+    }
+    if (mediaUri != null && mediaUri.isNotEmpty) {
+      return mediaUri;
+    }
+    return track.uri;
   }
 
   String? _resolveMetadataPath(String? path) {

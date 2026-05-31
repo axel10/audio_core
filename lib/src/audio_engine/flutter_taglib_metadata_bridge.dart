@@ -235,17 +235,14 @@ Future<List<bool>> copyTrackMetadataBatchWithFlutterTaglib({
         continue;
       }
 
-      final removed = await removeAllTagsWithFlutterTaglib(request.targetPath);
-      if (!removed) {
-        results.add(false);
-        continue;
-      }
-
       final success = await updateTrackMetadataWithFlutterTaglib(
         path: request.targetPath,
-        metadata: TrackMetadataUpdate.fromTrackMetadata(
-          metadata,
-        ).toMap(includeEmptyCollections: true),
+        metadata: <String, Object?>{
+          ...TrackMetadataUpdate.fromTrackMetadata(
+            metadata,
+          ).toMap(includeEmptyCollections: true),
+          'clearBeforeWrite': true,
+        },
       );
       results.add(success);
     } catch (_) {
