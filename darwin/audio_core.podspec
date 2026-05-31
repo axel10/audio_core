@@ -69,7 +69,7 @@ A new Flutter FFI plugin project.
 
       # Embed SPM package binary frameworks
       echo "Embedding SPM binary frameworks from ${PODS_CONFIGURATION_BUILD_DIR}"
-      for fw in lame tta-cpp opus FLAC mpg123 mpc wavpack ogg sndfile vorbis; do
+      for fw in lame tta-cpp opus FLAC mpc wavpack ogg sndfile vorbis; do
         if [ -d "${PODS_CONFIGURATION_BUILD_DIR}/${fw}.framework" ]; then
           echo "Copying ${fw}.framework to ${DEST}"
           cp -af "${PODS_CONFIGURATION_BUILD_DIR}/${fw}.framework" "${DEST}/"
