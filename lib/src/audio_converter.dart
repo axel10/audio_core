@@ -630,8 +630,7 @@ class AudioConverter {
     AndroidOutputDirectory? androidOutputDirectory,
     bool useSystemEncoder = false,
     AudioConverterProgressCallback? onProgress,
-    List<String>? metadataSourcePaths,
-    bool copyMetadata = false,
+    bool copyMetadata = true,
     AudioCoreController? audioCoreController,
   }) async {
     final requests = inputPaths.map((inputPath) {
@@ -713,11 +712,11 @@ class AudioConverter {
       results = await convertFiles(requests, onProgress: onProgress);
     }
 
-    if (copyMetadata && metadataSourcePaths != null) {
+    if (copyMetadata) {
       for (var index = 0; index < results.length; index++) {
         final result = results[index];
-        final metadataPath = (metadataSourcePaths.length > index)
-            ? metadataSourcePaths[index]
+        final metadataPath = (inputPaths.length > index)
+            ? inputPaths[index]
             : null;
 
         if (result.success && metadataPath != null) {
