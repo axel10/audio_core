@@ -105,7 +105,6 @@ dependencies {
     compileOnly "org.jetbrains.kotlin:kotlin-annotations-jvm:$kotlin_annotations_version"
     implementation "androidx.documentfile:documentfile:1.0.1"
     implementation "com.github.wendykierp:JTransforms:3.2"
-    implementation "io.github.kyant0:taglib:1.0.5"
 }
 
 apply from: "../cargokit/gradle/plugin.gradle"
