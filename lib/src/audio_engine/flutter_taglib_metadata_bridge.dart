@@ -30,10 +30,12 @@ Future<TrackMetadata?> readTrackMetadataWithFlutterTaglib(
       final trackNumber = _readTrackNumber(properties);
       final trackTotal = _readInt(properties, taglib.TagProperties.trackTotal);
       final discNumber = _readInt(properties, taglib.TagProperties.discNumber);
+      final duration = file.duration;
       final raw = <String, Object?>{
         ...properties,
         'hasCover': file.hasCover,
         if (file.coverMimeType != null) 'coverMimeType': file.coverMimeType,
+        'durationMs': duration.inMilliseconds,
       };
 
       return TrackMetadata(
@@ -46,6 +48,7 @@ Future<TrackMetadata?> readTrackMetadataWithFlutterTaglib(
         discNumber: discNumber,
         date: date,
         year: year,
+        duration: duration,
         comment:
             _stringOrNull(file.comment) ??
             _firstString(properties, taglib.TagProperties.comment),

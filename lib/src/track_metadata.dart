@@ -13,6 +13,7 @@ class TrackMetadata {
     this.discNumber,
     this.date,
     this.year,
+    this.duration,
     this.comment,
     this.lyrics,
     this.composer,
@@ -36,6 +37,7 @@ class TrackMetadata {
   final int? discNumber;
   final String? date;
   final int? year;
+  final Duration? duration;
   final String? comment;
   final String? lyrics;
   final String? composer;
@@ -60,6 +62,7 @@ class TrackMetadata {
       discNumber: _asInt(map['discNumber']),
       date: _asString(map['date']),
       year: _asInt(map['year']),
+      duration: _asDuration(map['duration']) ?? _asDuration(map['durationMs']),
       comment: _asString(map['comment']),
       lyrics: _asString(map['lyrics']),
       composer: _asString(map['composer']),
@@ -116,6 +119,7 @@ class TrackMetadata {
     int? discNumber,
     String? date,
     int? year,
+    Duration? duration,
     String? comment,
     String? lyrics,
     String? composer,
@@ -139,6 +143,7 @@ class TrackMetadata {
       discNumber: discNumber ?? this.discNumber,
       date: date ?? this.date,
       year: year ?? this.year,
+      duration: duration ?? this.duration,
       comment: comment ?? this.comment,
       lyrics: lyrics ?? this.lyrics,
       composer: composer ?? this.composer,
@@ -167,6 +172,13 @@ class TrackMetadata {
   static int? _asInt(Object? value) {
     if (value is int) return value;
     if (value is num) return value.toInt();
+    return null;
+  }
+
+  static Duration? _asDuration(Object? value) {
+    if (value is Duration) return value;
+    if (value is int) return Duration(milliseconds: value);
+    if (value is num) return Duration(milliseconds: value.toInt());
     return null;
   }
 
