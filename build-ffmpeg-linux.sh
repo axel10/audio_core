@@ -296,4 +296,86 @@ make -j"$jobs"
 log "Starting make install"
 make install
 
+copy_runtime_shared_libs() {
+  local lib_dir="$1"
+  local needed_libs=()
+  local lib_path dep target_path resolved_source resolved_target
+
+  copy_with_symlinks() {
+    local source_path="$1"
+    local destination_path="$2"
+    local source_dir source_name
+
+    source_dir="$(cd -- "$(dirname -- "$source_path")" && pwd)"
+    source_name="$(basename -- "$source_path")"
+
+    if [[ -L "$source_path" ]]; then
+      local link_target link_target_path
+      link_target="$(readlink "$source_path")"
+      mkdir -p "$(dirname -- "$destination_path")"
+      ln -sfn "$link_target" "$destination_path"
+
+      if [[ "$link_target" = /* ]]; then
+        link_target_path="$link_target"
+      else
+        link_target_path="$source_dir/$link_target"
+      fi
+
+      if [[ -e "$link_target_path" ]]; then
+        copy_with_symlinks "$link_target_path" "$(dirname -- "$destination_path")/$(basename -- "$link_target_path")"
+      fi
+    else
+      cp -a "$source_path" "$destination_path"
+    fi
+  }
+
+  while IFS= read -r -d '' lib_path; do
+    while IFS= read -r dep; do
+      case "$dep" in
+        linux-vdso.so.*|ld-linux*.so.*|libc.so.*|libm.so.*|libgcc_s.so.*|libpthread.so.*|librt.so.*|libdl.so.*|libstdc++.so.*)
+          continue
+          ;;
+      esac
+
+      target_path="$lib_dir/$dep"
+      if [[ -e "$target_path" ]]; then
+        continue
+      fi
+
+      if ldconfig -p >/dev/null 2>&1; then
+        resolved_source="$(ldconfig -p | awk -v name="$dep" '$1 == name { print $NF; exit }')"
+        if [[ -n "$resolved_source" && -f "$resolved_source" ]]; then
+          resolved_target="$(readlink -f "$resolved_source" 2>/dev/null || true)"
+          copy_with_symlinks "$resolved_source" "$target_path"
+          if [[ -n "$resolved_target" && -f "$resolved_target" && "$resolved_target" != "$resolved_source" ]]; then
+            copy_with_symlinks "$resolved_target" "$lib_dir/$(basename -- "$resolved_target")"
+          fi
+          log "Copied runtime dependency: $dep -> $target_path"
+          needed_libs+=("$dep")
+          continue
+        fi
+      fi
+
+      # Fall back to the first matching file on the system if ldconfig did not know it.
+      local fallback
+      fallback="$(find /usr/lib /lib -name "$dep" 2>/dev/null | head -n 1)"
+      if [[ -n "$fallback" && -f "$fallback" ]]; then
+        resolved_target="$(readlink -f "$fallback" 2>/dev/null || true)"
+        copy_with_symlinks "$fallback" "$target_path"
+        if [[ -n "$resolved_target" && -f "$resolved_target" && "$resolved_target" != "$fallback" ]]; then
+          copy_with_symlinks "$resolved_target" "$lib_dir/$(basename -- "$resolved_target")"
+        fi
+        log "Copied runtime dependency: $dep -> $target_path"
+        needed_libs+=("$dep")
+      fi
+    done < <(readelf -d "$lib_path" 2>/dev/null | awk '/NEEDED/ { gsub(/\[|\]/, "", $5); print $5 }')
+  done < <(find "$lib_dir" -maxdepth 1 -type f -name '*.so*' -print0)
+
+  if [[ ${#needed_libs[@]} -gt 0 ]]; then
+    log "Bundled runtime shared libraries: ${needed_libs[*]}"
+  fi
+}
+
+copy_runtime_shared_libs "$install_root/lib"
+
 log "Build finished"
