@@ -185,7 +185,12 @@ final class AppleAudioEngine: NSObject {
     }
 
     func stop() {
-      let fileDesc = url?.lastPathComponent ?? "nil"
+      guard let url = url else {
+        storedPositionMs = 0
+        gain = 1.0
+        return
+      }
+      let fileDesc = url.lastPathComponent
 #if canImport(SFBAudioEngine)
       let stopped = player.stop()
       print("[AppleAudioEngine] PlaybackSlot stop result for \(fileDesc): \(stopped)")
@@ -204,12 +209,12 @@ final class AppleAudioEngine: NSObject {
       let fileDesc = url?.lastPathComponent ?? "nil"
       print("[AppleAudioEngine] PlaybackSlot seek called for \(fileDesc) to \(positionMs), player.delegate is nil: \(player.delegate == nil)")
 #if canImport(SFBAudioEngine)
-      if player.isReady {
+      if player.isReady && player.playbackState != .stopped {
         let success = player.seek(time: Double(clamped) / 1000.0)
         print("[AppleAudioEngine] PlaybackSlot seek for \(fileDesc) to \(Double(clamped) / 1000.0)s, success: \(success)")
         isSeekPendingOnLoad = !success
       } else {
-        print("[AppleAudioEngine] PlaybackSlot seek for \(fileDesc) to \(Double(clamped) / 1000.0)s made pending (player is not ready)")
+        print("[AppleAudioEngine] PlaybackSlot seek for \(fileDesc) to \(Double(clamped) / 1000.0)s made pending (player is not ready or is stopped)")
         isSeekPendingOnLoad = true
       }
 #else
@@ -237,7 +242,9 @@ final class AppleAudioEngine: NSObject {
     }
 
     func clear() {
-      stop()
+      if url != nil {
+        stop()
+      }
 #if canImport(SFBAudioEngine)
       player.reset()
       file = nil
@@ -817,10 +824,10 @@ final class AppleAudioEngine: NSObject {
       if releasingFile, let url = slot.url {
         fileAccess.releaseAccess(for: url)
       }
-      slot.stop()
       if releasingFile {
         slot.clear()
       } else {
+        slot.stop()
         slot.gain = 1.0
         slot.applyBaseVolume(latestVolume)
       }
@@ -980,7 +987,6 @@ final class AppleAudioEngine: NSObject {
     activeSlotKind = incomingKind
     print("[AppleAudioEngine] settleCrossfade: updated activeSlotKind to \(incomingKind)")
     
-    outgoingSlot.stop()
     outgoingSlot.clear()
     incomingSlot.gain = 1.0
     incomingSlot.applyBaseVolume(latestVolume)
@@ -1052,6 +1058,9 @@ final class AppleAudioEngine: NSObject {
   }
 
   private func restorePendingEdit(_ pendingEdit: PendingEdit) throws {
+    fileAccess.releaseAccess(for: pendingEdit.path)
+    removePreparedAccessPath(pendingEdit.path)
+
     try load(path: pendingEdit.path)
     try seek(positionMs: pendingEdit.positionMs)
     try setVolume(pendingEdit.volume)
@@ -1059,7 +1068,6 @@ final class AppleAudioEngine: NSObject {
       try play(fadeDurationMs: 0, targetVolume: pendingEdit.volume)
     }
     self.pendingEdit = nil
-    removePreparedAccessPath(pendingEdit.path)
   }
 
   private func applyEqualizerConfig(_ config: AppleEqualizerConfig) {
