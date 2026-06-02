@@ -719,7 +719,7 @@ final class AppleAudioEngine: NSObject {
       clearPreparedAccessPaths()
       stopSlots(releasingFile: true, preservePosition: false)
       removeFftCaptureTap()
-      fileAccess.releaseAllAccess()
+      releaseAllAccess()
     }
   }
 
