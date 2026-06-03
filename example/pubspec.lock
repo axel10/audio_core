@@ -269,9 +269,11 @@ packages:
   flutter_taglib:
     dependency: transitive
     description:
-      path: "../flutter_taglib"
-      relative: true
-    source: path
+      path: "."
+      ref: master
+      resolved-ref: fa8560895a1b26a97d4310255b1966201a58b319
+      url: "https://github.com/axel10/flutter_taglib"
+    source: git
     version: "1.2.0"
   flutter_test:
     dependency: "direct dev"
