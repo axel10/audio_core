@@ -45,12 +45,7 @@ enum AppleWaveformProcessor {
       ) else {
         return Array(repeating: 0.0, count: expectedChunks)
       }
-      guard let waveformFormat = AVAudioFormat(
-        commonFormat: .pcmFormatFloat32,
-        sampleRate: sourceFormat.sampleRate,
-        channels: sourceFormat.channelCount,
-        interleaved: false
-      ) else {
+      guard let waveformFormat = makeWaveformFormat(from: sourceFormat) else {
         return Array(repeating: 0.0, count: expectedChunks)
       }
       let convertedCapacity = max(bufferCapacity, AVAudioFrameCount(8192))
@@ -126,12 +121,7 @@ enum AppleWaveformProcessor {
     ) else {
       return Array(repeating: 0.0, count: expectedChunks)
     }
-    guard let waveformFormat = AVAudioFormat(
-      commonFormat: .pcmFormatFloat32,
-      sampleRate: sourceFormat.sampleRate,
-      channels: sourceFormat.channelCount,
-      interleaved: false
-    ) else {
+    guard let waveformFormat = makeWaveformFormat(from: sourceFormat) else {
       return Array(repeating: 0.0, count: expectedChunks)
     }
     let convertedCapacity = max(bufferCapacity, AVAudioFrameCount(8192))
@@ -704,5 +694,23 @@ enum AppleWaveformProcessor {
 
     let signShift = 32 - effectiveBits
     return (shifted << signShift) >> signShift
+  }
+
+  private static func makeWaveformFormat(from sourceFormat: AVAudioFormat) -> AVAudioFormat? {
+    if let channelLayout = sourceFormat.channelLayout {
+      return AVAudioFormat(
+        commonFormat: .pcmFormatFloat32,
+        sampleRate: sourceFormat.sampleRate,
+        interleaved: false,
+        channelLayout: channelLayout
+      )
+    } else {
+      return AVAudioFormat(
+        commonFormat: .pcmFormatFloat32,
+        sampleRate: sourceFormat.sampleRate,
+        channels: sourceFormat.channelCount,
+        interleaved: false
+      )
+    }
   }
 }
