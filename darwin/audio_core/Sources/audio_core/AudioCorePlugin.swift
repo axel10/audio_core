@@ -83,7 +83,7 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
   }
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-    debugPrint("[AudioCorePlugin] handle method=\(call.method) on instance \(Unmanaged.passUnretained(self).toOpaque())")
+    // debugPrint("[AudioCorePlugin] handle method=\(call.method) on instance \(Unmanaged.passUnretained(self).toOpaque())")
     switch call.method {
     case "sayHello":
       engine.ensureReady()
