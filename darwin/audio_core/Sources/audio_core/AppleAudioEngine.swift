@@ -209,12 +209,12 @@ final class AppleAudioEngine: NSObject {
       let fileDesc = url?.lastPathComponent ?? "nil"
       print("[AppleAudioEngine] PlaybackSlot seek called for \(fileDesc) to \(positionMs), player.delegate is nil: \(player.delegate == nil)")
 #if canImport(SFBAudioEngine)
-      if player.isReady && player.playbackState != .stopped {
+      if player.isReady {
         let success = player.seek(time: Double(clamped) / 1000.0)
         print("[AppleAudioEngine] PlaybackSlot seek for \(fileDesc) to \(Double(clamped) / 1000.0)s, success: \(success)")
         isSeekPendingOnLoad = !success
       } else {
-        print("[AppleAudioEngine] PlaybackSlot seek for \(fileDesc) to \(Double(clamped) / 1000.0)s made pending (player is not ready or is stopped)")
+        print("[AppleAudioEngine] PlaybackSlot seek for \(fileDesc) to \(Double(clamped) / 1000.0)s made pending (player is not ready)")
         isSeekPendingOnLoad = true
       }
 #else
