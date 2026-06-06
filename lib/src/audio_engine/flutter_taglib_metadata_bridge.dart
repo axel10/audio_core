@@ -89,11 +89,15 @@ Future<bool> updateTrackMetadataWithFlutterTaglib({
   String? fallbackMediaUri,
 }) async {
   if (!taglib.TagLibFile.isSupported) {
+    taglib.TagLibFile.lastError = 'TagLib is not supported on this platform';
+    debugPrint('[flutter_taglib] ${taglib.TagLibFile.lastError}');
     return false;
   }
 
   final rawPictures = metadata['pictures'];
   final pictures = _asPictures(rawPictures);
+
+  String? lastFailureReason;
 
   for (final candidate in _metadataPathCandidates(path, fallbackMediaUri)) {
     final file = await taglib.TagLibFile.openAsync(
@@ -101,6 +105,7 @@ Future<bool> updateTrackMetadataWithFlutterTaglib({
       writeAccess: true,
     );
     if (file == null) {
+      lastFailureReason = taglib.TagLibFile.lastError ?? 'Failed to open file $candidate';
       continue;
     }
 
@@ -185,18 +190,24 @@ Future<bool> updateTrackMetadataWithFlutterTaglib({
 
       if (metadata.containsKey('pictures')) {
         if (!file.setPictures(pictures)) {
+          lastFailureReason = 'Failed to write pictures (setPictures returned false)';
+          taglib.TagLibFile.lastError = lastFailureReason;
           continue;
         }
       }
 
       if (file.save()) {
         return true;
+      } else {
+        lastFailureReason = taglib.TagLibFile.lastError ?? 'Native file save failed';
       }
     } finally {
       file.close();
     }
   }
 
+  taglib.TagLibFile.lastError = lastFailureReason ?? 'No file path candidates were successfully processed';
+  debugPrint('[flutter_taglib] updateTrackMetadataWithFlutterTaglib failed: ${taglib.TagLibFile.lastError}');
   return false;
 }
 
