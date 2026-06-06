@@ -15,7 +15,10 @@ dependencies:
   file_picker: ^11.0.2
   flutter_rust_bridge: 2.11.1
   flutter_taglib:
-    path: ./flutter_taglib
+    # path: ./flutter_taglib
+    git:
+      url: https://github.com/axel10/flutter_taglib
+      ref: master
   meta: ^1.17.0
   path: ^1.9.0
   path_provider: ^2.1.5
