@@ -32,6 +32,7 @@ final class AppleAudioEngine: NSObject {
     var gain: Double = 1.0
     var storedPositionMs: Int = 0
     var isSeekPendingOnLoad = false
+    var decodingStarted = false
 
 #if canImport(SFBAudioEngine)
     let player = AudioPlayer()
@@ -117,6 +118,7 @@ final class AppleAudioEngine: NSObject {
       self.url = url
       storedPositionMs = 0
       isSeekPendingOnLoad = false
+      decodingStarted = false
 #if canImport(SFBAudioEngine)
       do {
         let audioFile = try AudioFile(readingPropertiesAndMetadataFrom: url)
@@ -188,6 +190,7 @@ final class AppleAudioEngine: NSObject {
       guard let url = url else {
         storedPositionMs = 0
         gain = 1.0
+        decodingStarted = false
         return
       }
       let fileDesc = url.lastPathComponent
@@ -201,6 +204,7 @@ final class AppleAudioEngine: NSObject {
 #endif
       storedPositionMs = 0
       gain = 1.0
+      decodingStarted = false
     }
 
     func seek(positionMs: Int) throws {
@@ -209,12 +213,12 @@ final class AppleAudioEngine: NSObject {
       let fileDesc = url?.lastPathComponent ?? "nil"
       print("[AppleAudioEngine] PlaybackSlot seek called for \(fileDesc) to \(positionMs), player.delegate is nil: \(player.delegate == nil)")
 #if canImport(SFBAudioEngine)
-      if player.isReady {
+      if player.isReady && decodingStarted {
         let success = player.seek(time: Double(clamped) / 1000.0)
         print("[AppleAudioEngine] PlaybackSlot seek for \(fileDesc) to \(Double(clamped) / 1000.0)s, success: \(success)")
         isSeekPendingOnLoad = !success
       } else {
-        print("[AppleAudioEngine] PlaybackSlot seek for \(fileDesc) to \(Double(clamped) / 1000.0)s made pending (player is not ready)")
+        print("[AppleAudioEngine] PlaybackSlot seek for \(fileDesc) to \(Double(clamped) / 1000.0)s made pending (player is not ready or decoding not started)")
         isSeekPendingOnLoad = true
       }
 #else
@@ -254,6 +258,7 @@ final class AppleAudioEngine: NSObject {
 #endif
       url = nil
       storedPositionMs = 0
+      decodingStarted = false
     }
   }
 
@@ -336,9 +341,9 @@ final class AppleAudioEngine: NSObject {
   func load(path: String) throws {
     try syncOnStateQueue {
       let normalizedPath = normalizedFilePath(path)
-      let url = try fileAccess.acquireAccess(for: normalizedPath)
       cancelTimers()
       stopSlots(releasingFile: true, preservePosition: false)
+      let url = try fileAccess.acquireAccess(for: normalizedPath)
       let slot = activeSlot
       try slot.load(url: url)
       slot.applyBaseVolume(latestVolume)
@@ -627,24 +632,33 @@ final class AppleAudioEngine: NSObject {
   }
 
   func prepareForFileWrite(path: String? = nil) throws {
+    print("[AppleAudioEngine] prepareForFileWrite called for path=\(path ?? "nil")")
     try syncOnStateQueue {
       if let path {
         let normalizedPath = normalizedFilePath(path)
+        print("[AppleAudioEngine] prepareForFileWrite normalizedPath=\(normalizedPath)")
         if isPreparedAccessPath(normalizedPath) {
+          print("[AppleAudioEngine] prepareForFileWrite path already prepared, skipping")
           return
         }
         if publicSlot()?.url?.path != normalizedPath {
+          print("[AppleAudioEngine] prepareForFileWrite path is not current public slot path (\(publicSlot()?.url?.path ?? "nil")), acquiring temporary access")
           _ = try fileAccess.acquireAccess(for: normalizedPath)
           insertPreparedAccessPath(normalizedPath)
           return
         }
       }
 
-      guard let slot = publicSlot(), let path = slot.url?.path else { return }
+      guard let slot = publicSlot(), let path = slot.url?.path else {
+        print("[AppleAudioEngine] prepareForFileWrite no public slot or no url path, skipping")
+        return
+      }
       if isPreparedAccessPath(path) {
+        print("[AppleAudioEngine] prepareForFileWrite current slot path already prepared, skipping")
         return
       }
 
+      print("[AppleAudioEngine] prepareForFileWrite stopping slots for current path=\(path), positionMs=\(slot.currentPositionMs), wasPlaying=\(slot.isPlaying)")
       pendingEdit = PendingEdit(
         path: path,
         positionMs: slot.currentPositionMs,
@@ -654,36 +668,47 @@ final class AppleAudioEngine: NSObject {
       stopSlots(releasingFile: true, preservePosition: true)
       _ = try fileAccess.acquireAccess(for: path)
       insertPreparedAccessPath(path)
+      print("[AppleAudioEngine] prepareForFileWrite stop slots done and temporary access acquired")
     }
   }
 
   func prepareForFileWrite(paths: [String]) throws {
+    print("[AppleAudioEngine] prepareForFileWrite called for multiple paths: \(paths)")
     for path in Self.normalizedUniquePaths(paths) {
       try prepareForFileWrite(path: path)
     }
   }
 
   func finishFileWrite(path: String? = nil) throws {
+    print("[AppleAudioEngine] finishFileWrite called for path=\(path ?? "nil")")
     try syncOnStateQueue {
       if let path {
         let normalizedPath = normalizedFilePath(path)
+        print("[AppleAudioEngine] finishFileWrite normalizedPath=\(normalizedPath)")
         if let pendingEdit, pendingEdit.path == normalizedPath {
+          print("[AppleAudioEngine] finishFileWrite path matches pending edit, restoring")
           try restorePendingEdit(pendingEdit)
           return
         }
         if publicSlot()?.url?.path != normalizedPath {
+          print("[AppleAudioEngine] finishFileWrite path does not match public slot, releasing temporary access")
           fileAccess.releaseAccess(for: normalizedPath)
           removePreparedAccessPath(normalizedPath)
           return
         }
       }
 
-      guard let pendingEdit else { return }
+      guard let pendingEdit else {
+        print("[AppleAudioEngine] finishFileWrite no pending edit, skipping")
+        return
+      }
+      print("[AppleAudioEngine] finishFileWrite restoring pending edit for path=\(pendingEdit.path)")
       try restorePendingEdit(pendingEdit)
     }
   }
 
   func finishFileWrite(paths: [String]) throws {
+    print("[AppleAudioEngine] finishFileWrite called for multiple paths: \(paths)")
     for path in Self.normalizedUniquePaths(paths) {
       try finishFileWrite(path: path)
     }
@@ -1058,16 +1083,24 @@ final class AppleAudioEngine: NSObject {
   }
 
   private func restorePendingEdit(_ pendingEdit: PendingEdit) throws {
+    print("[AppleAudioEngine] restorePendingEdit start for path=\(pendingEdit.path), positionMs=\(pendingEdit.positionMs), wasPlaying=\(pendingEdit.wasPlaying)")
     fileAccess.releaseAccess(for: pendingEdit.path)
     removePreparedAccessPath(pendingEdit.path)
 
+    print("[AppleAudioEngine] restorePendingEdit: loading track")
     try load(path: pendingEdit.path)
+    print("[AppleAudioEngine] restorePendingEdit: load finished, seeking to \(pendingEdit.positionMs)ms")
     try seek(positionMs: pendingEdit.positionMs)
+    print("[AppleAudioEngine] restorePendingEdit: seek request processed, setting volume to \(pendingEdit.volume)")
     try setVolume(pendingEdit.volume)
     if pendingEdit.wasPlaying {
+      print("[AppleAudioEngine] restorePendingEdit: was playing, starting playback")
       try play(fadeDurationMs: 0, targetVolume: pendingEdit.volume)
+    } else {
+      print("[AppleAudioEngine] restorePendingEdit: was not playing, leaving in paused state")
     }
     self.pendingEdit = nil
+    print("[AppleAudioEngine] restorePendingEdit completed")
   }
 
   private func applyEqualizerConfig(_ config: AppleEqualizerConfig) {
@@ -1491,13 +1524,20 @@ extension AppleAudioEngine: AudioPlayer.Delegate {
     let slotName = slot(matching: audioPlayer) === primarySlot ? "primary" : "secondary"
     let fileDesc = slot(matching: audioPlayer)?.url?.lastPathComponent ?? "nil"
     print("[AppleAudioEngine] Delegate decodingStarted for \(slotName) slot (\(fileDesc))")
-    syncOnStateQueue {
-      if let slot = slot(matching: audioPlayer), slot.isSeekPendingOnLoad {
-        slot.isSeekPendingOnLoad = false
-        do {
-          try slot.seek(positionMs: slot.storedPositionMs)
-        } catch {
-          debugPrint("[AppleAudioEngine] Failed to apply stored seek position in decodingStarted: \(error.localizedDescription)")
+    stateQueue.async { [weak self] in
+      guard let self else { return }
+      if let slot = self.slot(matching: audioPlayer) {
+        slot.decodingStarted = true
+        if slot.isSeekPendingOnLoad {
+          print("[AppleAudioEngine] Delegate decodingStarted async task running: executing pending seek to \(slot.storedPositionMs)ms")
+          slot.isSeekPendingOnLoad = false
+          do {
+            try slot.seek(positionMs: slot.storedPositionMs)
+          } catch {
+            debugPrint("[AppleAudioEngine] Failed to apply stored seek position in decodingStarted: \(error.localizedDescription)")
+          }
+        } else {
+          print("[AppleAudioEngine] Delegate decodingStarted async task running: no pending seek")
         }
       }
     }
@@ -1507,9 +1547,10 @@ extension AppleAudioEngine: AudioPlayer.Delegate {
     let slotName = slot(matching: audioPlayer) === primarySlot ? "primary" : "secondary"
     let fileDesc = slot(matching: audioPlayer)?.url?.lastPathComponent ?? "nil"
     print("[AppleAudioEngine] Delegate playbackStateChanged to \(playbackState) for \(slotName) slot (\(fileDesc))")
-    syncOnStateQueue {
-      guard let matchedSlot = slot(matching: audioPlayer) else { return }
-      guard matchedSlot === publicSlot() else {
+    stateQueue.async { [weak self] in
+      guard let self else { return }
+      guard let matchedSlot = self.slot(matching: audioPlayer) else { return }
+      guard matchedSlot === self.publicSlot() else {
         print("[AppleAudioEngine] Delegate playbackStateChanged: Ignoring state change because \(slotName) slot (\(fileDesc)) is not the public slot")
         return
       }
@@ -1520,17 +1561,18 @@ extension AppleAudioEngine: AudioPlayer.Delegate {
       case .paused:
         state = "PAUSED"
       case .stopped:
-        if isPlaybackComplete(matchedSlot) {
+        matchedSlot.decodingStarted = false
+        if self.isPlaybackComplete(matchedSlot) {
           matchedSlot.storedPositionMs = matchedSlot.durationMs
           state = "ENDED"
         } else {
-          state = currentPlaybackState()
+          state = self.currentPlaybackState()
         }
       @unknown default:
-        state = currentPlaybackState()
+        state = self.currentPlaybackState()
       }
-      print("[AppleAudioEngine] Delegate playbackStateChanged mapping resolved state: \(state) (currentPlaybackState is \(currentPlaybackState()))")
-      emitPlayerState(playbackState: state)
+      print("[AppleAudioEngine] Delegate playbackStateChanged mapping resolved state: \(state) (currentPlaybackState is \(self.currentPlaybackState()))")
+      self.emitPlayerState(playbackState: state)
     }
   }
 
@@ -1538,15 +1580,16 @@ extension AppleAudioEngine: AudioPlayer.Delegate {
     let slotName = slot(matching: audioPlayer) === primarySlot ? "primary" : "secondary"
     let fileDesc = slot(matching: audioPlayer)?.url?.lastPathComponent ?? "nil"
     print("[AppleAudioEngine] Delegate audioPlayerEndOfAudio for \(slotName) slot (\(fileDesc))")
-    syncOnStateQueue {
-      guard let matchedSlot = slot(matching: audioPlayer) else { return }
-      guard matchedSlot === publicSlot() else {
+    stateQueue.async { [weak self] in
+      guard let self else { return }
+      guard let matchedSlot = self.slot(matching: audioPlayer) else { return }
+      guard matchedSlot === self.publicSlot() else {
         print("[AppleAudioEngine] Delegate audioPlayerEndOfAudio: Ignoring end of audio because \(slotName) slot (\(fileDesc)) is not the public slot")
         return
       }
       matchedSlot.storedPositionMs = matchedSlot.durationMs
       audioPlayer.stop()
-      emitPlayerState(playbackState: "ENDED")
+      self.emitPlayerState(playbackState: "ENDED")
     }
   }
 
@@ -1554,8 +1597,9 @@ extension AppleAudioEngine: AudioPlayer.Delegate {
     let slotName = slot(matching: audioPlayer) === primarySlot ? "primary" : "secondary"
     let fileDesc = slot(matching: audioPlayer)?.url?.lastPathComponent ?? "nil"
     print("[AppleAudioEngine] Delegate encounteredError: \(error.localizedDescription) for \(slotName) slot (\(fileDesc))")
-    syncOnStateQueue {
-      emitPlayerState(error: error.localizedDescription)
+    stateQueue.async { [weak self] in
+      guard let self else { return }
+      self.emitPlayerState(error: error.localizedDescription)
     }
   }
 
