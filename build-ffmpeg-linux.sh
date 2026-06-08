@@ -73,6 +73,14 @@ if [ "${INSIDE_DOCKER:-}" != "true" ]; then
         ./build-ffmpeg-linux.sh $* && \
         chown -R \${HOST_UID}:\${HOST_GID} /workspace
       "
+    # Fix pkgconfig prefix paths on host
+    host_install_root="$repo_root/build/ffmpeg-linux/install"
+    for pc in "$host_install_root/lib/pkgconfig"/*.pc; do
+        if [[ -f "$pc" ]]; then
+            sed -i "s|^prefix=.*|prefix=$host_install_root|g" "$pc"
+            sed -i "s|/workspace/build/ffmpeg-linux/install|\${prefix}|g" "$pc"
+        fi
+    done
     exit 0
   else
     echo "Docker not found or no permissions to run Docker, building natively on host..."
@@ -211,6 +219,7 @@ configure_args=(
   --prefix="$install_root"
   --enable-shared
   --disable-static
+  --extra-ldflags='-Wl,-rpath,'\''$$ORIGIN'\'''
   --disable-everything
   --disable-autodetect
   --disable-debug
@@ -377,5 +386,13 @@ copy_runtime_shared_libs() {
 }
 
 copy_runtime_shared_libs "$install_root/lib"
+
+# Dynamically adjust prefix path to make pkgconfig relocatable
+for pc in "$install_root/lib/pkgconfig"/*.pc; do
+    if [[ -f "$pc" ]]; then
+        sed -i "s|^prefix=.*|prefix=$install_root|g" "$pc"
+        sed -i "s|/workspace/build/ffmpeg-linux/install|\${prefix}|g" "$pc"
+    fi
+done
 
 log "Build finished"
