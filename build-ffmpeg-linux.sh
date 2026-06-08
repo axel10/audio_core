@@ -220,8 +220,8 @@ configure_args=(
   --disable-network
   --enable-small
   --enable-pic
-  --enable-static
-  --disable-shared
+  --disable-static
+  --enable-shared
   --enable-nonfree
   --enable-swresample
   --enable-swscale
@@ -278,52 +278,27 @@ done
 log "Configuring FFmpeg..."
 "$ffmpeg_root/configure" "${configure_args[@]}"
 
-log "Building FFmpeg static libraries..."
+log "Building FFmpeg shared libraries..."
 make -j"$jobs"
 make install
 popd >/dev/null
 
-log "Linking merged shared library..."
-component_static_libs=(
-  "$install_root/lib/libavutil.a"
-  "$install_root/lib/libswresample.a"
-  "$install_root/lib/libswscale.a"
-  "$install_root/lib/libavcodec.a"
-  "$install_root/lib/libavformat.a"
-  "$install_root/lib/libavfilter.a"
+shared_component_libs=(
+  "$install_root/lib/libavutil.so"
+  "$install_root/lib/libswresample.so"
+  "$install_root/lib/libswscale.so"
+  "$install_root/lib/libavcodec.so"
+  "$install_root/lib/libavformat.so"
+  "$install_root/lib/libavfilter.so"
 )
 
-for lib in "${component_static_libs[@]}"; do
-  if [[ ! -f "$lib" ]]; then
-    echo "Error: expected FFmpeg static library not found: $lib" >&2
+for lib in "${shared_component_libs[@]}"; do
+  if [[ ! -e "$lib" ]]; then
+    echo "Error: expected FFmpeg shared library not found: $lib" >&2
     exit 1
   fi
 done
 
-IFS=' ' read -r -a pkg_link_flags <<< "$(
-  PKG_CONFIG_PATH="$install_root/lib/pkgconfig:$PKG_CONFIG_PATH" \
-    pkg-config --static --libs libavutil libswresample libswscale libavcodec libavformat libavfilter
-)"
-
-rm -f "$install_root/lib"/libffmpeg.so "$install_root/lib"/libavcodec.so "$install_root/lib"/libavformat.so \
-  "$install_root/lib"/libavutil.so "$install_root/lib"/libswresample.so "$install_root/lib"/libswscale.so \
-  "$install_root/lib"/libavfilter.so
-
-cc -shared \
-  -Wl,-soname,libffmpeg.so \
-  -o "$install_root/lib/libffmpeg.so" \
-  -L"$fdk_install_root/lib" \
-  -L"$lame_install_root/lib" \
-  -L"$opus_install_root/lib" \
-  -Wl,--whole-archive \
-  "${component_static_libs[@]}" \
-  -Wl,--no-whole-archive \
-  "${pkg_link_flags[@]}"
-
-for alias in libavcodec.so libavformat.so libavutil.so libswresample.so libswscale.so libavfilter.so; do
-  ln -sf libffmpeg.so "$install_root/lib/$alias"
-done
-
 log "Build finished."
-log "Merged dynamic library: $install_root/lib/libffmpeg.so"
-log "Compatibility symlinks: $install_root/lib/libavcodec.so, libavformat.so, libavutil.so, libswresample.so, libswscale.so, libavfilter.so"
+log "Shared libraries are available in: $install_root/lib"
+log "Rust/pkg-config can consume: libavcodec, libavformat, libavutil, libswresample, libswscale, libavfilter"
