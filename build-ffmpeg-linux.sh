@@ -312,6 +312,9 @@ rm -f "$install_root/lib"/libffmpeg.so "$install_root/lib"/libavcodec.so "$insta
 cc -shared \
   -Wl,-soname,libffmpeg.so \
   -o "$install_root/lib/libffmpeg.so" \
+  -L"$fdk_install_root/lib" \
+  -L"$lame_install_root/lib" \
+  -L"$opus_install_root/lib" \
   -Wl,--whole-archive \
   "${component_static_libs[@]}" \
   -Wl,--no-whole-archive \
