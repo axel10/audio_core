@@ -205,7 +205,7 @@ export PKG_CONFIG_PATH="$fdk_install_root/lib/pkgconfig:$lame_install_root/lib/p
 configure_args=(
   --prefix="$install_root"
   --pkg-config-flags="--static"
-  --extra-cflags="-I$fdk_install_root/include -I$lame_install_root/include -I$opus_install_root/include -I$opus_install_root/include/opus"
+  --extra-cflags="-fPIC -I$fdk_install_root/include -I$lame_install_root/include -I$opus_install_root/include -I$opus_install_root/include/opus"
   --extra-ldflags="-L$fdk_install_root/lib -L$lame_install_root/lib -L$opus_install_root/lib"
 
   --disable-everything
