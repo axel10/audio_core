@@ -40,7 +40,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential nasm pkg-config curl git libopus-dev libmp3lame-dev libfdk-aac-dev ccache
+          sudo apt-get install -y build-essential cmake nasm pkg-config curl git xz-utils ccache
 
       - name: Setup ccache
         uses: actions/cache@v4

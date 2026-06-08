@@ -2,18 +2,20 @@
 set -euo pipefail
 
 usage() {
-  cat <<'EOF'
-Usage: ./build-ffmpeg-linux.sh [--clean] [--jobs N]
+  cat <<EOF
+Usage: ./build-ffmpeg-linux.sh [--clean] [--jobs N] [--prefix PATH]
 
 Options:
-  --clean      Remove the build directory before configuring.
-  --jobs N     Number of parallel jobs for make. Defaults to the CPU count.
-  -h, --help   Show this help message.
+  --clean        Remove previous build and install directories before building.
+  --jobs N       Number of parallel jobs for make. Defaults to CPU count.
+  --prefix PATH  Install directory. Defaults to build/ffmpeg-linux/install.
+  -h, --help     Show this help message.
 EOF
 }
 
 clean=false
 jobs=""
+prefix=""
 
 while (($#)); do
   case "$1" in
@@ -22,11 +24,11 @@ while (($#)); do
       shift
       ;;
     --jobs)
-      if (($# < 2)); then
-        echo "Missing value for --jobs" >&2
-        exit 1
-      fi
       jobs="$2"
+      shift 2
+      ;;
+    --prefix)
+      prefix="$2"
       shift 2
       ;;
     -h|--help)
@@ -41,358 +43,284 @@ while (($#)); do
   esac
 done
 
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$script_dir"
-
-if [ "${INSIDE_DOCKER:-}" != "true" ]; then
-  # Detect docker command and permissions
-  if command -v docker >/dev/null 2>&1; then
-    if docker ps >/dev/null 2>&1; then
-      DOCKER_CMD="docker"
-    elif command -v sudo >/dev/null 2>&1; then
-      DOCKER_CMD="sudo docker"
-    else
-      DOCKER_CMD="docker"
-    fi
-  else
-    DOCKER_CMD=""
-  fi
-
-  if [ -n "$DOCKER_CMD" ]; then
-    echo "Running build inside Ubuntu 22.04 Docker container using $DOCKER_CMD..."
-    $DOCKER_CMD run --rm \
-      -v "$repo_root":/workspace \
-      -w /workspace \
-      -e INSIDE_DOCKER=true \
-      -e HOST_UID="$(id -u)" \
-      -e HOST_GID="$(id -g)" \
-      ubuntu:22.04 bash -c "
-        apt-get update && \
-        apt-get install -y sudo build-essential nasm pkg-config curl git libopus-dev libmp3lame-dev libfdk-aac-dev && \
-        ./download_sources.sh && \
-        ./build-ffmpeg-linux.sh $* && \
-        chown -R \${HOST_UID}:\${HOST_GID} /workspace
-      "
-    # Fix pkgconfig prefix paths on host
-    host_install_root="$repo_root/build/ffmpeg-linux/install"
-    for pc in "$host_install_root/lib/pkgconfig"/*.pc; do
-        if [[ -f "$pc" ]]; then
-            sed -i "s|^prefix=.*|prefix=$host_install_root|g" "$pc"
-            sed -i "s|/workspace/build/ffmpeg-linux/install|\${prefix}|g" "$pc"
-        fi
-    done
-    exit 0
-  else
-    echo "Docker not found or no permissions to run Docker, building natively on host..."
-  fi
-fi
-ffmpeg_root="$repo_root/ffmpeg-8.1"
-build_root="$repo_root/build/ffmpeg-linux"
-install_root="$build_root/install"
-
-log() {
-  printf '[%(%H:%M:%S)T] %s\n' -1 "$*"
-}
-
-need_tool() {
-  local tool="$1"
-  command -v "$tool" >/dev/null 2>&1 || {
-    echo "Missing required tool: $tool" >&2
-    exit 1
-  }
-}
-
-need_pkg_config_pkg() {
-  local pkg="$1"
-  if ! pkg-config --exists "$pkg"; then
-    echo "Missing pkg-config package: $pkg" >&2
-    exit 1
-  fi
-}
-
-for path in "$ffmpeg_root" "$ffmpeg_root/configure"; do
-  if [[ ! -e "$path" ]]; then
-    echo "Missing required file or directory: $path" >&2
-    exit 1
-  fi
-done
-
-# Detect and install missing dependencies
-missing_packages=()
-
-check_tool() {
-  local tool="$1"
-  local pkg="$2"
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    missing_packages+=("$pkg")
-  fi
-}
-
-check_tool gcc gcc
-check_tool g++ g++
-check_tool make make
-check_tool nasm nasm
-check_tool perl perl
-check_tool pkg-config pkg-config
-
-if command -v pkg-config >/dev/null 2>&1; then
-  if ! pkg-config --exists opus; then
-    missing_packages+=("libopus-dev")
-  fi
-  if [[ ! -f "/usr/include/lame/lame.h" ]]; then
-    missing_packages+=("libmp3lame-dev")
-  fi
-  if ! pkg-config --exists fdk-aac; then
-    missing_packages+=("libfdk-aac-dev")
-  fi
-else
-  missing_packages+=("libopus-dev" "libmp3lame-dev" "libfdk-aac-dev")
-fi
-
-if [[ ${#missing_packages[@]} -gt 0 ]]; then
-  log "Missing dependencies: ${missing_packages[*]}"
-  if command -v apt-get >/dev/null 2>&1; then
-    log "Attempting to install missing dependencies using apt-get (sudo password may be required)..."
-    sudo apt-get update
-    sudo apt-get install -y "${missing_packages[@]}"
-  else
-    echo "Warning: The following packages are missing and could not be installed automatically (unsupported package manager):" >&2
-    echo "  ${missing_packages[*]}" >&2
-    echo "Please install them manually using your system package manager." >&2
-  fi
-fi
-
-need_tool gcc
-need_tool g++
-need_tool make
-need_tool nasm
-need_tool perl
-need_tool pkg-config
-
-if command -v ccache >/dev/null 2>&1; then
-  export CCACHE_DIR="${CCACHE_DIR:-$repo_root/.cache/ffmpeg-linux/ccache}"
-  export CCACHE_BASEDIR="$repo_root"
-  export CCACHE_NOHASHDIR=1
-  export CCACHE_COMPILERCHECK=content
-  mkdir -p "$CCACHE_DIR"
-  log "Using ccache: $(command -v ccache)"
-fi
-
-need_pkg_config_pkg opus
-if [[ ! -f "/usr/include/lame/lame.h" ]]; then
-  echo "Missing dependency: libmp3lame-dev (header lame/lame.h not found)" >&2
-  exit 1
-fi
-need_pkg_config_pkg fdk-aac
-
-if $clean && [[ -e "$build_root" ]]; then
-  rm -rf "$build_root"
-elif [[ -f "$build_root/Makefile" ]]; then
-  # If we are inside Docker, Makefile source path should contain /workspace.
-  # If we are on the host, Makefile source path should NOT contain /workspace.
-  has_workspace=false
-  if grep -q "include /workspace/" "$build_root/Makefile"; then
-    has_workspace=true
-  fi
-  
-  if [ "${INSIDE_DOCKER:-}" = "true" ] && ! $has_workspace; then
-    log "Detected stale host paths in build directory inside Docker. Cleaning..."
-    rm -rf "$build_root"
-  elif [ "${INSIDE_DOCKER:-}" != "true" ] && $has_workspace; then
-    log "Detected stale Docker paths in build directory on host. Cleaning..."
-    rm -rf "$build_root"
-  fi
-fi
-
-mkdir -p "$build_root" "$install_root"
-cd "$build_root"
-
 if [[ -z "$jobs" ]]; then
   if command -v nproc >/dev/null 2>&1; then
     jobs="$(nproc)"
+  elif command -v sysctl >/dev/null 2>&1; then
+    jobs="$(sysctl -n hw.ncpu)"
   else
     jobs=1
   fi
 fi
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+repo_root="$script_dir"
+build_root="$repo_root/build/ffmpeg-linux"
+install_root="${prefix:-$build_root/install}"
+
+log() {
+  printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"
+}
+
+find_source_dir() {
+  local name="$1"
+  local candidate
+
+  while IFS= read -r candidate; do
+    if [[ -n "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done < <(
+    find "$repo_root" -maxdepth 1 -mindepth 1 -type d \
+      \( -name "$name" -o -name "${name}-*" -o -name "${name}_*" -o -name "*${name}*" \) \
+      \( -exec test -x '{}/configure' \; -o -exec test -f '{}/CMakeLists.txt' \; \) \
+      -print | sort
+  )
+
+  return 1
+}
+
+require_command() {
+  local cmd="$1"
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "Error: required command not found: $cmd" >&2
+    exit 1
+  fi
+}
+
+extract_builtin_audio_decoders() {
+  local allcodecs_file="$1/libavcodec/allcodecs.c"
+
+  if [[ ! -f "$allcodecs_file" ]]; then
+    echo "Error: allcodecs.c not found at $allcodecs_file" >&2
+    exit 1
+  fi
+
+  awk '
+    /\/\* audio codecs \*\// { in_audio = 1; next }
+    /\/\* subtitles \*\// { in_audio = 0 }
+    in_audio && /extern const FFCodec ff_.*_decoder;/ {
+      name = $4
+      sub(/^ff_/, "", name)
+      sub(/_decoder;$/, "", name)
+      print name
+    }
+  ' "$allcodecs_file"
+}
+
+require_command make
+require_command pkg-config
+require_command cc
+require_command ar
+require_command ranlib
+require_command ln
+
+ffmpeg_root="$(find_source_dir FFmpeg || find_source_dir ffmpeg || true)"
+lame_root="$(find_source_dir lame || true)"
+opus_root="$(find_source_dir opus || true)"
+fdk_aac_root="$(find_source_dir fdk-aac || find_source_dir fdk_aac || true)"
+
+[[ -z "$ffmpeg_root" ]] && { echo "Error: FFmpeg source not found in $repo_root" >&2; exit 1; }
+[[ -z "$lame_root" ]] && { echo "Error: LAME source not found in $repo_root" >&2; exit 1; }
+[[ -z "$opus_root" ]] && { echo "Error: Opus source not found in $repo_root" >&2; exit 1; }
+[[ -z "$fdk_aac_root" ]] && { echo "Error: fdk-aac source not found in $repo_root" >&2; exit 1; }
+
+lame_build_root="$build_root/lame"
+opus_build_root="$build_root/opus"
+fdk_build_root="$build_root/fdk-aac"
+ffmpeg_build_root="$build_root/ffmpeg"
+
+lame_install_root="$lame_build_root/install"
+opus_install_root="$opus_build_root/install"
+fdk_install_root="$fdk_build_root/install"
+
+if $clean; then
+  rm -rf "$lame_build_root" "$opus_build_root" "$fdk_build_root" "$ffmpeg_build_root" "$install_root"
+fi
+
+mkdir -p "$build_root"
+
+log "Using FFmpeg source: $ffmpeg_root"
+log "Using LAME source: $lame_root"
+log "Using Opus source: $opus_root"
+log "Using fdk-aac source: $fdk_aac_root"
+
+export CFLAGS="${CFLAGS:-} -fPIC"
+export CXXFLAGS="${CXXFLAGS:-} -fPIC"
+
+log "Building libmp3lame..."
+mkdir -p "$lame_build_root"
+pushd "$lame_build_root" >/dev/null
+"$lame_root/configure" \
+  --prefix="$lame_install_root" \
+  --disable-shared \
+  --enable-static \
+  --disable-frontend
+make -j"$jobs"
+make install
+popd >/dev/null
+
+log "Building libopus..."
+mkdir -p "$opus_build_root"
+pushd "$opus_build_root" >/dev/null
+"$opus_root/configure" \
+  --prefix="$opus_install_root" \
+  --disable-shared \
+  --enable-static \
+  --disable-maintainer-mode \
+  --disable-extra-programs \
+  --disable-doc
+make -j"$jobs"
+make install
+popd >/dev/null
+
+log "Building libfdk-aac..."
+mkdir -p "$fdk_build_root"
+pushd "$fdk_build_root" >/dev/null
+cmake -S "$fdk_aac_root" -B "$fdk_build_root" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX="$fdk_install_root" \
+  -DBUILD_SHARED_LIBS=OFF \
+  -DBUILD_PROGRAMS=OFF \
+  -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+cmake --build "$fdk_build_root" --parallel "$jobs"
+cmake --install "$fdk_build_root"
+popd >/dev/null
+
+mapfile -t builtin_audio_decoders < <(extract_builtin_audio_decoders "$ffmpeg_root")
+
+if [[ ${#builtin_audio_decoders[@]} -eq 0 ]]; then
+  echo "Error: failed to discover built-in audio decoders from $ffmpeg_root" >&2
+  exit 1
+fi
+
+log "Discovered ${#builtin_audio_decoders[@]} built-in audio decoders"
+
+mkdir -p "$ffmpeg_build_root" "$install_root"
+pushd "$ffmpeg_build_root" >/dev/null
+
+export PKG_CONFIG_PATH="$fdk_install_root/lib/pkgconfig:$lame_install_root/lib/pkgconfig:$opus_install_root/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+
 configure_args=(
   --prefix="$install_root"
-  --enable-shared
-  --disable-static
-  --extra-ldflags='-Wl,-rpath,'\''$$ORIGIN'\'''
+  --pkg-config-flags="--static"
+  --extra-cflags="-I$fdk_install_root/include -I$lame_install_root/include -I$opus_install_root/include -I$opus_install_root/include/opus"
+  --extra-ldflags="-L$fdk_install_root/lib -L$lame_install_root/lib -L$opus_install_root/lib"
+
   --disable-everything
   --disable-autodetect
   --disable-debug
   --disable-doc
+  --disable-programs
   --disable-ffmpeg
-  --disable-ffprobe
   --disable-ffplay
+  --disable-ffprobe
   --disable-avdevice
-  --disable-filters
-  --enable-filter=aresample
+  --disable-network
   --enable-small
-  --enable-gpl
+  --enable-pic
+  --enable-static
+  --disable-shared
   --enable-nonfree
+  --enable-swresample
+  --enable-swscale
+  --enable-avcodec
+  --enable-avformat
+  --enable-avfilter
+  --enable-avutil
   --enable-libfdk-aac
+  --enable-libmp3lame
+  --enable-libopus
+
   --enable-protocol=file
   --enable-protocol=pipe
+
+  --enable-filter=aformat
+  --enable-filter=anull
+  --enable-filter=aresample
+
   --enable-parser=aac
   --enable-parser=aac_latm
   --enable-parser=flac
   --enable-parser=mpegaudio
   --enable-parser=opus
-  --enable-bsf=aac_adtstoasc
-  --enable-decoder=aac
-  --enable-decoder=aac_latm
-  --enable-decoder=flac
-  --enable-decoder=mjpeg
-  --enable-decoder=mp3
-  --enable-decoder=mp3float
-  --enable-decoder=opus
-  --enable-decoder=pcm_alaw
-  --enable-decoder=pcm_f32le
-  --enable-decoder=pcm_f64le
-  --enable-decoder=pcm_mulaw
-  --enable-decoder=pcm_s16le
-  --enable-decoder=pcm_s24le
-  --enable-decoder=pcm_s32le
-  --enable-decoder=pcm_u8
-  --enable-encoder=aac
-  --enable-encoder=flac
-  --enable-encoder=mjpeg
-  --enable-encoder=libmp3lame
-  --enable-encoder=libopus
-  --enable-encoder=libfdk_aac
-  --enable-encoder=pcm_s16le
-  --enable-encoder=pcm_s24le
-  --enable-encoder=pcm_s32le
-  --enable-libopus
-  --enable-libmp3lame
+  --enable-parser=vorbis
+
   --enable-demuxer=aac
+  --enable-demuxer=aiff
+  --enable-demuxer=caf
   --enable-demuxer=flac
-  --enable-demuxer=mp3
+  --enable-demuxer=matroska
   --enable-demuxer=mov
-  --enable-demuxer=ffmetadata
+  --enable-demuxer=mp3
   --enable-demuxer=ogg
   --enable-demuxer=wav
-  --enable-demuxer=matroska
+
   --enable-muxer=adts
   --enable-muxer=flac
   --enable-muxer=ipod
-  --enable-muxer=matroska
-  --enable-muxer=mov
   --enable-muxer=mp3
   --enable-muxer=ogg
   --enable-muxer=opus
   --enable-muxer=wav
+
+  --enable-encoder=libfdk_aac
+  --enable-encoder=flac
+  --enable-encoder=libopus
+  --enable-encoder=libmp3lame
 )
 
-if command -v ccache >/dev/null 2>&1; then
-  configure_args=(
-    --cc="ccache gcc"
-    --cxx="ccache g++"
-    --dep-cc="ccache gcc"
-    "${configure_args[@]}"
-  )
-fi
-
-log "Starting FFmpeg configure"
-"$ffmpeg_root/configure" "${configure_args[@]}"
-
-log "Starting make -j${jobs}"
-make -j"$jobs"
-
-log "Starting make install"
-make install
-
-copy_runtime_shared_libs() {
-  local lib_dir="$1"
-  local needed_libs=()
-  local lib_path dep target_path resolved_source resolved_target
-
-  copy_with_symlinks() {
-    local source_path="$1"
-    local destination_path="$2"
-    local source_dir source_name
-
-    source_dir="$(cd -- "$(dirname -- "$source_path")" && pwd)"
-    source_name="$(basename -- "$source_path")"
-
-    if [[ -L "$source_path" ]]; then
-      local link_target link_target_path
-      link_target="$(readlink "$source_path")"
-      mkdir -p "$(dirname -- "$destination_path")"
-      ln -sfn "$link_target" "$destination_path"
-
-      if [[ "$link_target" = /* ]]; then
-        link_target_path="$link_target"
-      else
-        link_target_path="$source_dir/$link_target"
-      fi
-
-      if [[ -e "$link_target_path" ]]; then
-        copy_with_symlinks "$link_target_path" "$(dirname -- "$destination_path")/$(basename -- "$link_target_path")"
-      fi
-    else
-      cp -a "$source_path" "$destination_path"
-    fi
-  }
-
-  while IFS= read -r -d '' lib_path; do
-    while IFS= read -r dep; do
-      case "$dep" in
-        linux-vdso.so.*|ld-linux*.so.*|libc.so.*|libm.so.*|libgcc_s.so.*|libpthread.so.*|librt.so.*|libdl.so.*|libstdc++.so.*)
-          continue
-          ;;
-      esac
-
-      target_path="$lib_dir/$dep"
-      if [[ -e "$target_path" ]]; then
-        continue
-      fi
-
-      if ldconfig -p >/dev/null 2>&1; then
-        resolved_source="$(ldconfig -p | awk -v name="$dep" '$1 == name { print $NF; exit }')"
-        if [[ -n "$resolved_source" && -f "$resolved_source" ]]; then
-          resolved_target="$(readlink -f "$resolved_source" 2>/dev/null || true)"
-          copy_with_symlinks "$resolved_source" "$target_path"
-          if [[ -n "$resolved_target" && -f "$resolved_target" && "$resolved_target" != "$resolved_source" ]]; then
-            copy_with_symlinks "$resolved_target" "$lib_dir/$(basename -- "$resolved_target")"
-          fi
-          log "Copied runtime dependency: $dep -> $target_path"
-          needed_libs+=("$dep")
-          continue
-        fi
-      fi
-
-      # Fall back to the first matching file on the system if ldconfig did not know it.
-      local fallback
-      fallback="$(find /usr/lib /lib -name "$dep" 2>/dev/null | head -n 1)"
-      if [[ -n "$fallback" && -f "$fallback" ]]; then
-        resolved_target="$(readlink -f "$fallback" 2>/dev/null || true)"
-        copy_with_symlinks "$fallback" "$target_path"
-        if [[ -n "$resolved_target" && -f "$resolved_target" && "$resolved_target" != "$fallback" ]]; then
-          copy_with_symlinks "$resolved_target" "$lib_dir/$(basename -- "$resolved_target")"
-        fi
-        log "Copied runtime dependency: $dep -> $target_path"
-        needed_libs+=("$dep")
-      fi
-    done < <(readelf -d "$lib_path" 2>/dev/null | awk '/NEEDED/ { gsub(/\[|\]/, "", $5); print $5 }')
-  done < <(find "$lib_dir" -maxdepth 1 -type f -name '*.so*' -print0)
-
-  if [[ ${#needed_libs[@]} -gt 0 ]]; then
-    log "Bundled runtime shared libraries: ${needed_libs[*]}"
-  fi
-}
-
-copy_runtime_shared_libs "$install_root/lib"
-
-# Dynamically adjust prefix path to make pkgconfig relocatable
-for pc in "$install_root/lib/pkgconfig"/*.pc; do
-    if [[ -f "$pc" ]]; then
-        sed -i "s|^prefix=.*|prefix=$install_root|g" "$pc"
-        sed -i "s|/workspace/build/ffmpeg-linux/install|\${prefix}|g" "$pc"
-    fi
+for decoder in "${builtin_audio_decoders[@]}"; do
+  configure_args+=("--enable-decoder=$decoder")
 done
 
-log "Build finished"
+log "Configuring FFmpeg..."
+"$ffmpeg_root/configure" "${configure_args[@]}"
+
+log "Building FFmpeg static libraries..."
+make -j"$jobs"
+make install
+popd >/dev/null
+
+log "Linking merged shared library..."
+component_static_libs=(
+  "$install_root/lib/libavutil.a"
+  "$install_root/lib/libswresample.a"
+  "$install_root/lib/libswscale.a"
+  "$install_root/lib/libavcodec.a"
+  "$install_root/lib/libavformat.a"
+  "$install_root/lib/libavfilter.a"
+)
+
+for lib in "${component_static_libs[@]}"; do
+  if [[ ! -f "$lib" ]]; then
+    echo "Error: expected FFmpeg static library not found: $lib" >&2
+    exit 1
+  fi
+done
+
+IFS=' ' read -r -a pkg_link_flags <<< "$(
+  PKG_CONFIG_PATH="$install_root/lib/pkgconfig:$PKG_CONFIG_PATH" \
+    pkg-config --static --libs libavutil libswresample libswscale libavcodec libavformat libavfilter
+)"
+
+rm -f "$install_root/lib"/libffmpeg.so "$install_root/lib"/libavcodec.so "$install_root/lib"/libavformat.so \
+  "$install_root/lib"/libavutil.so "$install_root/lib"/libswresample.so "$install_root/lib"/libswscale.so \
+  "$install_root/lib"/libavfilter.so
+
+cc -shared \
+  -Wl,-soname,libffmpeg.so \
+  -o "$install_root/lib/libffmpeg.so" \
+  -Wl,--whole-archive \
+  "${component_static_libs[@]}" \
+  -Wl,--no-whole-archive \
+  "${pkg_link_flags[@]}"
+
+for alias in libavcodec.so libavformat.so libavutil.so libswresample.so libswscale.so libavfilter.so; do
+  ln -sf libffmpeg.so "$install_root/lib/$alias"
+done
+
+log "Build finished."
+log "Merged dynamic library: $install_root/lib/libffmpeg.so"
+log "Compatibility symlinks: $install_root/lib/libavcodec.so, libavformat.so, libavutil.so, libswresample.so, libswscale.so, libavfilter.so"
