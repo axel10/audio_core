@@ -2,6 +2,11 @@ name: Build FFmpeg Linux Dynamic Libraries
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'GitHub Release Tag to publish to (e.g. 0.0.1). Leave empty to compile without publishing.'
+        required: false
+        default: ''
   push:
     branches:
       - main
@@ -25,6 +30,8 @@ jobs:
   build-linux:
     name: Build FFmpeg Linux
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -79,9 +86,10 @@ jobs:
           retention-days: 90
 
       - name: Upload to GitHub Release
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.release_tag || github.event.release.tag_name }}
           files: ffmpeg_lib_linux.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
