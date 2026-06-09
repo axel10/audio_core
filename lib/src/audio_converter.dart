@@ -104,7 +104,6 @@ class ConvertRequest {
     this.channels,
     this.bitRate,
     this.bitRateMode,
-    this.ffmpegPath,
     this.aacEncoder,
     this.allowFallbackToFfmpeg = true,
     this.extraOptions,
@@ -119,7 +118,6 @@ class ConvertRequest {
   final int? channels;
   final int? bitRate;
   final BitRateMode? bitRateMode;
-  final String? ffmpegPath;
   final AacEncoder? aacEncoder;
   final bool allowFallbackToFfmpeg;
   final Map<String, String>? extraOptions;
@@ -134,7 +132,6 @@ class ConvertRequest {
     int? channels,
     int? bitRate,
     BitRateMode? bitRateMode,
-    String? ffmpegPath,
     AacEncoder? aacEncoder,
     bool allowFallbackToFfmpeg = true,
     Map<String, String>? extraOptions,
@@ -158,7 +155,6 @@ class ConvertRequest {
       channels: channels,
       bitRate: bitRate,
       bitRateMode: bitRateMode,
-      ffmpegPath: ffmpegPath,
       aacEncoder: aacEncoder,
       allowFallbackToFfmpeg: allowFallbackToFfmpeg,
       extraOptions: extraOptions,
@@ -176,7 +172,6 @@ class ConvertRequest {
       'channels': channels,
       'bitRate': bitRate,
       'bitRateMode': bitRateMode?.value,
-      'ffmpegPath': ffmpegPath,
       'aacEncoder': aacEncoder?.value,
       'allowFallbackToFfmpeg': allowFallbackToFfmpeg,
       'extraOptions': extraOptions,
@@ -393,7 +388,9 @@ class AudioConverter {
     ConvertRequest request, {
     AudioConverterProgressCallback? onProgress,
   }) async {
-    if (Platform.isAndroid && request.useSystemEncoder && request.outputFormat == AudioFormat.m4a) {
+    if (Platform.isAndroid &&
+        request.useSystemEncoder &&
+        request.outputFormat == AudioFormat.m4a) {
       onProgress?.call(
         ConversionProgress(
           completedFiles: 0,
@@ -406,10 +403,11 @@ class AudioConverter {
       );
 
       try {
-        final rawResult = await _androidConverterChannel.invokeMapMethod<String, Object?>(
-          'convertFileWithTransformer',
-          request.toMap(),
-        );
+        final rawResult = await _androidConverterChannel
+            .invokeMapMethod<String, Object?>(
+              'convertFileWithTransformer',
+              request.toMap(),
+            );
         if (rawResult == null) {
           throw StateError('Android audio converter returned no result.');
         }
@@ -566,7 +564,6 @@ class AudioConverter {
     int? channels,
     int? bitRate,
     BitRateMode? bitRateMode,
-    String? ffmpegPath,
     AacEncoder? aacEncoder,
     bool allowFallbackToFfmpeg = true,
     Map<String, String>? extraOptions,
@@ -583,7 +580,6 @@ class AudioConverter {
       channels: channels,
       bitRate: bitRate,
       bitRateMode: bitRateMode,
-      ffmpegPath: ffmpegPath,
       aacEncoder: aacEncoder,
       allowFallbackToFfmpeg: allowFallbackToFfmpeg,
       extraOptions: extraOptions,
@@ -622,7 +618,6 @@ class AudioConverter {
     int? channels,
     int? bitRate,
     BitRateMode? bitRateMode,
-    String? ffmpegPath,
     AacEncoder? aacEncoder,
     bool allowFallbackToFfmpeg = true,
     Map<String, String>? extraOptions,
@@ -642,7 +637,6 @@ class AudioConverter {
         channels: channels,
         bitRate: bitRate,
         bitRateMode: bitRateMode,
-        ffmpegPath: ffmpegPath,
         aacEncoder: aacEncoder,
         allowFallbackToFfmpeg: allowFallbackToFfmpeg,
         extraOptions: extraOptions,
@@ -689,7 +683,9 @@ class AudioConverter {
       if (scopedOutputDirectory.isEmpty) {
         results = await convertFiles(requests, onProgress: onProgress);
       } else {
-        final beganOutputAccess = await _beginScopedAccess(scopedOutputDirectory);
+        final beganOutputAccess = await _beginScopedAccess(
+          scopedOutputDirectory,
+        );
         final beganInputAccesses = <String, bool>{};
         for (final inputPath in inputPaths) {
           beganInputAccesses[inputPath] = await _beginScopedAccess(inputPath);
@@ -751,7 +747,9 @@ class AudioConverter {
         [AudioTrack(id: targetPath, uri: targetPath)],
       );
     } catch (e) {
-      debugPrint('[AudioConverter] Failed to copy metadata from $sourcePath to $targetPath: $e');
+      debugPrint(
+        '[AudioConverter] Failed to copy metadata from $sourcePath to $targetPath: $e',
+      );
     }
   }
 
@@ -810,7 +808,9 @@ class AudioConverter {
     return result?.files.single.path;
   }
 
-  Future<List<String>?> pickInputFiles({List<String>? allowedExtensions}) async {
+  Future<List<String>?> pickInputFiles({
+    List<String>? allowedExtensions,
+  }) async {
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions:

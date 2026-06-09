@@ -748,7 +748,6 @@ pub(crate) fn transcode_direct(
     ensure_ffmpeg_initialized().map_err(ConversionFailure::from)?;
 
     let _ = request.allow_fallback_to_ffmpeg.unwrap_or(true);
-    let _ = request.ffmpeg_path.as_deref();
     let _ = request.extra_options.as_ref();
     let mut debug_log = String::new();
     push_log_line(
