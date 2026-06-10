@@ -340,11 +340,11 @@ class PlayerController extends ChangeNotifier {
 
     // Guard position and playing state to avoid "jumping" back to old state during command processing
     if (recentlyCommanded) {
-      debugPrint(
-        '[PlayerController] applySnapshot recentlyCommanded '
-        'path=${path ?? "nil"} playbackState=${playbackState ?? "nil"} '
-        'suppressTransientPause=$suppressTransientPause',
-      );
+      // debugPrint(
+      //   '[PlayerController] applySnapshot recentlyCommanded '
+      //   'path=${path ?? "nil"} playbackState=${playbackState ?? "nil"} '
+      //   'suppressTransientPause=$suppressTransientPause',
+      // );
       _selectedPath = path;
       _isPlaying = isPlaying;
       if (suppressTransientPause) {
@@ -369,10 +369,10 @@ class PlayerController extends ChangeNotifier {
 
     _selectedPath = path;
     if (suppressTransientPause) {
-      debugPrint(
-        '[PlayerController] applySnapshot suppressTransientPause '
-        'path=${path ?? "nil"} playbackState=${playbackState ?? "nil"}',
-      );
+      // debugPrint(
+      //   '[PlayerController] applySnapshot suppressTransientPause '
+      //   'path=${path ?? "nil"} playbackState=${playbackState ?? "nil"}',
+      // );
       _position = position > _position ? position : _position;
       _isPlaying = true;
       _playerState = PlayerState.playing;
