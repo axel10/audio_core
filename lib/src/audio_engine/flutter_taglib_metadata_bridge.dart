@@ -152,16 +152,12 @@ Future<bool> updateTrackMetadataWithFlutterTaglib({
 
       final date = _stringOrNull(metadata['date']);
       final year = _asInt(metadata['year']);
-      if (date != null) {
-        merged[taglib.TagProperties.date] = <String>[date];
-        final derivedYear = _yearFromDate(date) ?? year;
-        if (derivedYear != null) {
-          merged[taglib.TagProperties.year] = <String>[derivedYear.toString()];
-        }
-      } else if (year != null) {
-        merged[taglib.TagProperties.date] = <String>[year.toString()];
-        merged[taglib.TagProperties.year] = <String>[year.toString()];
-      }
+      _applyDateAndYearProperties(
+        merged,
+        date: date,
+        year: year,
+        clearBeforeWrite: clearBeforeWrite,
+      );
 
       _putSingle(merged, taglib.TagProperties.comment, metadata['comment']);
       _putSingle(merged, taglib.TagProperties.lyrics, metadata['lyrics']);
@@ -331,6 +327,32 @@ void _putSingle(Map<String, List<String>> target, String key, Object? value) {
   final text = _stringOrNull(value);
   if (text == null) return;
   target[key] = <String>[text];
+}
+
+void _applyDateAndYearProperties(
+  Map<String, List<String>> target, {
+  required String? date,
+  required int? year,
+  required bool clearBeforeWrite,
+}) {
+  if (date != null) {
+    target[taglib.TagProperties.date] = <String>[date];
+
+    // Avoid writing an equivalent YEAR field alongside DATE. Some formats or
+    // readers surface both values together, which shows up as duplicated years
+    // like "2023\\2023" after metadata copy/transcode.
+    if (!clearBeforeWrite) {
+      target.remove(taglib.TagProperties.year);
+    }
+    return;
+  }
+
+  if (year != null) {
+    target[taglib.TagProperties.year] = <String>[year.toString()];
+    if (!clearBeforeWrite) {
+      target.remove(taglib.TagProperties.date);
+    }
+  }
 }
 
 String? _firstString(Map<String, List<String>> properties, String key) {
