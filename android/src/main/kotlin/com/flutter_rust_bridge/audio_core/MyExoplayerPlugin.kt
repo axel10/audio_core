@@ -1634,6 +1634,7 @@ class MyExoplayerPlugin :
         val treeUriString = arguments["treeUri"]?.toString()
         val sourcePath = arguments["sourcePath"]?.toString()
         val fileName = arguments["fileName"]?.toString()
+        val overwrite = arguments["overwrite"] as? Boolean ?: false
 
         if (treeUriString.isNullOrEmpty()) {
             result.error("invalid_arguments", "Missing treeUri.", null)
@@ -1659,10 +1660,27 @@ class MyExoplayerPlugin :
                     return@Thread
                 }
 
-                val existing = tree.findFile(fileName)
-                existing?.delete()
+                var resolvedFileName = fileName
+                if (overwrite) {
+                    val existing = tree.findFile(fileName)
+                    existing?.delete()
+                } else {
+                    val existing = tree.findFile(fileName)
+                    if (existing != null) {
+                        val dotIndex = fileName.lastIndexOf('.')
+                        val baseName = if (dotIndex >= 0) fileName.substring(0, dotIndex) else fileName
+                        val ext = if (dotIndex >= 0) fileName.substring(dotIndex) else ""
+                        var index = 1
+                        var candidate = "$baseName ($index)$ext"
+                        while (tree.findFile(candidate) != null && index < 1000) {
+                            index++
+                            candidate = "$baseName ($index)$ext"
+                        }
+                        resolvedFileName = candidate
+                    }
+                }
 
-                val created = tree.createFile(mimeTypeForFileName(fileName), fileName)
+                val created = tree.createFile(mimeTypeForFileName(resolvedFileName), resolvedFileName)
                 if (created == null) {
                     result.error("save_failed", "Failed to create the output file.", null)
                     return@Thread
@@ -1686,7 +1704,7 @@ class MyExoplayerPlugin :
 
                 val response = mapOf(
                     "savedUri" to created.uri.toString(),
-                    "displayPath" to resolveDisplayPath(treeUri) + "/" + fileName
+                    "displayPath" to resolveDisplayPath(treeUri) + "/" + resolvedFileName
                 )
                 result.success(response)
             } catch (error: java.io.IOException) {

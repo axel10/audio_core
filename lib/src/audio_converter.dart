@@ -137,6 +137,7 @@ class ConvertRequest {
     Map<String, String>? extraOptions,
     List<String>? customArgs,
     bool useSystemEncoder = false,
+    bool overwrite = false,
   }) {
     final baseName = p.basenameWithoutExtension(inputPath);
     final outputPath = Platform.isAndroid
@@ -145,7 +146,12 @@ class ConvertRequest {
             'audio_converter',
             '$baseName.${outputFormat.value}',
           )
-        : p.join(outputDirectory, '$baseName.${outputFormat.value}');
+        : _generateUniqueOutputPath(
+            inputPath: inputPath,
+            outputDirectory: outputDirectory,
+            outputFormat: outputFormat,
+            ensureUnique: !overwrite,
+          );
 
     return ConvertRequest(
       inputPath: inputPath,
@@ -571,6 +577,7 @@ class AudioConverter {
     AndroidOutputDirectory? androidOutputDirectory,
     bool useSystemEncoder = false,
     AudioConverterProgressCallback? onProgress,
+    bool overwrite = false,
   }) async {
     final request = ConvertRequest.forOutputDirectory(
       inputPath: inputPath,
@@ -585,6 +592,7 @@ class AudioConverter {
       extraOptions: extraOptions,
       customArgs: customArgs,
       useSystemEncoder: useSystemEncoder,
+      overwrite: overwrite,
     );
 
     if (!Platform.isIOS && !Platform.isMacOS) {
@@ -627,6 +635,7 @@ class AudioConverter {
     AudioConverterProgressCallback? onProgress,
     bool copyMetadata = true,
     AudioCoreController? audioCoreController,
+    bool overwrite = false,
   }) async {
     final requests = inputPaths.map((inputPath) {
       return ConvertRequest.forOutputDirectory(
@@ -642,6 +651,7 @@ class AudioConverter {
         extraOptions: extraOptions,
         customArgs: customArgs,
         useSystemEncoder: useSystemEncoder,
+        overwrite: overwrite,
       );
     }).toList();
 
@@ -669,6 +679,7 @@ class AudioConverter {
                     ),
                   );
                 },
+          overwrite: overwrite,
         );
         results.add(
           result.conversionResult.copyWith(
@@ -889,6 +900,7 @@ class AudioConverter {
     required AndroidOutputDirectory directory,
     required String sourcePath,
     String? fileName,
+    bool overwrite = false,
   }) async {
     if (!Platform.isAndroid) {
       return null;
@@ -903,6 +915,7 @@ class AudioConverter {
         'treeUri': directory.treeUri,
         'sourcePath': sourcePath,
         'fileName': resolvedFileName,
+        'overwrite': overwrite,
       },
     );
     return result?['savedUri']?.toString();
@@ -912,6 +925,7 @@ class AudioConverter {
     ConvertRequest request,
     AndroidOutputDirectory directory, {
     AudioConverterProgressCallback? onProgress,
+    bool overwrite = false,
   }) async {
     final result = await convertFile(request, onProgress: onProgress);
     if (!result.success || result.outputPath == null) {
@@ -927,6 +941,7 @@ class AudioConverter {
         directory: directory,
         sourcePath: tempPath,
         fileName: p.basename(tempPath),
+        overwrite: overwrite,
       );
       if (savedUri == null) {
         return ConvertAndSaveResult(
@@ -963,24 +978,38 @@ class AudioConverter {
     required AudioFormat outputFormat,
     bool ensureUnique = true,
   }) {
-    final normalizedOutputDirectory = outputDirectory.trim();
-    final baseName = p.basenameWithoutExtension(inputPath);
-    final ext = outputFormat.value;
-    final preferredPath = p.join(normalizedOutputDirectory, '$baseName.$ext');
-    if (!ensureUnique || !File(preferredPath).existsSync()) {
-      return preferredPath;
-    }
+    return _generateUniqueOutputPath(
+      inputPath: inputPath,
+      outputDirectory: outputDirectory,
+      outputFormat: outputFormat,
+      ensureUnique: ensureUnique,
+    );
+  }
+}
 
-    for (var index = 1; index < 1000; index++) {
-      final candidate = p.join(
-        normalizedOutputDirectory,
-        '$baseName ($index).$ext',
-      );
-      if (!File(candidate).existsSync()) {
-        return candidate;
-      }
-    }
-
+String _generateUniqueOutputPath({
+  required String inputPath,
+  required String outputDirectory,
+  required AudioFormat outputFormat,
+  bool ensureUnique = true,
+}) {
+  final normalizedOutputDirectory = outputDirectory.trim();
+  final baseName = p.basenameWithoutExtension(inputPath);
+  final ext = outputFormat.value;
+  final preferredPath = p.join(normalizedOutputDirectory, '$baseName.$ext');
+  if (!ensureUnique || !File(preferredPath).existsSync()) {
     return preferredPath;
   }
+
+  for (var index = 1; index < 1000; index++) {
+    final candidate = p.join(
+      normalizedOutputDirectory,
+      '$baseName ($index).$ext',
+    );
+    if (!File(candidate).existsSync()) {
+      return candidate;
+    }
+  }
+
+  return preferredPath;
 }
