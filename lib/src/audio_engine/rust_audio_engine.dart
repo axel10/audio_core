@@ -8,12 +8,9 @@ import '../track_metadata_update.dart';
 import '../audio_details.dart';
 import 'audio_engine_interface.dart';
 import 'flutter_taglib_metadata_bridge.dart';
-import 'pcm_waveform_support.dart';
 import 'track_artwork_support.dart';
 
-class RustAudioEngine
-    with PcmWaveformSupport, TrackArtworkSupport
-    implements AudioEngine {
+class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   final _statusController = StreamController<AudioStatus>.broadcast();
   StreamSubscription? _subscription;
   double _currentVolume = 1.0;
@@ -150,11 +147,13 @@ class RustAudioEngine
     required String path,
     required int expectedChunks,
     int sampleStride = 0,
-  }) => waveformFromPcm(
-    path: path,
-    expectedChunks: expectedChunks,
-    sampleStride: sampleStride,
-  );
+  }) => rust
+      .getAudioWaveform(
+        path: path,
+        expectedChunks: BigInt.from(expectedChunks),
+        sampleStride: BigInt.from(sampleStride),
+      )
+      .then((values) => values.toList(growable: false));
 
   @override
   Future<Float32List> getAudioPcm({String? path, int sampleStride = 0}) =>

@@ -127,7 +127,10 @@ fn build_transcoder<'a>(
 
         if is_vbr && output_format_key != "opus" {
             let is_fdkaac = request.aac_encoder.as_deref() == Some("fdkaac")
-                && (output_format_key == "aac" || output_format_key == "m4a" || output_format_key == "m4b" || output_format_key == "caf");
+                && (output_format_key == "aac"
+                    || output_format_key == "m4a"
+                    || output_format_key == "m4b"
+                    || output_format_key == "caf");
 
             if !is_fdkaac {
                 encoder.set_flags(codec::flag::Flags::QSCALE);
@@ -183,7 +186,10 @@ fn build_transcoder<'a>(
     if output_format_key == "opus" && is_vbr {
         options.set("vbr", "on");
     }
-    if (output_format_key == "aac" || output_format_key == "m4a" || output_format_key == "m4b" || output_format_key == "caf")
+    if (output_format_key == "aac"
+        || output_format_key == "m4a"
+        || output_format_key == "m4b"
+        || output_format_key == "caf")
         && is_vbr
         && request.aac_encoder.as_deref() == Some("fdkaac")
     {

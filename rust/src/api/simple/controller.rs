@@ -1,14 +1,15 @@
 use super::equalizer::{EqSource, EqualizerConfig, EqualizerShared};
+use super::fft::{clear_fft_buffer, FftSource, RAW_FFT_BINS};
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use ffmpeg_core::AudioSource as CoreAudioSource;
-use super::fft::{clear_fft_buffer, FftSource, RAW_FFT_BINS};
-use log::{info, warn, error};
+use log::{error, info, warn};
 use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use std::fs::File;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
+use std::{cmp, f64};
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 struct FfmpegAudioSource {
@@ -181,6 +182,8 @@ impl Default for FadeSettings {
 
 const DEFAULT_OUTPUT_POLL_INTERVAL: Duration = Duration::from_millis(1000);
 const CROSSFADE_TICK_INTERVAL: Duration = Duration::from_millis(16);
+const WAVEFORM_RMS_WINDOWS_PER_CHUNK: usize = 8;
+const WAVEFORM_PRECISION_SCALE: f64 = 100.0;
 
 static PLAYER_CONTROLLER: OnceLock<Mutex<PlayerController>> = OnceLock::new();
 static DEFAULT_OUTPUT_MONITOR: OnceLock<()> = OnceLock::new();
@@ -915,6 +918,104 @@ pub fn get_audio_pcm(path: Option<String>, sample_stride: usize) -> Result<Vec<f
     Ok(pcm)
 }
 
+pub fn get_audio_waveform(
+    path: Option<String>,
+    expected_chunks: usize,
+    sample_stride: usize,
+) -> Result<Vec<f64>, String> {
+    if expected_chunks == 0 {
+        return Ok(Vec::new());
+    }
+
+    let pcm = get_audio_pcm(path.clone(), sample_stride)?;
+    if pcm.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let channels = get_audio_pcm_channel_count(path)? as usize;
+    let mono = mix_to_mono_samples(&pcm, channels);
+    if mono.is_empty() {
+        return Ok(vec![0.0; expected_chunks]);
+    }
+
+    Ok(reduce_waveform_chunks(&mono, expected_chunks)
+        .into_iter()
+        .map(round_waveform_precision)
+        .collect())
+}
+
+fn mix_to_mono_samples(pcm: &[f32], channels: usize) -> Vec<f64> {
+    let safe_channels = channels.max(1);
+    if safe_channels == 1 {
+        return pcm.iter().map(|sample| *sample as f64).collect();
+    }
+
+    let frame_count = pcm.len() / safe_channels;
+    let mut out = vec![0.0; frame_count];
+
+    for frame in 0..frame_count {
+        let base = frame * safe_channels;
+        let mut sum = 0.0;
+        for channel in 0..safe_channels {
+            sum += pcm[base + channel] as f64;
+        }
+        out[frame] = sum / safe_channels as f64;
+    }
+
+    out
+}
+
+fn reduce_waveform_chunks(samples: &[f64], expected_chunks: usize) -> Vec<f64> {
+    let mut out = vec![0.0; expected_chunks];
+    if samples.is_empty() {
+        return out;
+    }
+
+    let window_count = cmp::max(
+        expected_chunks,
+        cmp::min(
+            samples.len(),
+            expected_chunks.saturating_mul(WAVEFORM_RMS_WINDOWS_PER_CHUNK),
+        ),
+    );
+    let mut envelope = vec![0.0; window_count];
+
+    for window in 0..window_count {
+        let start = (window * samples.len()) / window_count;
+        let end = ((window + 1) * samples.len()) / window_count;
+        if end <= start {
+            continue;
+        }
+        envelope[window] = compute_rms(samples, start, end);
+    }
+
+    for chunk in 0..expected_chunks {
+        let start = (chunk * window_count) / expected_chunks;
+        let end = ((chunk + 1) * window_count) / expected_chunks;
+        let mut max_value = 0.0;
+        for value in &envelope[start..end] {
+            if *value > max_value {
+                max_value = *value;
+            }
+        }
+        out[chunk] = max_value.clamp(0.0, 1.0);
+    }
+
+    out
+}
+
+fn compute_rms(samples: &[f64], start: usize, end: usize) -> f64 {
+    let mut sum = 0.0;
+    for sample in &samples[start..end] {
+        sum += sample * sample;
+    }
+    (sum / (end - start) as f64).sqrt()
+}
+
+fn round_waveform_precision(value: f64) -> f64 {
+    (value * WAVEFORM_PRECISION_SCALE).round() / WAVEFORM_PRECISION_SCALE
+}
+
 pub fn get_audio_pcm_channel_count(path: Option<String>) -> Result<i32, String> {
     let target_path = {
         let c = controller()
@@ -1247,5 +1348,3 @@ pub fn finish_file_write() -> Result<(), String> {
         .map_err(|_| "player lock poisoned".to_string())?;
     c.finish_file_write()
 }
-
-

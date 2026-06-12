@@ -105,7 +105,11 @@ pub fn get_audio_details(path: String) -> anyhow::Result<AudioDetails> {
     let sample_rate = properties.sample_rate().unwrap_or(0) as i32;
     let channels = properties.channels().unwrap_or(0) as i32;
     let bit_depth = properties.bit_depth().map(|d| d as i32);
-    let bitrate = (properties.audio_bitrate().or(properties.overall_bitrate()).unwrap_or(0) as i32) * 1000;
+    let bitrate = (properties
+        .audio_bitrate()
+        .or(properties.overall_bitrate())
+        .unwrap_or(0) as i32)
+        * 1000;
 
     let format_name = format!("{:?}", tagged_file.file_type()).to_lowercase();
 
@@ -118,7 +122,8 @@ pub fn get_audio_details(path: String) -> anyhow::Result<AudioDetails> {
             "wav" | "aiff" => "CBR",
             _ => "unknown",
         },
-    }.to_string();
+    }
+    .to_string();
 
     Ok(AudioDetails {
         format_name: format_name.clone(),
@@ -870,7 +875,7 @@ mod tests {
         // 3. Read bytes and check if "hdlr" is present
         let bytes = fs::read(temp_path).unwrap();
         let has_hdlr = bytes.windows(4).any(|w| w == b"hdlr");
-        
+
         let _ = fs::remove_file(temp_path);
 
         assert!(has_hdlr, "Output M4A is missing the hdlr atom!");
@@ -896,4 +901,3 @@ mod tests {
         println!("bitrate_mode for full_test.mp3: {}", details.bitrate_mode);
     }
 }
-

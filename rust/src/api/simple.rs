@@ -118,10 +118,14 @@ pub mod controller {
     pub fn get_latest_fft() -> Vec<f32> {
         vec![]
     }
-    pub fn get_audio_pcm(
+    pub fn get_audio_pcm(_path: Option<String>, _sample_stride: usize) -> Result<Vec<f32>, String> {
+        Err("Not supported".to_string())
+    }
+    pub fn get_audio_waveform(
         _path: Option<String>,
+        _expected_chunks: usize,
         _sample_stride: usize,
-    ) -> Result<Vec<f32>, String> {
+    ) -> Result<Vec<f64>, String> {
         Err("Not supported".to_string())
     }
     pub fn set_audio_equalizer_config(_config: EqualizerConfig) -> Result<(), String> {
@@ -160,15 +164,14 @@ use std::time::Duration;
 pub use audio_fingerprint::get_audio_fingerprint;
 pub use controller::{
     crossfade_to_audio_file, dispose_audio, get_audio_decode_engine, get_audio_duration_ms,
-    get_audio_equalizer_config, get_audio_pcm, get_audio_position_ms, get_latest_fft,
-    get_loaded_audio_path, init_app, is_audio_playing, load_audio_file, pause_audio, play_audio,
-    seek_audio_ms, set_audio_equalizer_config, set_audio_volume, toggle_audio, FadeMode,
-    FadeSettings, PlaybackState,
+    get_audio_equalizer_config, get_audio_pcm, get_audio_position_ms, get_audio_waveform,
+    get_latest_fft, get_loaded_audio_path, init_app, is_audio_playing, load_audio_file,
+    pause_audio, play_audio, seek_audio_ms, set_audio_equalizer_config, set_audio_volume,
+    toggle_audio, FadeMode, FadeSettings, PlaybackState,
 };
 pub use metadata::{
-    generate_track_artwork, get_track_metadata, remove_all_tags, update_track_metadata,
-    TrackArtworkResult, TrackMetadataUpdate, TrackPicture,
-    get_audio_details, AudioDetails,
+    generate_track_artwork, get_audio_details, get_track_metadata, remove_all_tags,
+    update_track_metadata, AudioDetails, TrackArtworkResult, TrackMetadataUpdate, TrackPicture,
 };
 
 const PLAYBACK_STATE_PUSH_INTERVAL: Duration = Duration::from_millis(500);
@@ -189,10 +192,7 @@ pub fn get_capabilities() -> String {
 }
 
 #[flutter_rust_bridge::frb]
-pub fn convert_file_with_progress(
-    request_json: String,
-    progress_sink: StreamSink<String>,
-) {
+pub fn convert_file_with_progress(request_json: String, progress_sink: StreamSink<String>) {
     audio_converter::simple::convert_file_with_progress(request_json, progress_sink)
 }
 
