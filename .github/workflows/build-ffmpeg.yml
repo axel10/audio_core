@@ -1,4 +1,4 @@
-name: Build FFmpeg Windows Dynamic Libraries
+name: Build FFmpeg Dynamic Libraries
 
 on:
   workflow_dispatch:
@@ -12,30 +12,62 @@ on:
       - main
       - master
     paths:
-      - '.github/workflows/build-ffmpeg-windows.yml'
+      - '.github/workflows/build-ffmpeg.yml'
+      - 'build-ffmpeg-linux.sh'
+      - 'download_sources.sh'
       - 'ffmpeg-vibeflow-audio/**'
   pull_request:
     branches:
       - main
       - master
     paths:
-      - '.github/workflows/build-ffmpeg-windows.yml'
+      - '.github/workflows/build-ffmpeg.yml'
+      - 'build-ffmpeg-linux.sh'
+      - 'download_sources.sh'
       - 'ffmpeg-vibeflow-audio/**'
   release:
     types: [published]
 
 jobs:
-  build-windows:
-    name: Build FFmpeg Windows
-    runs-on: 	windows-2025-vs2026
+  build:
+    name: Build FFmpeg ${{ matrix.platform.name }}
+    runs-on: ${{ matrix.platform.runner }}
     permissions:
       contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: Linux
+            runner: ubuntu-22.04
+            artifact_name: ffmpeg_lib_linux
+            package_path: ffmpeg_lib_linux.tar.gz
+          - name: Windows
+            runner: windows-2025-vs2026
+            artifact_name: ffmpeg_lib_windows
+            package_path: ffmpeg_lib_windows.zip
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake nasm pkg-config curl git xz-utils ccache
+
+      - name: Setup Linux ccache
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: .cache/ffmpeg-linux/ccache
+          key: ${{ runner.os }}-ffmpeg-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-ffmpeg-ccache-
+
       - name: Cache vcpkg downloads
+        if: runner.os == 'Windows'
         uses: actions/cache@v4
         with:
           path: vcpkg-downloads
@@ -43,13 +75,29 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ffmpeg-vcpkg-downloads-
 
+      - name: Download source codes
+        if: runner.os == 'Linux'
+        run: |
+          chmod +x download_sources.sh
+          ./download_sources.sh
+
       - name: Bootstrap vcpkg
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           git clone https://github.com/microsoft/vcpkg.git vcpkg
           .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
 
-      - name: Build FFmpeg shared libraries
+      - name: Build FFmpeg shared libraries (Linux)
+        if: runner.os == 'Linux'
+        env:
+          INSIDE_DOCKER: "true"
+        run: |
+          chmod +x build-ffmpeg-linux.sh
+          ./build-ffmpeg-linux.sh --jobs $(nproc)
+
+      - name: Build FFmpeg shared libraries (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         env:
           VCPKG_ROOT: ${{ github.workspace }}\vcpkg
@@ -59,7 +107,25 @@ jobs:
             --overlay-ports="${{ github.workspace }}" `
             --overlay-triplets="${{ github.workspace }}\ffmpeg-vibeflow-audio\triplets"
 
-      - name: Package build outputs
+      - name: Fix paths in pkgconfig for relocation compatibility
+        if: runner.os == 'Linux'
+        run: |
+          RUNNER_WORKSPACE_PATH="${{ github.workspace }}"
+          echo "Replacing $RUNNER_WORKSPACE_PATH with /workspace in pkgconfig files"
+          for pc in build/ffmpeg-linux/install/lib/pkgconfig/*.pc; do
+            if [[ -f "$pc" ]]; then
+              sed -i "s|$RUNNER_WORKSPACE_PATH|/workspace|g" "$pc"
+            fi
+          done
+
+      - name: Package build outputs (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd build/ffmpeg-linux/install
+          tar -czf ../../../${{ matrix.platform.package_path }} .
+
+      - name: Package build outputs (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $installRoot = Join-Path $env:GITHUB_WORKSPACE 'vcpkg\installed\x64-windows-audio'
@@ -74,7 +140,7 @@ jobs:
           Copy-Item -LiteralPath (Join-Path $installRoot 'include') -Destination $stageRoot -Recurse
           Copy-Item -LiteralPath (Join-Path $installRoot 'lib') -Destination $stageRoot -Recurse
 
-          $archivePath = Join-Path $env:GITHUB_WORKSPACE 'ffmpeg_lib_windows.zip'
+          $archivePath = Join-Path $env:GITHUB_WORKSPACE '${{ matrix.platform.package_path }}'
           if (Test-Path $archivePath) {
             Remove-Item -LiteralPath $archivePath -Force
           }
@@ -84,8 +150,8 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg_lib_windows
-          path: ffmpeg_lib_windows.zip
+          name: ${{ matrix.platform.artifact_name }}
+          path: ${{ matrix.platform.package_path }}
           retention-days: 90
 
       - name: Upload to GitHub Release
@@ -93,6 +159,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.release_tag || github.event.release.tag_name }}
-          files: ffmpeg_lib_windows.zip
+          files: ${{ matrix.platform.package_path }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
