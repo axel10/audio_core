@@ -13,6 +13,7 @@ on:
       - master
     paths:
       - '.github/workflows/build-ffmpeg.yml'
+      - 'build-ffmpeg-android.sh'
       - 'build-ffmpeg-linux.sh'
       - 'download_sources.sh'
       - 'ffmpeg-vibeflow-audio/**'
@@ -22,6 +23,7 @@ on:
       - master
     paths:
       - '.github/workflows/build-ffmpeg.yml'
+      - 'build-ffmpeg-android.sh'
       - 'build-ffmpeg-linux.sh'
       - 'download_sources.sh'
       - 'ffmpeg-vibeflow-audio/**'
@@ -160,5 +162,66 @@ jobs:
         with:
           tag_name: ${{ inputs.release_tag || github.event.release.tag_name }}
           files: ${{ matrix.platform.package_path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-android:
+    name: Build FFmpeg Android
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config curl git xz-utils ccache autoconf automake libtool unzip
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: |
+          sdkmanager "ndk;28.2.13676358"
+
+      - name: Setup Android ccache
+        uses: actions/cache@v4
+        with:
+          path: .cache/ffmpeg-android/ccache
+          key: android-ffmpeg-ccache-${{ github.sha }}
+          restore-keys: |
+            android-ffmpeg-ccache-
+
+      - name: Download source codes
+        run: |
+          chmod +x download_sources.sh
+          ./download_sources.sh
+
+      - name: Build FFmpeg shared libraries (Android)
+        run: |
+          chmod +x build-ffmpeg-android.sh
+          SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          ./build-ffmpeg-android.sh --clean --jobs "$(nproc)" --sdk "${SDK_ROOT}" --abi arm64-v8a --abi armeabi-v7a
+
+      - name: Package build outputs (Android)
+        run: |
+          tar -czf ffmpeg_lib_android.tar.gz android/ffmpeg_lib
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg_lib_android
+          path: ffmpeg_lib_android.tar.gz
+          retention-days: 90
+
+      - name: Upload to GitHub Release
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag || github.event.release.tag_name }}
+          files: ffmpeg_lib_android.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

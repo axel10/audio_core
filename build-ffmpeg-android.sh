@@ -105,6 +105,26 @@ log() {
   printf "[$(date +%H:%M:%S)] %s\n" "$*"
 }
 
+extract_builtin_audio_decoders() {
+  local allcodecs_file="$1/libavcodec/allcodecs.c"
+
+  if [[ ! -f "$allcodecs_file" ]]; then
+    echo "Error: allcodecs.c not found at $allcodecs_file" >&2
+    exit 1
+  fi
+
+  awk '
+    /\/\* audio codecs \*\// { in_audio = 1; next }
+    /\/\* subtitles \*\// { in_audio = 0 }
+    in_audio && /extern const FFCodec ff_.*_decoder;/ {
+      name = $4
+      sub(/^ff_/, "", name)
+      sub(/_decoder;$/, "", name)
+      print name
+    }
+  ' "$allcodecs_file"
+}
+
 # Find NDK
 ndk_root="$sdk_root/ndk"
 if [[ ! -d "$ndk_root" ]]; then
@@ -137,9 +157,19 @@ if [[ ! -d "$toolchain_bin" ]]; then
   exit 1
 fi
 
+mapfile -t builtin_audio_decoders < <(extract_builtin_audio_decoders "$ffmpeg_root")
+
+if [[ ${#builtin_audio_decoders[@]} -eq 0 ]]; then
+  echo "Error: failed to discover built-in audio decoders from $ffmpeg_root" >&2
+  exit 1
+fi
+
+log "Discovered ${#builtin_audio_decoders[@]} built-in audio decoders"
+
 for abi in "${abis[@]}"; do
   build_root="$repo_root/build/ffmpeg-android-$abi"
   install_root="$repo_root/android/ffmpeg_lib/$abi"
+  jni_libs_root="$repo_root/android/src/main/jniLibs/$abi"
 
   log "Building for ABI: $abi"
 
@@ -186,6 +216,14 @@ if $clean && [[ -e "$build_root" ]]; then
   rm -rf "$build_root"
 fi
 
+if $clean && [[ -e "$install_root" ]]; then
+  rm -rf "$install_root"
+fi
+
+if $clean && [[ -e "$jni_libs_root" ]]; then
+  rm -rf "$jni_libs_root"
+fi
+
 # Build LAME
 lame_build_root="$repo_root/build/lame-android-$abi"
 lame_install_root="$lame_build_root/install"
@@ -218,16 +256,17 @@ fi
 
 # LAME configure needs to be run from its source or with a path
 # But it's better to run it in the build dir
-"$lame_root/configure" \
+env \
+  CC="$cc" \
+  AR="$ar" \
+  RANLIB="$ranlib" \
+  CFLAGS="-fPIC" \
+  "$lame_root/configure" \
   --prefix="$lame_install_root" \
   --host="$lame_host" \
   --disable-shared \
   --enable-static \
-  --disable-frontend \
-  CC="$cc" \
-  AR="$ar" \
-  RANLIB="$ranlib" \
-  CFLAGS="-fPIC"
+  --disable-frontend
 
 log "Building LAME for $abi"
 make -j"$jobs"
@@ -251,17 +290,19 @@ if [[ "$abi" == "armeabi-v7a" ]]; then
   opus_host="arm-linux-androideabi"
 fi
 
-"$opus_root/configure" \
+env \
+  CC="$cc" \
+  AR="$ar" \
+  RANLIB="$ranlib" \
+  CFLAGS="-fPIC" \
+  "$opus_root/configure" \
   --prefix="$opus_install_root" \
   --host="$opus_host" \
   --disable-shared \
   --enable-static \
   --disable-extra-programs \
   --disable-doc \
-  CC="$cc" \
-  AR="$ar" \
-  RANLIB="$ranlib" \
-  CFLAGS="-fPIC"
+  --disable-maintainer-mode
 
 log "Building Opus for $abi"
 make -j"$jobs"
@@ -270,6 +311,16 @@ make install
 mkdir -p "$build_root" "$install_root"
 cd "$build_root"
 
+ffmpeg_cc="$cc"
+ffmpeg_cxx="$cxx"
+
+if command -v ccache >/dev/null 2>&1; then
+  export CCACHE_DIR="${CCACHE_DIR:-$repo_root/.cache/ffmpeg-android/ccache}"
+  mkdir -p "$CCACHE_DIR"
+  ffmpeg_cc="ccache $cc"
+  ffmpeg_cxx="ccache $cxx"
+  log "Using ccache"
+fi
 
 configure_args=(
   --prefix="$install_root"
@@ -277,8 +328,8 @@ configure_args=(
   --arch="$arch"
   --cpu="$cpu"
   --enable-cross-compile
-  --cc="$cc"
-  --cxx="$cxx"
+  --cc="$ffmpeg_cc"
+  --cxx="$ffmpeg_cxx"
   --ar="$ar"
   --nm="$nm"
   --ranlib="$ranlib"
@@ -286,29 +337,35 @@ configure_args=(
   --sysroot="$ndk_root/toolchains/llvm/prebuilt/$host_os/sysroot"
   --extra-cflags="-fPIC -I$lame_install_root/include -I$opus_install_root/include/opus"
   --extra-ldflags="-L$lame_install_root/lib -L$opus_install_root/lib"
-  
+
   --disable-everything
   --disable-autodetect
   --disable-debug
   --disable-doc
+  --disable-programs
+  --disable-ffmpeg
   --disable-ffplay
   --disable-ffprobe
-  --disable-ffmpeg
   --disable-avdevice
+  --disable-network
   --disable-filters
-  --enable-filter=abuffer
-  --enable-filter=abuffersink
+  --enable-filter=aformat
   --enable-filter=anull
   --enable-filter=aresample
-  --enable-filter=aformat
   --enable-small
-  --disable-gpl
   --enable-pic
   --enable-shared
   --disable-static
+  --disable-asm
+  --disable-x86asm
+  --enable-avcodec
+  --enable-avformat
+  --enable-avutil
+  --enable-swresample
+  --enable-swscale
   --enable-libmp3lame
   --enable-libopus
-  
+
   --enable-protocol=file
   --enable-protocol=pipe
   --enable-parser=aac
@@ -316,60 +373,31 @@ configure_args=(
   --enable-parser=flac
   --enable-parser=mpegaudio
   --enable-parser=opus
-  --enable-bsf=aac_adtstoasc
-  --enable-decoder=aac
-  --enable-decoder=aac_latm
-  --enable-decoder=flac
-  --enable-decoder=mjpeg
-  --enable-decoder=mp3
-  --enable-decoder=mp3float
-  --enable-decoder=libopus
-  --enable-decoder=pcm_alaw
-  --enable-decoder=pcm_f32le
-  --enable-decoder=pcm_f64le
-  --enable-decoder=pcm_mulaw
-  --enable-decoder=pcm_s16le
-  --enable-decoder=pcm_s24le
-  --enable-decoder=pcm_s32le
-  --enable-decoder=pcm_u8
-  --enable-encoder=aac
-  --enable-encoder=flac
-  --enable-encoder=mjpeg
-  --enable-encoder=libopus
-  --enable-encoder=libmp3lame
-  --enable-encoder=pcm_s16be
-  --enable-encoder=pcm_s16le
+  --enable-parser=vorbis
   --enable-demuxer=aac
+  --enable-demuxer=aiff
+  --enable-demuxer=caf
   --enable-demuxer=flac
-  --enable-demuxer=mp3
+  --enable-demuxer=matroska
   --enable-demuxer=mov
-  --enable-demuxer=ffmetadata
+  --enable-demuxer=mp3
   --enable-demuxer=ogg
   --enable-demuxer=wav
-  --enable-demuxer=matroska
   --enable-muxer=adts
   --enable-muxer=flac
   --enable-muxer=ipod
-  --enable-muxer=matroska
-  --enable-muxer=mov
   --enable-muxer=mp3
   --enable-muxer=ogg
   --enable-muxer=opus
   --enable-muxer=wav
+  --enable-encoder=libopus
+  --enable-encoder=libmp3lame
+  --enable-encoder=flac
 )
 
-# Note: External libraries (libopus, libmp3lame) are now built and linked.
-
-if command -v ccache >/dev/null 2>&1; then
-  export CCACHE_DIR="${CCACHE_DIR:-$repo_root/.cache/ffmpeg-android/ccache}"
-  mkdir -p "$CCACHE_DIR"
-  configure_args=(
-    --cc="ccache $cc"
-    --cxx="ccache $cxx"
-    "${configure_args[@]}"
-  )
-  log "Using ccache"
-fi
+for decoder in "${builtin_audio_decoders[@]}"; do
+  configure_args+=("--enable-decoder=$decoder")
+done
 
 log "Starting FFmpeg configure for Android $abi (API $api_level)"
 
@@ -384,7 +412,6 @@ make -j"$jobs"
 log "Starting make install"
 make install
 
-jni_libs_root="$repo_root/android/src/main/jniLibs/$abi"
 mkdir -p "$jni_libs_root"
 cp -f "$install_root/lib/"*.so "$jni_libs_root/"
 
