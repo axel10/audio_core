@@ -2,7 +2,10 @@ diff --git a/libavcodec/cbs.c b/libavcodec/cbs.c
 index 726cdfb9d7..431675643d 100644
 --- a/libavcodec/cbs.c
 +++ b/libavcodec/cbs.c
-@@ -60,9 +60,15 @@ static const CodedBitstreamType *const cbs_type_table[] = {
+@@ -58,7 +58,13 @@ static const CodedBitstreamType *const cbs_type_table[] = {
+ #if CBS_VP8
+     &CBS_FUNC(type_vp8),
+ #endif
  #if CBS_VP9
      &CBS_FUNC(type_vp9),
  #endif
@@ -12,12 +15,14 @@ index 726cdfb9d7..431675643d 100644
  };
  
  const enum AVCodecID CBS_FUNC(all_codec_ids)[] = {
-@@ -105,7 +111,7 @@ av_cold int CBS_FUNC(init)(CodedBitstreamContext **ctx_ptr,
+@@ -104,8 +110,8 @@ av_cold int CBS_FUNC(init)(CodedBitstreamContext **ctx_ptr,
      int i;
  
      type = NULL;
 -    for (i = 0; i < FF_ARRAY_ELEMS(cbs_type_table); i++) {
+-        if (cbs_type_table[i]->codec_id == codec_id) {
 +    for (i = 0; i < FF_ARRAY_ELEMS(cbs_type_table) && cbs_type_table[i]; i++) {
-         if (cbs_type_table[i]->codec_id == codec_id) {
++        if (cbs_type_table[i]->codec_id == codec_id) {
              type = cbs_type_table[i];
              break;
+         }
