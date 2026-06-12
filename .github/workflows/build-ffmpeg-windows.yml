@@ -1,0 +1,98 @@
+name: Build FFmpeg Windows Dynamic Libraries
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'GitHub Release Tag to publish to (e.g. 0.0.1). Leave empty to compile without publishing.'
+        required: false
+        default: ''
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - '.github/workflows/build-ffmpeg-windows.yml'
+      - 'ffmpeg-vibeflow-audio/**'
+  pull_request:
+    branches:
+      - main
+      - master
+    paths:
+      - '.github/workflows/build-ffmpeg-windows.yml'
+      - 'ffmpeg-vibeflow-audio/**'
+  release:
+    types: [published]
+
+jobs:
+  build-windows:
+    name: Build FFmpeg Windows
+    runs-on: windows-2022
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cache vcpkg downloads
+        uses: actions/cache@v4
+        with:
+          path: vcpkg-downloads
+          key: ${{ runner.os }}-ffmpeg-vcpkg-downloads-${{ hashFiles('ffmpeg-vibeflow-audio/**') }}
+          restore-keys: |
+            ${{ runner.os }}-ffmpeg-vcpkg-downloads-
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git vcpkg
+          .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+
+      - name: Build FFmpeg shared libraries
+        shell: pwsh
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}\vcpkg
+          VCPKG_DOWNLOADS: ${{ github.workspace }}\vcpkg-downloads
+        run: |
+          .\vcpkg\vcpkg.exe install ffmpeg-vibeflow-audio:x64-windows-audio `
+            --overlay-ports="${{ github.workspace }}" `
+            --overlay-triplets="${{ github.workspace }}\ffmpeg-vibeflow-audio\triplets"
+
+      - name: Package build outputs
+        shell: pwsh
+        run: |
+          $installRoot = Join-Path $env:GITHUB_WORKSPACE 'vcpkg\installed\x64-windows-audio'
+          $stageRoot = Join-Path $env:GITHUB_WORKSPACE 'build\ffmpeg-windows\install'
+
+          if (Test-Path $stageRoot) {
+            Remove-Item -LiteralPath $stageRoot -Recurse -Force
+          }
+
+          New-Item -ItemType Directory -Path $stageRoot | Out-Null
+          Copy-Item -LiteralPath (Join-Path $installRoot 'bin') -Destination $stageRoot -Recurse
+          Copy-Item -LiteralPath (Join-Path $installRoot 'include') -Destination $stageRoot -Recurse
+          Copy-Item -LiteralPath (Join-Path $installRoot 'lib') -Destination $stageRoot -Recurse
+
+          $archivePath = Join-Path $env:GITHUB_WORKSPACE 'ffmpeg_lib_windows.zip'
+          if (Test-Path $archivePath) {
+            Remove-Item -LiteralPath $archivePath -Force
+          }
+
+          Compress-Archive -Path (Join-Path $stageRoot '*') -DestinationPath $archivePath
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg_lib_windows
+          path: ffmpeg_lib_windows.zip
+          retention-days: 90
+
+      - name: Upload to GitHub Release
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag || github.event.release.tag_name }}
+          files: ffmpeg_lib_windows.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

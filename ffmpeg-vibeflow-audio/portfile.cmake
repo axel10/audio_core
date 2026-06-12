@@ -170,6 +170,105 @@ file(REMOVE_RECURSE "${CURRENT_BUILDTREES_DIR}/${TARGET_TRIPLET}-dbg" "${CURRENT
 
 set(FFMPEG_PKGCONFIG_MODULES libavutil)
 
+function(extract_builtin_audio_decoders out_var source_root)
+    set(allcodecs_file "${source_root}/libavcodec/allcodecs.c")
+    if(NOT EXISTS "${allcodecs_file}")
+        message(FATAL_ERROR "Failed to locate ${allcodecs_file}")
+    endif()
+
+    file(STRINGS "${allcodecs_file}" allcodecs_lines)
+
+    set(in_audio OFF)
+    set(result "")
+
+    foreach(line IN LISTS allcodecs_lines)
+        if(line MATCHES "/\\* audio codecs \\*/")
+            set(in_audio ON)
+            continue()
+        endif()
+
+        if(line MATCHES "/\\* subtitles \\*/")
+            set(in_audio OFF)
+        endif()
+
+        if(in_audio AND line MATCHES "extern const FFCodec ff_([A-Za-z0-9_]+)_decoder;")
+            list(APPEND result "${CMAKE_MATCH_1}")
+        endif()
+    endforeach()
+
+    list(REMOVE_DUPLICATES result)
+
+    if(NOT result)
+        message(FATAL_ERROR "Failed to discover built-in audio decoders from ${allcodecs_file}")
+    endif()
+
+    set(${out_var} "${result}" PARENT_SCOPE)
+endfunction()
+
+set(AUDIO_PROFILE_OPTIONS "")
+if("audio" IN_LIST FEATURES)
+    extract_builtin_audio_decoders(BUILTIN_AUDIO_DECODERS "${SOURCE_PATH}")
+
+    set(AUDIO_PROFILE_OPTIONS
+        --disable-everything
+        --disable-debug
+        --disable-doc
+        --disable-programs
+        --disable-ffmpeg
+        --disable-ffplay
+        --disable-ffprobe
+        --disable-avdevice
+        --disable-network
+        --enable-small
+        --enable-pic
+
+        --enable-protocol=file
+        --enable-protocol=pipe
+
+        --disable-filters
+        --enable-filter=aformat
+        --enable-filter=anull
+        --enable-filter=aresample
+
+        --enable-parser=aac
+        --enable-parser=aac_latm
+        --enable-parser=flac
+        --enable-parser=mpegaudio
+        --enable-parser=opus
+        --enable-parser=vorbis
+
+        --enable-demuxer=aac
+        --enable-demuxer=aiff
+        --enable-demuxer=caf
+        --enable-demuxer=flac
+        --enable-demuxer=matroska
+        --enable-demuxer=mov
+        --enable-demuxer=mp3
+        --enable-demuxer=ogg
+        --enable-demuxer=wav
+
+        --enable-muxer=adts
+        --enable-muxer=flac
+        --enable-muxer=ipod
+        --enable-muxer=mp3
+        --enable-muxer=ogg
+        --enable-muxer=opus
+        --enable-muxer=wav
+
+        --enable-encoder=libfdk_aac
+        --enable-encoder=flac
+        --enable-encoder=libopus
+        --enable-encoder=libmp3lame
+    )
+
+    foreach(decoder IN LISTS BUILTIN_AUDIO_DECODERS)
+        list(APPEND AUDIO_PROFILE_OPTIONS "--enable-decoder=${decoder}")
+    endforeach()
+
+    string(JOIN " " AUDIO_PROFILE_OPTIONS_STRING ${AUDIO_PROFILE_OPTIONS})
+    set(OPTIONS "${OPTIONS} ${AUDIO_PROFILE_OPTIONS_STRING}")
+endif()
+
 if("nonfree" IN_LIST FEATURES)
     set(OPTIONS "${OPTIONS} --enable-nonfree")
 endif()
