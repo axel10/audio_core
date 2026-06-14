@@ -302,7 +302,7 @@ final class AppleAudioEngine: NSObject {
   private var isFftCaptureEnabled = false
   private var fftProcessingGeneration: UInt64 = 0
   private let waveformRmsWindowsPerChunk = 8
-  private let waveformPrecisionScale = 100.0
+  private let waveformPrecisionScale = 10000.0
   private var fftGroupingConfig = AppleFftGroupingConfig()
 
   var onPlayerStateChanged: ((String?, String?) -> Void)?

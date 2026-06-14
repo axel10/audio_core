@@ -10,7 +10,7 @@ class WaveformPcmProcessor {
   const WaveformPcmProcessor();
 
   static const int _rmsWindowsPerChunk = 8;
-  static const double _waveformPrecisionScale = 100.0;
+  static const double _waveformPrecisionScale = 10000.0;
 
   List<double> process(
     Float32List pcm, {

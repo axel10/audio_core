@@ -63,7 +63,7 @@ void main() {
     expect(waveform[1], greaterThan(waveform[0]));
   });
 
-  test('waveform processor rounds output to two decimals', () {
+  test('waveform processor rounds output to four decimals', () {
     const processor = WaveformPcmProcessor();
 
     final waveform = processor.process(
@@ -82,6 +82,6 @@ void main() {
     );
 
     expect(waveform, hasLength(1));
-    expect(waveform[0], equals(0.78));
+    expect(waveform[0], equals(0.7786));
   });
 }

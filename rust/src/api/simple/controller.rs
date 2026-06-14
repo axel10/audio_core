@@ -183,7 +183,7 @@ impl Default for FadeSettings {
 const DEFAULT_OUTPUT_POLL_INTERVAL: Duration = Duration::from_millis(1000);
 const CROSSFADE_TICK_INTERVAL: Duration = Duration::from_millis(16);
 const WAVEFORM_RMS_WINDOWS_PER_CHUNK: usize = 8;
-const WAVEFORM_PRECISION_SCALE: f64 = 100.0;
+const WAVEFORM_PRECISION_SCALE: f64 = 10000.0;
 
 static PLAYER_CONTROLLER: OnceLock<Mutex<PlayerController>> = OnceLock::new();
 static DEFAULT_OUTPUT_MONITOR: OnceLock<()> = OnceLock::new();

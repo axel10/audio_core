@@ -5,7 +5,7 @@ import SFBAudioEngine
 
 enum AppleWaveformProcessor {
   private static let waveformRmsWindowsPerChunk = 8
-  private static let waveformPrecisionScale = 100.0
+  private static let waveformPrecisionScale = 10000.0
 
   static func decodeWaveform(url: URL, expectedChunks: Int, sampleStride: Int) throws -> [Double] {
     let decoder = try AudioDecoder(url: url, detectContentType: true)
