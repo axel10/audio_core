@@ -23,6 +23,7 @@ class PlayerController extends ChangeNotifier {
   PlayerState _playerState = PlayerState.idle;
   DateTime _lastCommandTime = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastPlayCommandTime = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _isAudioSessionTransitioning = false;
 
   // --- Getters ---
   String? get currentPath => _selectedPath;
@@ -34,6 +35,14 @@ class PlayerController extends ChangeNotifier {
   String? get lastFingerprint => _lastFingerprint;
   PlayerState get currentState => _playerState;
   FadeSettings get fadeSettings => _fadeSettings;
+  bool get isAudioSessionTransitioning => _isAudioSessionTransitioning;
+
+  set isAudioSessionTransitioning(bool value) {
+    if (_isAudioSessionTransitioning != value) {
+      _isAudioSessionTransitioning = value;
+      notifyListeners();
+    }
+  }
 
   // --- Actions ---
 
@@ -156,6 +165,10 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> togglePlayPause({FadeSettings? fadeSetting}) async {
+    if (_isAudioSessionTransitioning) {
+      debugPrint('[PlayerController] togglePlayPause ignored: Audio session is transitioning');
+      return;
+    }
     if (_selectedPath == null) return;
     if (_isPlaying) {
       await pause(fadeSetting: fadeSetting);
@@ -164,7 +177,15 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  Future<void> pause({bool withFade = true, FadeSettings? fadeSetting}) async {
+  Future<void> pause({
+    bool withFade = true,
+    FadeSettings? fadeSetting,
+    bool bypassGuard = false,
+  }) async {
+    if (!bypassGuard && _isAudioSessionTransitioning) {
+      debugPrint('[PlayerController] pause ignored: Audio session is transitioning');
+      return;
+    }
     try {
       _lastPlayCommandTime = DateTime.fromMillisecondsSinceEpoch(0);
       final fadeDuration = _pauseResumeFadeDuration(
@@ -181,7 +202,15 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> play({bool withFade = true, FadeSettings? fadeSetting}) async {
+  Future<void> play({
+    bool withFade = true,
+    FadeSettings? fadeSetting,
+    bool bypassGuard = false,
+  }) async {
+    if (!bypassGuard && _isAudioSessionTransitioning) {
+      debugPrint('[PlayerController] play ignored: Audio session is transitioning');
+      return;
+    }
     if (_selectedPath == null) return;
 
     if (_playerState == PlayerState.completed) {
@@ -492,7 +521,7 @@ class ImmediateTransition extends PlaybackTransition {
   }) async {
     await player.load(uri);
     if (position != null) await player.seek(position);
-    if (autoPlay) await player.play(withFade: false);
+    if (autoPlay) await player.play(withFade: false, bypassGuard: true);
   }
 }
 
