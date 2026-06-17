@@ -306,6 +306,28 @@ class AudioCoreController extends ChangeNotifier
   void notifyListeners() => super.notifyListeners();
 
   @override
+  Future<bool> canPlayTrack(AudioTrack track) async {
+    final uri = track.uri.trim();
+    if (uri.isEmpty) return false;
+
+    try {
+      if (uri.contains('://')) {
+        final parsed = Uri.parse(uri);
+        if (parsed.scheme == 'file') {
+          return File.fromUri(parsed).exists();
+        }
+
+        // Non-file URIs are handed off to the audio engine.
+        return true;
+      }
+
+      return File(uri).exists();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
   Future<void> loadTrack({
     required bool autoPlay,
     Duration? position,

@@ -300,7 +300,7 @@ class PlaylistController extends ChangeNotifier {
     FadeSettings? fadeSetting,
   }) async {
     final oldTrack = currentTrack;
-    final resolution = _resolveAdjacentIndex(next: true);
+    final resolution = await _resolvePlayableAdjacentIndex(next: true);
     debugPrint(
       '[PlaylistController] playNext reason=$reason '
       'old=${oldTrack?.id} resolution=$resolution '
@@ -322,28 +322,13 @@ class PlaylistController extends ChangeNotifier {
     FadeSettings? fadeSetting,
   }) async {
     final oldTrack = currentTrack;
-    final resolution = _resolveAdjacentIndex(next: false);
+    final resolution = await _resolvePlayableAdjacentIndex(next: false);
     debugPrint(
       '[PlaylistController] playPrevious reason=$reason '
       'old=${oldTrack?.id} resolution=$resolution '
       'mode=$_playlistMode random=${_randomManager.policy != null}',
     );
-    if (resolution == null) {
-      if (_randomManager.policy != null && currentTrack != null) {
-        debugPrint(
-          '[PlaylistController] playPrevious random fallback -> reload current '
-          'track=${currentTrack?.id}',
-        );
-        await _parent.loadTrack(
-          autoPlay: true,
-          position: Duration.zero,
-          reason: reason,
-          fadeSetting: fadeSetting,
-        );
-        return true;
-      }
-      return false;
-    }
+    if (resolution == null) return false;
     _currentIndex = resolution;
     await _reconcile(
       oldTrack: oldTrack,
@@ -532,6 +517,140 @@ class PlaylistController extends ChangeNotifier {
 
   // --- Internal ---
 
+  Future<int?> _resolvePlayableAdjacentIndex({required bool next}) async {
+    if (_activePlaylistTracks.isEmpty || _playlistMode == PlaylistMode.single) {
+      return null;
+    }
+
+    if (_playlistMode == PlaylistMode.singleLoop) {
+      final index = _currentIndex ?? 0;
+      final playable = await _isPlayableIndex(index);
+      return playable ? index : null;
+    }
+
+    if (_randomManager.policy != null) {
+      final snapshot = _captureRandomState();
+      final maxAttempts = _activePlaylistTracks.length;
+      int? resolution;
+      var foundPlayable = false;
+
+      try {
+        for (var attempts = 0; attempts < maxAttempts; attempts++) {
+          resolution = _randomManager.resolveAdjacentIndex(
+            next: next,
+            playlistId: _activePlaylistId,
+            tracks: _activePlaylistTracks,
+            currentTrack: currentTrack,
+            loop:
+                _playlistMode == PlaylistMode.queueLoop ||
+                _playlistMode == PlaylistMode.autoQueueLoop,
+            peek: false,
+          );
+          if (resolution == null) {
+            break;
+          }
+
+          if (await _isPlayableIndex(resolution)) {
+            foundPlayable = true;
+            break;
+          }
+        }
+      } finally {
+        if (!foundPlayable &&
+            (_randomManager.currentDeck != snapshot.deck ||
+                _randomManager.historyCursor != snapshot.historyCursor ||
+                _randomManager.deckCursor != snapshot.deckCursor ||
+                _randomManager.deckSignature != snapshot.deckSignature ||
+                _randomManager.stashedNextTrackId !=
+                    snapshot.stashedNextTrackId ||
+                _randomManager.stashedForTrackId !=
+                    snapshot.stashedForTrackId)) {
+          _randomManager.restoreState(
+            policy: snapshot.policy,
+            history: snapshot.history,
+            historyCursor: snapshot.historyCursor,
+            deck: snapshot.deck,
+            deckCursor: snapshot.deckCursor,
+            deckSignature: snapshot.deckSignature,
+            stashedNextTrackId: snapshot.stashedNextTrackId,
+            stashedForTrackId: snapshot.stashedForTrackId,
+          );
+        }
+      }
+
+      return foundPlayable ? resolution : null;
+    }
+
+    return next
+        ? await _resolveSequentialPlayableIndex(next: true)
+        : await _resolveSequentialPlayableIndex(next: false);
+  }
+
+  Future<int?> _resolveSequentialPlayableIndex({required bool next}) async {
+    if (_activePlaylistTracks.isEmpty) return null;
+
+    if (_currentIndex == null) {
+      if (!next) return null;
+      for (var i = 0; i < _activePlaylistTracks.length; i++) {
+        if (await _isPlayableIndex(i)) return i;
+      }
+      return null;
+    }
+
+    final length = _activePlaylistTracks.length;
+    if (length == 0) return null;
+
+    final loop =
+        _playlistMode == PlaylistMode.queueLoop ||
+        _playlistMode == PlaylistMode.autoQueueLoop;
+    var steps = 0;
+    var index = _currentIndex!;
+
+    while (steps < length) {
+      index = next ? index + 1 : index - 1;
+      steps++;
+
+      if (index < 0 || index >= length) {
+        if (!loop) return null;
+        index = (index + length) % length;
+      }
+
+      if (index == _currentIndex!) {
+        return null;
+      }
+
+      if (await _isPlayableIndex(index)) {
+        return index;
+      }
+    }
+
+    return null;
+  }
+
+  Future<bool> _isPlayableIndex(int index) async {
+    if (index < 0 || index >= _activePlaylistTracks.length) {
+      return false;
+    }
+    final track = _activePlaylistTracks[index];
+    return _isPlayableTrack(track);
+  }
+
+  Future<bool> _isPlayableTrack(AudioTrack track) async =>
+      await _parent.canPlayTrack(track);
+
+  _RandomStateSnapshot _captureRandomState() {
+    return _RandomStateSnapshot(
+      policy: _randomManager.policy,
+      history: List<RandomHistoryEntry>.unmodifiable(_randomManager.history),
+      historyCursor: _randomManager.historyCursor,
+      deck: List<String>.unmodifiable(_randomManager.currentDeck),
+      deckCursor: _randomManager.deckCursor,
+      deckSignature: _randomManager.deckSignature,
+      stashedNextTrackId: _randomManager.stashedNextTrackId,
+      stashedForTrackId: _randomManager.stashedForTrackId,
+    );
+  }
+
   int? _resolveAdjacentIndex({required bool next, bool peek = false}) {
     if (_activePlaylistTracks.isEmpty || _playlistMode == PlaylistMode.single) {
       return null;
@@ -668,4 +787,26 @@ class PlaylistController extends ChangeNotifier {
     super.notifyListeners();
     _parent.notifyListeners();
   }
+}
+
+class _RandomStateSnapshot {
+  const _RandomStateSnapshot({
+    required this.policy,
+    required this.history,
+    required this.historyCursor,
+    required this.deck,
+    required this.deckCursor,
+    required this.deckSignature,
+    required this.stashedNextTrackId,
+    required this.stashedForTrackId,
+  });
+
+  final RandomPolicy? policy;
+  final List<RandomHistoryEntry> history;
+  final int? historyCursor;
+  final List<String> deck;
+  final int? deckCursor;
+  final String? deckSignature;
+  final String? stashedNextTrackId;
+  final String? stashedForTrackId;
 }

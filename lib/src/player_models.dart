@@ -11,6 +11,12 @@ abstract class AudioVisualizerParent {
   /// Access to the underlying audio engine.
   AudioEngine get engine;
 
+  /// Whether the given track can be played right now.
+  ///
+  /// Callers use this to skip deleted or otherwise unavailable tracks when
+  /// navigating the queue.
+  Future<bool> canPlayTrack(AudioTrack track);
+
   /// Called when a track needs to be loaded (e.g., from playlist navigation).
   Future<void> loadTrack({
     required bool autoPlay,
