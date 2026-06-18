@@ -555,15 +555,31 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     required String path,
   }) async {
     final targetPath = _normalizePath(path);
-    final details = await _withAppleFileReadAccess(targetPath, () async {
-      return rust.getAudioDetails(path: targetPath);
+    return _withAppleFileReadAccess(targetPath, () async {
+      final Map<Object?, Object?>? result = await _channel.invokeMethod<Map<Object?, Object?>>(
+        'getAudioDetails',
+        <String, Object?>{'path': targetPath},
+      );
+      if (result == null) {
+        throw Exception('Failed to get audio details natively');
+      }
+      return AudioDetails(
+        formatName: result['formatName'] as String? ?? 'unknown',
+        codecName: result['codecName'] as String? ?? 'unknown',
+        duration: Duration(milliseconds: result['durationMs'] as int? ?? 0),
+        bitrate: result['bitrate'] as int? ?? 0,
+        sampleRate: result['sampleRate'] as int? ?? 0,
+        channels: result['channels'] as int? ?? 0,
+        bitrateMode: result['bitrateMode'] as String? ?? 'unknown',
+        fileSize: result['fileSize'] as int? ?? 0,
+      );
     });
-    return AudioDetails.fromRust(details);
   }
 
   @override
   Future<GeneratedTrackArtwork> generateTrackArtwork({
     required String path,
+    Uint8List? artworkBytes,
     required String cacheRootPath,
     required bool saveLargeArtwork,
     TrackArtworkOptions options = const TrackArtworkOptions(),
@@ -573,6 +589,7 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     final result = await _withAppleFileReadAccess(targetPath, () async {
       return rust.generateTrackArtwork(
         path: targetPath,
+        artworkBytes: artworkBytes,
         cacheRootPath: normalizedCacheRootPath,
         saveLargeArtwork: saveLargeArtwork,
         thumbnailSize: options.thumbnailSize,

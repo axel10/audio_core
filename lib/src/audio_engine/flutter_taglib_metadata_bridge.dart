@@ -1,15 +1,19 @@
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_taglib/flutter_taglib.dart' as taglib;
+import 'package:path/path.dart' as p;
 
 import '../rust/api/simple/metadata.dart' as rust;
 import '../track_metadata.dart';
 import '../track_metadata_update.dart';
+import '../audio_details.dart';
 
 const String _metadataTypeFlutterTaglib = 'flutter_taglib';
 
 Future<TrackMetadata?> readTrackMetadataWithFlutterTaglib(
   String path, {
   String? fallbackMediaUri,
+  bool getImage = true,
 }) async {
   if (!taglib.TagLibFile.isSupported) {
     return null;
@@ -23,7 +27,7 @@ Future<TrackMetadata?> readTrackMetadataWithFlutterTaglib(
 
     try {
       final properties = file.properties;
-      final pictures = file.pictures;
+      final pictures = getImage ? file.pictures : const <taglib.Picture>[];
 
       final date = _firstString(properties, taglib.TagProperties.date);
       final year = _readYear(properties, date);
@@ -440,4 +444,61 @@ extension on Iterable<String> {
     if (!iterator.moveNext()) return null;
     return iterator.current;
   }
+}
+
+Future<AudioDetails> getAudioDetailsWithFlutterTaglib({
+  required String path,
+  String? fallbackMediaUri,
+}) async {
+  if (!taglib.TagLibFile.isSupported) {
+    throw UnsupportedError('TagLib is not supported on this platform');
+  }
+
+  String? lastFailureReason;
+  for (final candidate in _metadataPathCandidates(path, fallbackMediaUri)) {
+    final file = await taglib.TagLibFile.openAsync(candidate);
+    if (file == null) {
+      lastFailureReason = taglib.TagLibFile.lastError ?? 'Failed to open file $candidate';
+      continue;
+    }
+
+    try {
+      final info = file.audioInfo;
+      final fileSize = File(candidate).lengthSync();
+      final ext = p.extension(candidate).replaceAll('.', '').toLowerCase();
+
+      final rawFormat = ext;
+      String formatName = rawFormat;
+      if (rawFormat == 'mpeg') {
+        formatName = 'mp3';
+      } else if (rawFormat == 'mp4') {
+        formatName = 'm4a';
+      }
+
+      final rawCodec = ext;
+      String codecName = rawCodec;
+      if (rawCodec == 'mpeg') {
+        codecName = 'mp3';
+      } else if (rawCodec == 'mp4') {
+        codecName = 'aac';
+      }
+
+      return AudioDetails(
+        formatName: formatName,
+        codecName: codecName,
+        duration: info.duration,
+        bitrate: info.bitrate * 1000,
+        sampleRate: info.sampleRate,
+        channels: info.channels,
+        bitrateMode: info.bitrateMode,
+        fileSize: fileSize,
+      );
+    } finally {
+      file.close();
+    }
+  }
+
+  throw Exception(
+    lastFailureReason ?? 'Failed to open any path candidates for $path',
+  );
 }

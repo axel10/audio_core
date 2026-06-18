@@ -39,6 +39,62 @@ enum AppleTrackMetadataBridge {
     }
   }
 
+  static func readAudioDetails(
+    path: String,
+    fileAccess: SecurityScopedFileAccessCoordinator
+  ) -> [String: Any]? {
+    do {
+      return try fileAccess.withTemporaryAccess(for: path) { url in
+        let audioFile = try AudioFile(readingPropertiesAndMetadataFrom: url)
+        let properties = audioFile.properties
+        
+        let fileManager = FileManager.default
+        let attrs = try fileManager.attributesOfItem(atPath: url.path)
+        let fileSize = attrs[.size] as? Int64 ?? 0
+        
+        let duration = properties.duration
+        let sampleRate = Int(properties.sampleRate)
+        let channelCount = Int(properties.channelCount)
+        
+        let bitrate: Int
+        if duration > 0 {
+          bitrate = Int((Double(fileSize) * 8.0 / duration).rounded())
+        } else {
+          bitrate = 0
+        }
+        
+        let fileExtension = url.pathExtension.lowercased()
+        var formatName = fileExtension
+        if fileExtension == "mpeg" {
+          formatName = "mp3"
+        } else if fileExtension == "mp4" {
+          formatName = "m4a"
+        }
+        
+        var codecName = fileExtension
+        if fileExtension == "mpeg" {
+          codecName = "mp3"
+        } else if fileExtension == "mp4" {
+          codecName = "aac"
+        }
+        
+        return [
+          "formatName": formatName,
+          "codecName": codecName,
+          "durationMs": Int((duration * 1000.0).rounded()),
+          "bitrate": bitrate,
+          "sampleRate": sampleRate,
+          "channels": channelCount,
+          "bitrateMode": "unknown",
+          "fileSize": fileSize
+        ]
+      }
+    } catch {
+      return nil
+    }
+  }
+
+
   private static func apply(metadata request: [String: Any], to metadata: AudioMetadata) {
     if let value = stringValue(request, key: "title") {
       metadata.title = value

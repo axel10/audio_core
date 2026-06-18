@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import '../rust/api/simple_api.dart' as rust;
 import '../track_artwork.dart';
 
@@ -6,12 +7,14 @@ mixin TrackArtworkSupport {
 
   Future<GeneratedTrackArtwork> generateTrackArtwork({
     required String path,
+    Uint8List? artworkBytes,
     required String cacheRootPath,
     required bool saveLargeArtwork,
     TrackArtworkOptions options = const TrackArtworkOptions(),
   }) async {
     final result = await rust.generateTrackArtwork(
       path: normalizeArtworkPath(path),
+      artworkBytes: artworkBytes,
       cacheRootPath: normalizeArtworkPath(cacheRootPath),
       saveLargeArtwork: saveLargeArtwork,
       thumbnailSize: options.thumbnailSize,

@@ -1270,6 +1270,7 @@ class AudioCoreController extends ChangeNotifier
 
   Future<GeneratedTrackArtwork> generateTrackArtwork({
     required String path,
+    Uint8List? artworkBytes,
     required String cacheRootPath,
     required bool saveLargeArtwork,
     TrackArtworkOptions options = const TrackArtworkOptions(),
@@ -1283,6 +1284,7 @@ class AudioCoreController extends ChangeNotifier
 
     return _engine.generateTrackArtwork(
       path: path,
+      artworkBytes: artworkBytes,
       cacheRootPath: cacheRootPath,
       saveLargeArtwork: saveLargeArtwork,
       options: options,

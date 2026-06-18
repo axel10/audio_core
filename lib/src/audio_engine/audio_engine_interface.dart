@@ -148,6 +148,7 @@ abstract class AudioEngine {
 
   Future<GeneratedTrackArtwork> generateTrackArtwork({
     required String path,
+    Uint8List? artworkBytes,
     required String cacheRootPath,
     required bool saveLargeArtwork,
     TrackArtworkOptions options = const TrackArtworkOptions(),

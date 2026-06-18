@@ -266,8 +266,7 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
 
   @override
   Future<AudioDetails> getAudioDetails({required String path}) async {
-    final details = await rust.getAudioDetails(path: path);
-    return AudioDetails.fromRust(details);
+    return getAudioDetailsWithFlutterTaglib(path: path);
   }
 
   @override

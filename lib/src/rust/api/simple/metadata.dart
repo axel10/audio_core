@@ -25,6 +25,7 @@ Future<AudioDetails> getAudioDetails({required String path}) =>
 
 Future<TrackArtworkResult> generateTrackArtwork({
   required String path,
+  Uint8List? artworkBytes,
   required String cacheRootPath,
   required bool saveLargeArtwork,
   required int thumbnailSize,
@@ -38,6 +39,7 @@ Future<TrackArtworkResult> generateTrackArtwork({
   required double meshVibrancyStrength,
 }) => RustLib.instance.api.crateApiSimpleMetadataGenerateTrackArtwork(
   path: path,
+  artworkBytes: artworkBytes,
   cacheRootPath: cacheRootPath,
   saveLargeArtwork: saveLargeArtwork,
   thumbnailSize: thumbnailSize,

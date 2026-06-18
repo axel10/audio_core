@@ -390,6 +390,31 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         ))
       }
 
+    case "getAudioDetails":
+      guard let args = call.arguments as? [String: Any],
+            let path = args["path"] as? String else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
+        return
+      }
+      metadataQueue.async {
+        if let details = AppleTrackMetadataBridge.readAudioDetails(
+          path: path,
+          fileAccess: self.fileAccess
+        ) {
+          DispatchQueue.main.async {
+            result(details)
+          }
+        } else {
+          DispatchQueue.main.async {
+            result(FlutterError(
+              code: "READ_DETAILS_FAILED",
+              message: "Failed to read audio details natively via SFBAudioEngine",
+              details: nil
+            ))
+          }
+        }
+      }
+
     case "getTrackMetadata":
       guard let args = call.arguments as? [String: Any],
             let path = args["path"] as? String else {

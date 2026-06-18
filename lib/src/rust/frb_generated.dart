@@ -125,6 +125,7 @@ abstract class RustLibApi extends BaseApi {
 
   Future<TrackArtworkResult> crateApiSimpleMetadataGenerateTrackArtwork({
     required String path,
+    Uint8List? artworkBytes,
     required String cacheRootPath,
     required bool saveLargeArtwork,
     required int thumbnailSize,
@@ -624,6 +625,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @override
   Future<TrackArtworkResult> crateApiSimpleMetadataGenerateTrackArtwork({
     required String path,
+    Uint8List? artworkBytes,
     required String cacheRootPath,
     required bool saveLargeArtwork,
     required int thumbnailSize,
@@ -641,6 +643,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(path, serializer);
+          sse_encode_opt_list_prim_u_8_strict(artworkBytes, serializer);
           sse_encode_String(cacheRootPath, serializer);
           sse_encode_bool(saveLargeArtwork, serializer);
           sse_encode_i_32(thumbnailSize, serializer);
@@ -666,6 +669,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         constMeta: kCrateApiSimpleMetadataGenerateTrackArtworkConstMeta,
         argValues: [
           path,
+          artworkBytes,
           cacheRootPath,
           saveLargeArtwork,
           thumbnailSize,
@@ -688,6 +692,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         debugName: "generate_track_artwork",
         argNames: [
           "path",
+          "artworkBytes",
           "cacheRootPath",
           "saveLargeArtwork",
           "thumbnailSize",

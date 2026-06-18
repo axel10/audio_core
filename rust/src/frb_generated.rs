@@ -446,6 +446,7 @@ fn wire__crate__api__simple__metadata__generate_track_artwork_impl(
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_path = <String>::sse_decode(&mut deserializer);
+            let api_artwork_bytes = <Option<Vec<u8>>>::sse_decode(&mut deserializer);
             let api_cache_root_path = <String>::sse_decode(&mut deserializer);
             let api_save_large_artwork = <bool>::sse_decode(&mut deserializer);
             let api_thumbnail_size = <i32>::sse_decode(&mut deserializer);
@@ -463,6 +464,7 @@ fn wire__crate__api__simple__metadata__generate_track_artwork_impl(
                     (move || {
                         let output_ok = crate::api::simple::metadata::generate_track_artwork(
                             api_path,
+                            api_artwork_bytes,
                             api_cache_root_path,
                             api_save_large_artwork,
                             api_thumbnail_size,
