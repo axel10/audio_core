@@ -52,9 +52,9 @@ enum AppleTrackMetadataBridge {
         let attrs = try fileManager.attributesOfItem(atPath: url.path)
         let fileSize = attrs[.size] as? Int64 ?? 0
         
-        let duration = properties.duration
-        let sampleRate = Int(properties.sampleRate)
-        let channelCount = Int(properties.channelCount)
+        let duration = properties.duration ?? 0.0
+        let sampleRate = Int(properties.sampleRate ?? 0.0)
+        let channelCount = Int(properties.channelCount ?? 0)
         
         let bitrate: Int
         if duration > 0 {

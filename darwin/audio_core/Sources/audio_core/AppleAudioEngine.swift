@@ -123,7 +123,7 @@ final class AppleAudioEngine: NSObject {
       do {
         let audioFile = try AudioFile(readingPropertiesAndMetadataFrom: url)
         file = audioFile
-        print("[AppleAudioEngine] PlaybackSlot AudioFile read success: duration=\(audioFile.properties.duration)s, sampleRate=\(audioFile.properties.sampleRate)Hz, frameLength=\(audioFile.properties.frameLength)")
+        print("[AppleAudioEngine] PlaybackSlot AudioFile read success: duration=\(audioFile.properties.duration ?? 0.0)s, sampleRate=\(audioFile.properties.sampleRate ?? 0.0)Hz, frameLength=\(audioFile.properties.frameLength ?? 0)")
       } catch {
         print("[AppleAudioEngine] PlaybackSlot AudioFile read failed: \(error.localizedDescription)")
         file = nil
