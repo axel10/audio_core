@@ -135,6 +135,8 @@ Future<bool> updateTrackMetadataWithFlutterTaglib({
           merged[taglib.TagProperties.trackNumber] = <String>[
             trackNumber.toString(),
           ];
+        } else {
+          merged.remove(taglib.TagProperties.trackNumber);
         }
       }
       if (metadata.containsKey('trackTotal')) {
@@ -328,9 +330,13 @@ taglib.Picture? _asPicture(Map<String, Object?> map) {
 }
 
 void _putSingle(Map<String, List<String>> target, String key, Object? value) {
-  final text = _stringOrNull(value);
-  if (text == null) return;
-  target[key] = <String>[text];
+  if (value == null) return;
+  final text = value.toString().trim();
+  if (text.isEmpty) {
+    target.remove(key);
+  } else {
+    target[key] = <String>[text];
+  }
 }
 
 void _applyDateAndYearProperties(

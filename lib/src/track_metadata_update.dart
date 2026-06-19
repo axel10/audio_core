@@ -53,6 +53,7 @@ class TrackMetadataUpdate {
     this.genres = const <String>[],
     this.pictures = const <TrackMetadataPicture>[],
     this.clearArtwork,
+    this.clearTrackNumber,
   });
 
   final String? title;
@@ -74,6 +75,7 @@ class TrackMetadataUpdate {
   final List<String> genres;
   final List<TrackMetadataPicture> pictures;
   final bool? clearArtwork;
+  final bool? clearTrackNumber;
 
   Map<String, Object?> toMap({bool includeEmptyCollections = false}) {
     return <String, Object?>{
@@ -81,7 +83,10 @@ class TrackMetadataUpdate {
       if (artist != null) 'artist': artist,
       if (album != null) 'album': album,
       if (albumArtist != null) 'albumArtist': albumArtist,
-      if (trackNumber != null) 'trackNumber': trackNumber,
+      if (clearTrackNumber == true)
+        'trackNumber': null
+      else if (trackNumber != null)
+        'trackNumber': trackNumber,
       if (trackTotal != null) 'trackTotal': trackTotal,
       if (discNumber != null) 'discNumber': discNumber,
       if (date != null) 'date': date,
@@ -105,7 +110,11 @@ class TrackMetadataUpdate {
     if (title != null) metadata.setTitle(title);
     if (artist != null) metadata.setArtist(artist);
     if (album != null) metadata.setAlbum(album);
-    if (trackNumber != null) metadata.setTrackNumber(trackNumber);
+    if (clearTrackNumber == true) {
+      metadata.setTrackNumber(null);
+    } else if (trackNumber != null) {
+      metadata.setTrackNumber(trackNumber);
+    }
     if (trackTotal != null) metadata.setTrackTotal(trackTotal);
     if (discNumber != null) metadata.setCD(discNumber, null);
 
