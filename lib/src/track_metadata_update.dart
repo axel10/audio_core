@@ -52,6 +52,7 @@ class TrackMetadataUpdate {
     this.remixer,
     this.genres = const <String>[],
     this.pictures = const <TrackMetadataPicture>[],
+    this.clearArtwork,
   });
 
   final String? title;
@@ -72,6 +73,7 @@ class TrackMetadataUpdate {
   final String? remixer;
   final List<String> genres;
   final List<TrackMetadataPicture> pictures;
+  final bool? clearArtwork;
 
   Map<String, Object?> toMap({bool includeEmptyCollections = false}) {
     return <String, Object?>{
@@ -92,7 +94,9 @@ class TrackMetadataUpdate {
       if (conductor != null) 'conductor': conductor,
       if (remixer != null) 'remixer': remixer,
       if (includeEmptyCollections || genres.isNotEmpty) 'genres': genres,
-      if (includeEmptyCollections || pictures.isNotEmpty)
+      if (clearArtwork == true)
+        'pictures': const <Object?>[]
+      else if (includeEmptyCollections || pictures.isNotEmpty)
         'pictures': pictures.map((picture) => picture.toMap()).toList(),
     };
   }
@@ -109,7 +113,9 @@ class TrackMetadataUpdate {
     if (resolvedDate != null) {
       metadata.setYear(resolvedDate);
     }
-    if (pictures.isNotEmpty) {
+    if (clearArtwork == true) {
+      metadata.setPictures(const <Picture>[]);
+    } else if (pictures.isNotEmpty) {
       metadata.setPictures(
         pictures
             .map(
