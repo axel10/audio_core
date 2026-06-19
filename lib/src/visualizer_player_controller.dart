@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_taglib/flutter_taglib.dart' as taglib;
 import 'package:flutter/services.dart';
 
 import 'player_models.dart';
@@ -1063,6 +1064,32 @@ class AudioCoreController extends ChangeNotifier
     return _resolveTrackPath(currentTrack).trim();
   }
 
+  Future<bool> _isFileOccupied(String filePath) async {
+    try {
+      final file = File(filePath);
+      if (!await file.exists()) {
+        return false;
+      }
+      final access = await file.open(mode: FileMode.append);
+      await access.close();
+      return false;
+    } catch (e) {
+      if (e is FileSystemException) {
+        final code = e.osError?.errorCode;
+        if (Platform.isWindows) {
+          if (code == 32 || code == 33) {
+            return true;
+          }
+        } else {
+          if (code == 11 || code == 26 || code == 32 || code == 33) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+  }
+
   Future<bool> _updateMetadataAtPath({
     required String path,
     String? fallbackMediaUri,
@@ -1075,6 +1102,12 @@ class AudioCoreController extends ChangeNotifier
       debugPrint(
         '[AudioCore][Metadata] updateMetadata: File does not exist: $path',
       );
+      return false;
+    }
+
+    if (file != null && await _isFileOccupied(path)) {
+      taglib.TagLibFile.lastError = 'file_occupied';
+      debugPrint('[AudioCore][Metadata] File occupied by another app: $path');
       return false;
     }
 
@@ -1210,7 +1243,28 @@ class AudioCoreController extends ChangeNotifier
       return finalResults;
     }
 
-    final needsSync = normalizedRequests.any((request) {
+    final unoccupiedRequests = <TrackMetadataWriteRequest>[];
+    final unoccupiedIndexes = <int>[];
+
+    for (var i = 0; i < normalizedRequests.length; i++) {
+      final request = normalizedRequests[i];
+      final origIndex = normalizedIndexes[i];
+      final file = request.path.startsWith('content://') ? null : File(request.path);
+      if (file != null && await _isFileOccupied(request.path)) {
+        taglib.TagLibFile.lastError = 'file_occupied';
+        debugPrint('[AudioCore][Metadata] File occupied by another app: ${request.path}');
+        finalResults[origIndex] = false;
+      } else {
+        unoccupiedRequests.add(request);
+        unoccupiedIndexes.add(origIndex);
+      }
+    }
+
+    if (unoccupiedRequests.isEmpty) {
+      return finalResults;
+    }
+
+    final needsSync = unoccupiedRequests.any((request) {
       return _needsMetadataWriteSyncForPath(request.path);
     });
 
@@ -1224,14 +1278,14 @@ class AudioCoreController extends ChangeNotifier
 
       final batchSupported = await _engine.supportsBatchMetadataWrite();
       final operationResults = batchSupported
-          ? await _engine.updateTrackMetadataBatch(requests: normalizedRequests)
+          ? await _engine.updateTrackMetadataBatch(requests: unoccupiedRequests)
           : [
-              for (final request in normalizedRequests)
+              for (final request in unoccupiedRequests)
                 await _writeMetadataRequest(request, managePlaybackSync: false),
             ];
 
-      for (var i = 0; i < normalizedIndexes.length; i++) {
-        finalResults[normalizedIndexes[i]] = operationResults[i];
+      for (var i = 0; i < unoccupiedIndexes.length; i++) {
+        finalResults[unoccupiedIndexes[i]] = operationResults[i];
       }
       notifyListeners();
       return finalResults;
@@ -1317,7 +1371,34 @@ class AudioCoreController extends ChangeNotifier
   Future<List<bool>> _copyMetadataBatch(
     List<TrackMetadataCopyRequest> requests,
   ) async {
-    final needsSync = requests.any((request) {
+    final finalResults = List<bool>.filled(
+      requests.length,
+      false,
+      growable: false,
+    );
+
+    final unoccupiedRequests = <TrackMetadataCopyRequest>[];
+    final unoccupiedIndexes = <int>[];
+
+    for (var i = 0; i < requests.length; i++) {
+      final request = requests[i];
+      final targetPath = request.targetPath.trim();
+      final file = targetPath.startsWith('content://') ? null : File(targetPath);
+      if (file != null && await _isFileOccupied(targetPath)) {
+        taglib.TagLibFile.lastError = 'file_occupied';
+        debugPrint('[AudioCore][Metadata] Target file occupied by another app: $targetPath');
+        finalResults[i] = false;
+      } else {
+        unoccupiedRequests.add(request);
+        unoccupiedIndexes.add(i);
+      }
+    }
+
+    if (unoccupiedRequests.isEmpty) {
+      return finalResults;
+    }
+
+    final needsSync = unoccupiedRequests.any((request) {
       return _needsMetadataWriteSyncForPath(request.targetPath.trim());
     });
 
@@ -1329,9 +1410,12 @@ class AudioCoreController extends ChangeNotifier
         preparedForWrite = true;
       }
 
-      final results = await _engine.copyTrackMetadataBatch(requests: requests);
+      final operationResults = await _engine.copyTrackMetadataBatch(requests: unoccupiedRequests);
+      for (var i = 0; i < unoccupiedIndexes.length; i++) {
+        finalResults[unoccupiedIndexes[i]] = operationResults[i];
+      }
       notifyListeners();
-      return results;
+      return finalResults;
     } catch (e) {
       final errorText = e is PlatformException
           ? [
@@ -1342,7 +1426,7 @@ class AudioCoreController extends ChangeNotifier
           : e.toString();
       debugPrint('[AudioCore][Metadata] copyMetadataBatch failed: $errorText');
       player.setError('Metadata batch copy failed: $errorText');
-      return List<bool>.filled(requests.length, false, growable: false);
+      return finalResults;
     } finally {
       if (preparedForWrite) {
         await _engine.finishFileWrite().catchError((_) {});
