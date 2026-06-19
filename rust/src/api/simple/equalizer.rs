@@ -168,6 +168,14 @@ struct EqualizerChain {
     eq_unit: Box<dyn AudioUnit>,
     protection_unit: Box<dyn AudioUnit>,
     sample_rate: u32,
+    current_enabled: bool,
+    current_band_count: usize,
+    preamp_gain: Shared,
+    bass_boost_freq: Shared,
+    bass_boost_q: Shared,
+    bass_boost_gain: Shared,
+    band_freqs: Vec<Shared>,
+    band_gains: Vec<Shared>,
 }
 
 impl EqualizerChain {
@@ -195,6 +203,14 @@ impl EqualizerChain {
             eq_unit: Box::new(pass()),
             protection_unit: protection,
             sample_rate,
+            current_enabled: false,
+            current_band_count: 0,
+            preamp_gain: shared(1.0),
+            bass_boost_freq: shared(DEFAULT_BASS_BOOST_HZ),
+            bass_boost_q: shared(DEFAULT_BASS_BOOST_Q),
+            bass_boost_gain: shared(1.0),
+            band_freqs: (0..MAX_EQ_BANDS).map(|_| shared(1000.0)).collect(),
+            band_gains: (0..MAX_EQ_BANDS).map(|_| shared(1.0)).collect(),
         }
     }
 
@@ -205,6 +221,33 @@ impl EqualizerChain {
 
     fn update_from_config(&mut self, config: &EqualizerConfig, sample_rate: u32) {
         let config = config.clone().sanitized();
+        let band_count = config.band_count as usize;
+
+        // Auto gain compensation: Calculate the maximum boost to create headroom
+        let mut max_boost_db = 0.0_f32;
+        if config.bass_boost_db > 0.0 {
+            max_boost_db = config.bass_boost_db;
+        }
+        for i in 0..band_count {
+            if let Some(&gain) = config.band_gains_db.get(i) {
+                if gain > max_boost_db {
+                    max_boost_db = gain;
+                }
+            }
+        }
+
+        let actual_preamp_db = config.preamp_db - max_boost_db;
+        let preamp_gain = db_amp(actual_preamp_db);
+
+        // Update the shared values first
+        self.preamp_gain.set_value(preamp_gain);
+        self.bass_boost_freq.set_value(config.bass_boost_frequency_hz);
+        self.bass_boost_q.set_value(config.bass_boost_q);
+        self.bass_boost_gain.set_value(db_amp(config.bass_boost_db));
+        for i in 0..band_count {
+            self.band_freqs[i].set_value(band_center_frequency(i, band_count));
+            self.band_gains[i].set_value(db_amp(config.band_gains_db[i]));
+        }
 
         // Update protection unit if sample rate changed
         if self.sample_rate != sample_rate {
@@ -224,56 +267,43 @@ impl EqualizerChain {
             self.sample_rate = sample_rate;
         }
 
-        if !config.enabled {
-            self.eq_unit = Box::new(pass());
-            self.eq_unit.set_sample_rate(sample_rate as f64);
-            return;
-        }
+        let structure_changed = !self.current_enabled
+            || self.current_band_count != band_count
+            || !config.enabled;
 
-        // Build the EQ part (excluding limiter to prevent constant resets)
-        // Auto gain compensation: Calculate the maximum boost to create headroom
-        let mut max_boost_db = 0.0_f32;
-        if config.bass_boost_db > 0.0 {
-            max_boost_db = config.bass_boost_db;
-        }
-        for i in 0..config.band_count as usize {
-            if let Some(&gain) = config.band_gains_db.get(i) {
-                if gain > max_boost_db {
-                    max_boost_db = gain;
-                }
+        if structure_changed {
+            if !config.enabled {
+                self.eq_unit = Box::new(pass());
+                self.eq_unit.set_sample_rate(sample_rate as f64);
+                self.current_enabled = false;
+                self.current_band_count = 0;
+                return;
             }
-        }
 
-        // Reduce preamp by `max_boost_db` to prevent digital clipping
-        let actual_preamp_db = config.preamp_db - max_boost_db;
-        let preamp_gain: f32 = db_amp(actual_preamp_db);
-        let mut node: Box<dyn AudioUnit> = Box::new(mul(preamp_gain));
+            // Build the dynamic EQ chain graph
+            let mut node: Box<dyn AudioUnit> = Box::new(pass() * var(&self.preamp_gain));
 
-        // Bass Boost
-        if config.bass_boost_db.abs() > EPSILON_GAIN_DB {
+            // Bass Boost (lowshelf)
             node = Box::new(
                 An(Unit::<U1, U1>::new(node))
-                    >> lowshelf_hz(
-                        config.bass_boost_frequency_hz,
-                        config.bass_boost_q,
-                        db_amp(config.bass_boost_db),
-                    ),
+                    >> (pass() | var(&self.bass_boost_freq) | var(&self.bass_boost_q) | var(&self.bass_boost_gain))
+                    >> lowshelf::<f32>(),
             );
-        }
 
-        // EQ Bands
-        let band_count = config.band_count as usize;
-        for i in 0..band_count {
-            let freq = band_center_frequency(i, band_count);
-            let gain_db = config.band_gains_db.get(i).copied().unwrap_or(0.0);
-            if gain_db.abs() > EPSILON_GAIN_DB {
-                node =
-                    Box::new(An(Unit::<U1, U1>::new(node)) >> bell_hz(freq, 1.0, db_amp(gain_db)));
+            // EQ Bands
+            for i in 0..band_count {
+                node = Box::new(
+                    An(Unit::<U1, U1>::new(node))
+                        >> (pass() | var(&self.band_freqs[i]) | dc(1.0) | var(&self.band_gains[i]))
+                        >> bell::<f32>(),
+                );
             }
-        }
 
-        node.set_sample_rate(sample_rate as f64);
-        self.eq_unit = node;
+            node.set_sample_rate(sample_rate as f64);
+            self.eq_unit = node;
+            self.current_enabled = true;
+            self.current_band_count = band_count;
+        }
     }
 
     fn process_sample(&mut self, sample: f32) -> f32 {
