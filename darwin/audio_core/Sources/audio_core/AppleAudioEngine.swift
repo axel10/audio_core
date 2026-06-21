@@ -1637,10 +1637,10 @@ extension AppleAudioEngine: AudioPlayer.Delegate {
     }
   }
 
-  func audioPlayer(_ audioPlayer: AudioPlayer, seekCompleted decoder: PCMDecoding) {
+  func audioPlayer(_ audioPlayer: AudioPlayer, didSeek decoder: PCMDecoding, toFrame frame: AVAudioFramePosition) {
     let slotName = slot(matching: audioPlayer) === primarySlot ? "primary" : "secondary"
     let fileDesc = slot(matching: audioPlayer)?.url?.lastPathComponent ?? "nil"
-    print("[AppleAudioEngine] Delegate seekCompleted for \(slotName) slot (\(fileDesc))")
+    print("[AppleAudioEngine] Delegate didSeek to frame \(frame) for \(slotName) slot (\(fileDesc))")
     stateQueue.async { [weak self] in
       guard let self else { return }
       if let slot = self.slot(matching: audioPlayer) {
