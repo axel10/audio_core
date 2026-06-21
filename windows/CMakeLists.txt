@@ -10,6 +10,19 @@ project(${PROJECT_NAME} LANGUAGES CXX)
 
 set(FFMPEG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffmpeg")
 
+if(NOT EXISTS "${FFMPEG_DIR}/bin/avcodec-62.dll")
+  message(STATUS "Precompiled FFmpeg Windows binaries not found at ${FFMPEG_DIR}. Downloading...")
+  set(DOWNLOAD_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/../download-ffmpeg-windows.ps1")
+  get_filename_component(DOWNLOAD_SCRIPT "${DOWNLOAD_SCRIPT}" REALPATH)
+  execute_process(
+    COMMAND powershell -ExecutionPolicy Bypass -File "${DOWNLOAD_SCRIPT}"
+    RESULT_VARIABLE DOWNLOAD_RESULT
+  )
+  if(NOT DOWNLOAD_RESULT EQUAL 0)
+    message(FATAL_ERROR "Failed to download FFmpeg dependencies via download-ffmpeg-windows.ps1")
+  endif()
+endif()
+
 include("../cargokit/cmake/cargokit.cmake")
 apply_cargokit(${PROJECT_NAME} ../rust audio_core "")
 
