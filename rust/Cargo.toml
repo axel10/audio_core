@@ -28,7 +28,6 @@ ffmpeg_core = { path = "ffmpeg_core" }
 
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 rusty-chromaprint = "0.3.0"
-symphonia = { version = "0.5.5", features = ["all"] }
 rodio = { git="https://github.com/rustaudio/rodio",branch = "master", default-features = true, features = ["symphonia-all"] }
 realfft = "3.5.0"
 fundsp = "0.23.0"

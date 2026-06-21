@@ -1,13 +1,6 @@
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use rusty_chromaprint::{Configuration, FingerprintCompressor, Fingerprinter};
 use std::path::Path;
-use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
-use symphonia::core::errors::Error as SymphoniaError;
-use symphonia::core::formats::FormatOptions;
-use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
 
 pub fn get_audio_fingerprint(path: String) -> anyhow::Result<String> {
     let path = Path::new(&path);
@@ -18,82 +11,44 @@ pub fn get_audio_fingerprint(path: String) -> anyhow::Result<String> {
 }
 
 fn get_raw_audio_fingerprint(path: &Path) -> anyhow::Result<Vec<u32>> {
-    let src = std::fs::File::open(path)?;
-    let mss = MediaSourceStream::new(Box::new(src), Default::default());
+    let mut source = ffmpeg_core::AudioSource::open(path)
+        .map_err(|e| anyhow::anyhow!("failed to open audio via ffmpeg: {:?}", e))?;
 
-    let mut hint = Hint::new();
-    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-        hint.with_extension(ext);
+    let sample_rate = source.sample_rate();
+    let channels = source.channels();
+    if sample_rate == 0 || channels == 0 {
+        return Err(anyhow::anyhow!("invalid sample rate or channels"));
     }
-
-    let meta_opts: MetadataOptions = Default::default();
-    let fmt_opts: FormatOptions = Default::default();
-
-    let probed = symphonia::default::get_probe().format(&hint, mss, &fmt_opts, &meta_opts)?;
-
-    let mut format = probed.format;
-
-    let track = format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-        .ok_or_else(|| anyhow::anyhow!("no supported audio tracks"))?;
-
-    let dec_opts: DecoderOptions = Default::default();
-    let mut decoder = symphonia::default::get_codecs().make(&track.codec_params, &dec_opts)?;
-    let track_id = track.id;
 
     let mut printer = Fingerprinter::new(&Configuration::preset_test2());
-    let mut is_printer_started = false;
-    let mut sample_buf = None;
+    printer
+        .start(sample_rate, channels as u32)
+        .map_err(|e| anyhow::anyhow!("printer start error: {:?}", e))?;
 
-    let mut total_samples_processed: usize = 0;
-    let mut target_samples: usize = usize::MAX;
+    let target_samples = (sample_rate as usize) * (channels as usize) * 20;
 
-    loop {
-        let packet = match format.next_packet() {
-            Ok(packet) => packet,
-            Err(_) => break,
-        };
-
-        if packet.track_id() != track_id {
-            continue;
-        }
-
-        match decoder.decode(&packet) {
-            Ok(audio_buf) => {
-                if !is_printer_started {
-                    let spec = *audio_buf.spec();
-                    printer
-                        .start(spec.rate, spec.channels.count() as u32)
-                        .map_err(|e| anyhow::anyhow!("printer start error: {:?}", e))?;
-
-                    let duration = audio_buf.capacity() as u64;
-                    sample_buf = Some(SampleBuffer::<i16>::new(duration, spec));
-                    is_printer_started = true;
-
-                    target_samples = (spec.rate as usize) * (spec.channels.count() as usize) * 20;
-                }
-
-                if let Some(buf) = &mut sample_buf {
-                    buf.copy_interleaved_ref(audio_buf);
-                    let samples = buf.samples();
-
-                    let remaining = target_samples.saturating_sub(total_samples_processed);
-                    if samples.len() >= remaining {
-                        printer.consume(&samples[..remaining]);
-                        break;
-                    } else {
-                        printer.consume(samples);
-                        total_samples_processed += samples.len();
-                    }
-                }
-            }
-            Err(SymphoniaError::DecodeError(_)) => continue,
-            Err(err) => return Err(anyhow::anyhow!(err)),
-        }
+    let mut samples = Vec::with_capacity(target_samples);
+    for sample_f32 in (&mut source).take(target_samples) {
+        let sample_i16 = (sample_f32 * 32767.0).clamp(-32768.0, 32767.0) as i16;
+        samples.push(sample_i16);
     }
 
+    printer.consume(&samples);
     printer.finish();
     Ok(printer.fingerprint().to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_audio_fingerprint() {
+        let path = "rodio/assets/music.mp3";
+        let fp = get_audio_fingerprint(path.to_string());
+        assert!(fp.is_ok(), "Failed to get audio fingerprint: {:?}", fp.err());
+        let fp_str = fp.unwrap();
+        println!("Fingerprint: {}", fp_str);
+        assert!(!fp_str.is_empty());
+    }
 }

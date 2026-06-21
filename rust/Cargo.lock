@@ -143,7 +143,6 @@ dependencies = [
  "rusty-chromaprint",
  "serde",
  "serde_json",
- "symphonia",
  "windows 0.52.0",
  "zune-core",
  "zune-image",
