@@ -65,15 +65,6 @@
       }
     },
     {
-      "identity" : "cxxtaglib",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/sbooth/CXXTagLib",
-      "state" : {
-        "revision" : "b570acead5e27006cb41ab5ff7443c8797b3b8e5",
-        "version" : "2.3.0"
-      }
-    },
-    {
       "identity" : "cxxunfairlock",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/sbooth/CXXUnfairLock",
@@ -107,15 +98,6 @@
       "state" : {
         "revision" : "de4b45fa64ed88467806c50217e9da7032a99d80",
         "version" : "0.1.2"
-      }
-    },
-    {
-      "identity" : "mpg123-binary-xcframework",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/sbooth/mpg123-binary-xcframework",
-      "state" : {
-        "revision" : "acc2c651cbd8fff8bc8cdeb4faf14b35ba81adee",
-        "version" : "0.3.1"
       }
     },
     {
