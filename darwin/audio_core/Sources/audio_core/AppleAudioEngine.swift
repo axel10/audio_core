@@ -33,10 +33,12 @@ final class AppleAudioEngine: NSObject {
     var storedPositionMs: Int = 0
     var isSeekPendingOnLoad = false
     var decodingStarted = false
+    private var cachedSampleRate: Double = 44_100
+    private var cachedFrameLength: AVAudioFramePosition = 0
+    private var cachedDuration: Double = 0.0
 
 #if canImport(SFBAudioEngine)
     let player = AudioPlayer()
-    var file: AudioFile?
 #else
     var player: AVAudioPlayer?
     var durationOverrideMs: Int = 0
@@ -64,7 +66,7 @@ final class AppleAudioEngine: NSObject {
 
     var sampleRate: Double {
 #if canImport(SFBAudioEngine)
-      file?.properties.sampleRate ?? 44_100
+      cachedSampleRate
 #else
       player?.sampleRate ?? 44_100
 #endif
@@ -72,7 +74,7 @@ final class AppleAudioEngine: NSObject {
 
     var frameLength: AVAudioFramePosition {
 #if canImport(SFBAudioEngine)
-      file?.properties.frameLength ?? 0
+      cachedFrameLength
 #else
       AVAudioFramePosition(durationMs) // Placeholder for compatibility.
 #endif
@@ -80,7 +82,7 @@ final class AppleAudioEngine: NSObject {
 
     var durationMs: Int {
 #if canImport(SFBAudioEngine)
-      let durationSeconds = file?.properties.duration ?? player.totalTime ?? 0
+      let durationSeconds = cachedDuration > 0 ? cachedDuration : (player.totalTime ?? 0)
       return max(0, Int((durationSeconds * 1000.0).rounded()))
 #else
       if durationOverrideMs > 0 {
@@ -121,12 +123,18 @@ final class AppleAudioEngine: NSObject {
       decodingStarted = false
 #if canImport(SFBAudioEngine)
       do {
-        let audioFile = try AudioFile(readingPropertiesAndMetadataFrom: url)
-        file = audioFile
-        print("[AppleAudioEngine] PlaybackSlot AudioFile read success: duration=\(audioFile.properties.duration ?? 0.0)s, sampleRate=\(audioFile.properties.sampleRate ?? 0.0)Hz, frameLength=\(audioFile.properties.frameLength ?? 0)")
+        let decoder = try AudioDecoder(url: url)
+        try decoder.open()
+        cachedSampleRate = decoder.processingFormat.sampleRate
+        cachedFrameLength = decoder.length
+        cachedDuration = Double(cachedFrameLength) / cachedSampleRate
+        try decoder.close()
+        print("[AppleAudioEngine] PlaybackSlot AudioDecoder read success: duration=\(cachedDuration)s, sampleRate=\(cachedSampleRate)Hz, frameLength=\(cachedFrameLength)")
       } catch {
-        print("[AppleAudioEngine] PlaybackSlot AudioFile read failed: \(error.localizedDescription)")
-        file = nil
+        print("[AppleAudioEngine] PlaybackSlot AudioDecoder read failed: \(error.localizedDescription)")
+        cachedSampleRate = 44_100
+        cachedFrameLength = 0
+        cachedDuration = 0.0
       }
       do {
         let enqueued = try player.enqueue(url, immediate: true)
@@ -251,7 +259,6 @@ final class AppleAudioEngine: NSObject {
       }
 #if canImport(SFBAudioEngine)
       player.reset()
-      file = nil
 #else
       player = nil
       durationOverrideMs = 0
@@ -593,28 +600,19 @@ final class AppleAudioEngine: NSObject {
   }
 
   func getTrackMetadata(path: String) -> [String: Any] {
-    let normalizedPath = normalizedFilePath(path)
-    return AppleTrackMetadataBridge.readTrackMetadata(
-      path: normalizedPath,
-      fileAccess: fileAccess
-    )
+    return [
+      "genres": [String](),
+      "pictures": [String](),
+      "metadataType": "apple-native",
+    ]
   }
 
   func updateTrackMetadata(path: String, metadata: [String: Any]) throws {
-    let normalizedPath = normalizedFilePath(path)
-    try AppleTrackMetadataBridge.updateTrackMetadata(
-      path: normalizedPath,
-      metadata: metadata,
-      fileAccess: fileAccess
-    )
+    // Stubbed since metadata operations are handled by flutter_taglib in Dart.
   }
 
   func removeAllTags(path: String) throws {
-    let normalizedPath = normalizedFilePath(path)
-    try AppleTrackMetadataBridge.removeAllTags(
-      path: normalizedPath,
-      fileAccess: fileAccess
-    )
+    // Stubbed since metadata operations are handled by flutter_taglib in Dart.
   }
 
   func deleteFromLibrary(path: String) throws {

@@ -391,91 +391,24 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       }
 
     case "getAudioDetails":
-      guard let args = call.arguments as? [String: Any],
-            let path = args["path"] as? String else {
-        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
-        return
-      }
-      metadataQueue.async {
-        if let details = AppleTrackMetadataBridge.readAudioDetails(
-          path: path,
-          fileAccess: self.fileAccess
-        ) {
-          DispatchQueue.main.async {
-            result(details)
-          }
-        } else {
-          DispatchQueue.main.async {
-            result(FlutterError(
-              code: "READ_DETAILS_FAILED",
-              message: "Failed to read audio details natively via SFBAudioEngine",
-              details: nil
-            ))
-          }
-        }
-      }
+      result(FlutterError(
+        code: "READ_DETAILS_FAILED",
+        message: "Audio details reading is now handled by flutter_taglib in Dart.",
+        details: nil
+      ))
 
     case "getTrackMetadata":
-      guard let args = call.arguments as? [String: Any],
-            let path = args["path"] as? String else {
-        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
-        return
-      }
-      metadataQueue.async {
-        let payload = self.engine.getTrackMetadata(path: path)
-        DispatchQueue.main.async {
-          result(payload)
-        }
-      }
+      result([
+        "genres": [String](),
+        "pictures": [String](),
+        "metadataType": "apple-native"
+      ])
 
     case "updateTrackMetadata":
-      guard let args = call.arguments as? [String: Any],
-            let path = args["path"] as? String else {
-        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
-        return
-      }
-      let metadata = Self.normalizeMetadataDictionary(args["metadata"]) ?? [:]
-      metadataQueue.async {
-        do {
-          try self.engine.updateTrackMetadata(path: path, metadata: metadata)
-          DispatchQueue.main.async {
-            result(true)
-          }
-        } catch {
-          self.sendPlayerState(error: error.localizedDescription)
-          DispatchQueue.main.async {
-            result(FlutterError(
-              code: "UPDATE_METADATA_FAILED",
-              message: error.localizedDescription,
-              details: nil
-            ))
-          }
-        }
-      }
+      result(true)
 
     case "removeAllTags":
-      guard let args = call.arguments as? [String: Any],
-            let path = args["path"] as? String else {
-        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
-        return
-      }
-      metadataQueue.async {
-        do {
-          try self.engine.removeAllTags(path: path)
-          DispatchQueue.main.async {
-            result(true)
-          }
-        } catch {
-          self.sendPlayerState(error: error.localizedDescription)
-          DispatchQueue.main.async {
-            result(FlutterError(
-              code: "REMOVE_METADATA_FAILED",
-              message: error.localizedDescription,
-              details: nil
-            ))
-          }
-        }
-      }
+      result(true)
 
     case "getCapabilities":
       result(AppleAudioTranscoder.capabilities())

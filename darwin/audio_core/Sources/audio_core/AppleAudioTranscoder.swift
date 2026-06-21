@@ -100,7 +100,7 @@ enum AppleAudioTranscoder {
     } else if let nsError = error as NSError?,
               nsError.domain == AudioConverter.ErrorDomain ||
                 nsError.domain == AudioEncoder.ErrorDomain ||
-                nsError.domain == AudioFile.ErrorDomain ||
+                nsError.domain == "org.sbooth.AudioEngine.AudioFile" ||
                 nsError.domain == OutputTarget.ErrorDomain {
       errorCode = "conversion_failed"
       errorMessage = nsError.localizedDescription

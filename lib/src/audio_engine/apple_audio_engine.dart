@@ -14,6 +14,7 @@ import '../track_metadata_update.dart';
 import '../audio_details.dart';
 import 'audio_engine_interface.dart';
 import 'track_artwork_support.dart';
+import 'flutter_taglib_metadata_bridge.dart';
 
 class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   static const MethodChannel _channel = MethodChannel('audio_core.player');
@@ -448,14 +449,10 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   }) async {
     final targetPath = _normalizePath(path);
     return _withAppleFileWriteAccess(targetPath, () async {
-      final result = await _channel.invokeMethod<bool>(
-        'updateTrackMetadata',
-        <String, Object?>{
-          'path': targetPath,
-          'metadata': metadata,
-        },
+      return await updateTrackMetadataWithFlutterTaglib(
+        path: targetPath,
+        metadata: metadata,
       );
-      return result ?? true;
     });
   }
 
@@ -478,21 +475,9 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     final paths = normalizedRequests.map((request) => request.path).toSet();
 
     return _withAppleBatchFileWriteAccess(paths, () async {
-      final results = <bool>[];
-      for (final request in normalizedRequests) {
-        try {
-          final success = await updateTrackMetadata(
-            path: request.path,
-            metadata: request.metadata.toMap(
-              includeEmptyCollections: request.clearBeforeWrite,
-            ),
-          );
-          results.add(success);
-        } catch (_) {
-          results.add(false);
-        }
-      }
-      return results;
+      return await updateTrackMetadataBatchWithFlutterTaglib(
+        requests: normalizedRequests,
+      );
     });
   }
 
@@ -503,33 +488,20 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   Future<List<bool>> copyTrackMetadataBatch({
     required List<TrackMetadataCopyRequest> requests,
   }) async {
-    final results = <bool>[];
-    for (final request in requests) {
-      final sourcePath = _normalizePath(request.sourcePath);
-      final targetPath = _normalizePath(request.targetPath);
-      results.add(
-        await _withAppleFileWriteAccess(targetPath, () async {
-          final metadata = await _withAppleFileReadAccess(sourcePath, () async {
-            final result = await _channel.invokeMethod<Map<Object?, Object?>>(
-              'getTrackMetadata',
-              <String, Object?>{'path': sourcePath},
-            );
-            return TrackMetadata.fromMap(
-              Map<String, Object?>.from(result ?? const <Object?, Object?>{}),
-            );
-          });
-          await removeAllTags(path: targetPath);
-          await updateTrackMetadata(
-            path: targetPath,
-            metadata: TrackMetadataUpdate.fromTrackMetadata(metadata).toMap(
-              includeEmptyCollections: true,
-            ),
-          );
-          return true;
-        }).catchError((_) => false),
+    final normalizedRequests = requests
+        .map(
+          (request) => TrackMetadataCopyRequest(
+            sourcePath: _normalizePath(request.sourcePath),
+            targetPath: _normalizePath(request.targetPath),
+          ),
+        )
+        .toList(growable: false);
+    final targetPaths = normalizedRequests.map((r) => r.targetPath).toSet();
+    return _withAppleBatchFileWriteAccess(targetPaths, () async {
+      return await copyTrackMetadataBatchWithFlutterTaglib(
+        requests: normalizedRequests,
       );
-    }
-    return results;
+    });
   }
 
   @override
@@ -538,16 +510,17 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     String? fallbackMediaUri,
   }) async {
     final targetPath = _normalizePath(path);
-    final metadata = await _withAppleFileReadAccess(targetPath, () async {
-      final result = await _channel.invokeMethod<Map<Object?, Object?>>(
-        'getTrackMetadata',
-        <String, Object?>{'path': targetPath},
+    final fallback = _normalizeNullablePath(fallbackMediaUri);
+    return _withAppleFileReadAccess(targetPath, () async {
+      final metadata = await readTrackMetadataWithFlutterTaglib(
+        targetPath,
+        fallbackMediaUri: fallback,
       );
-      return TrackMetadata.fromMap(
-        Map<String, Object?>.from(result ?? const <Object?, Object?>{}),
-      );
+      if (metadata == null) {
+        throw Exception('Failed to read track metadata with flutter_taglib');
+      }
+      return metadata;
     });
-    return metadata;
   }
 
   @override
@@ -556,22 +529,8 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   }) async {
     final targetPath = _normalizePath(path);
     return _withAppleFileReadAccess(targetPath, () async {
-      final Map<Object?, Object?>? result = await _channel.invokeMethod<Map<Object?, Object?>>(
-        'getAudioDetails',
-        <String, Object?>{'path': targetPath},
-      );
-      if (result == null) {
-        throw Exception('Failed to get audio details natively');
-      }
-      return AudioDetails(
-        formatName: result['formatName'] as String? ?? 'unknown',
-        codecName: result['codecName'] as String? ?? 'unknown',
-        duration: Duration(milliseconds: result['durationMs'] as int? ?? 0),
-        bitrate: result['bitrate'] as int? ?? 0,
-        sampleRate: result['sampleRate'] as int? ?? 0,
-        channels: result['channels'] as int? ?? 0,
-        bitrateMode: result['bitrateMode'] as String? ?? 'unknown',
-        fileSize: result['fileSize'] as int? ?? 0,
+      return await getAudioDetailsWithFlutterTaglib(
+        path: targetPath,
       );
     });
   }
@@ -614,10 +573,10 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     }
     final normalizedPath = _normalizePath(targetPath);
     await _withAppleFileWriteAccess(normalizedPath, () async {
-      await _channel.invokeMethod<bool>(
-        'removeAllTags',
-        <String, Object?>{'path': normalizedPath},
-      );
+      final success = await removeAllTagsWithFlutterTaglib(normalizedPath);
+      if (!success) {
+        throw Exception('Failed to remove all tags with flutter_taglib');
+      }
     });
   }
 
