@@ -282,8 +282,9 @@ final class AppleAudioEngine: NSObject {
   private var latestEqualizerConfig = AppleEqualizerCodec.defaultConfig()
   private var fadeTimer: DispatchSourceTimer?
   private var fadeGeneration: UInt64 = 0
-  private var seekDebounceTimer: DispatchSourceTimer?
-  private var pendingSeekPositionMs: Int?
+  private var isSeeking = false
+  private var pendingSeekCompletion: (() -> Void)?
+  private var nextPendingSeek: (positionMs: Int, completion: () -> Void)?
   private let fftSize = 1024
   private let fftBinCount = 512
   private let fftLog2Size: vDSP_Length = 10
@@ -366,7 +367,7 @@ final class AppleAudioEngine: NSObject {
         print("[AppleAudioEngine] crossfade: fallback to load and play because publicSlot isLoaded=\(publicSlot()?.isLoaded ?? false), isPlaying=\(publicSlot()?.isPlaying ?? false)")
         try load(path: path)
         if let positionMs, positionMs > 0 {
-          try seek(positionMs: positionMs)
+          try seek(positionMs: positionMs) {}
         }
         try play(fadeDurationMs: fadeDurationMs, targetVolume: latestVolume)
         return
@@ -466,19 +467,32 @@ final class AppleAudioEngine: NSObject {
     }
   }
 
-  func seek(positionMs: Int) throws {
+  func seek(positionMs: Int, completion: @escaping () -> Void) throws {
     try syncOnStateQueue {
-      guard publicSlot()?.isLoaded == true else {
+      guard let slot = publicSlot(), slot.isLoaded else {
         throw engineError("audio is not loaded")
       }
 
-      if seekDebounceTimer != nil {
-        pendingSeekPositionMs = positionMs
+      let clampedPositionMs = max(0, positionMs)
+
+      if isSeeking {
+        if let next = nextPendingSeek {
+          next.completion()
+        }
+        nextPendingSeek = (positionMs: clampedPositionMs, completion: completion)
         return
       }
 
-      try executeSeek(positionMs: positionMs)
-      startSeekDebounceTimer()
+      isSeeking = true
+      pendingSeekCompletion = completion
+
+      let seekPerformed = try executeSeek(positionMs: clampedPositionMs)
+      if !seekPerformed {
+        isSeeking = false
+        pendingSeekCompletion = nil
+        completion()
+        triggerNextPendingSeekIfNeeded(slot: slot)
+      }
     }
   }
 
@@ -860,7 +874,8 @@ final class AppleAudioEngine: NSObject {
     }
   }
 
-  private func executeSeek(positionMs: Int) throws {
+  @discardableResult
+  private func executeSeek(positionMs: Int) throws -> Bool {
     guard let slot = publicSlot(), slot.isLoaded else {
       throw engineError("audio is not loaded")
     }
@@ -878,35 +893,60 @@ final class AppleAudioEngine: NSObject {
       slot.player?.currentTime = 0
 #endif
       emitPlayerState(playbackState: "ENDED")
-      return
+      return false
     }
 
     let wasPlaying = slot.isPlaying
+    var isAsyncSeek = false
+#if canImport(SFBAudioEngine)
+    if slot.player.isReady && slot.decodingStarted {
+      isAsyncSeek = true
+    }
+#endif
+
     try slot.seek(positionMs: clampedPositionMs)
     if !wasPlaying {
       slot.storedPositionMs = clampedPositionMs
     }
     emitPlayerState()
+    return isAsyncSeek
   }
 
-  private func startSeekDebounceTimer() {
-    seekDebounceTimer?.cancel()
-    let timer = DispatchSource.makeTimerSource(queue: stateQueue)
-    timer.schedule(deadline: .now() + .milliseconds(200))
-    timer.setEventHandler { [weak self] in
-      guard let self else { return }
-      self.seekDebounceTimer = nil
-      guard let pending = self.pendingSeekPositionMs else { return }
-      self.pendingSeekPositionMs = nil
+  private func handleSeekCompleted(slot: PlaybackSlot) {
+    let completion = pendingSeekCompletion
+    pendingSeekCompletion = nil
+    isSeeking = false
+
+    completion?()
+
+    triggerNextPendingSeekIfNeeded(slot: slot)
+  }
+
+  private func triggerNextPendingSeekIfNeeded(slot: PlaybackSlot) {
+    guard let currentSlot = publicSlot(), currentSlot === slot, currentSlot.isLoaded else {
+      nextPendingSeek = nil
+      return
+    }
+
+    if let next = nextPendingSeek {
+      nextPendingSeek = nil
       do {
-        try self.executeSeek(positionMs: pending)
-        self.startSeekDebounceTimer()
+        isSeeking = true
+        pendingSeekCompletion = next.completion
+        let seekPerformed = try executeSeek(positionMs: next.positionMs)
+        if !seekPerformed {
+          isSeeking = false
+          pendingSeekCompletion = nil
+          next.completion()
+          triggerNextPendingSeekIfNeeded(slot: slot)
+        }
       } catch {
-        self.emitPlayerState(error: error.localizedDescription)
+        isSeeking = false
+        pendingSeekCompletion = nil
+        next.completion()
+        emitPlayerState(error: error.localizedDescription)
       }
     }
-    seekDebounceTimer = timer
-    timer.resume()
   }
 
   private func startCrossfadeTimer(
@@ -1024,9 +1064,15 @@ final class AppleAudioEngine: NSObject {
   }
 
   private func cancelSeekTimer() {
-    seekDebounceTimer?.cancel()
-    seekDebounceTimer = nil
-    pendingSeekPositionMs = nil
+    isSeeking = false
+    if let completion = pendingSeekCompletion {
+      pendingSeekCompletion = nil
+      completion()
+    }
+    if let next = nextPendingSeek {
+      nextPendingSeek = nil
+      next.completion()
+    }
   }
 
   private func cancelFadeTimer() {
@@ -1088,7 +1134,7 @@ final class AppleAudioEngine: NSObject {
     print("[AppleAudioEngine] restorePendingEdit: loading track")
     try load(path: pendingEdit.path)
     print("[AppleAudioEngine] restorePendingEdit: load finished, seeking to \(pendingEdit.positionMs)ms")
-    try seek(positionMs: pendingEdit.positionMs)
+    try seek(positionMs: pendingEdit.positionMs) {}
     print("[AppleAudioEngine] restorePendingEdit: seek request processed, setting volume to \(pendingEdit.volume)")
     try setVolume(pendingEdit.volume)
     if pendingEdit.wasPlaying {
@@ -1588,6 +1634,18 @@ extension AppleAudioEngine: AudioPlayer.Delegate {
       matchedSlot.storedPositionMs = matchedSlot.durationMs
       audioPlayer.stop()
       self.emitPlayerState(playbackState: "ENDED")
+    }
+  }
+
+  func audioPlayer(_ audioPlayer: AudioPlayer, seekCompleted decoder: PCMDecoding) {
+    let slotName = slot(matching: audioPlayer) === primarySlot ? "primary" : "secondary"
+    let fileDesc = slot(matching: audioPlayer)?.url?.lastPathComponent ?? "nil"
+    print("[AppleAudioEngine] Delegate seekCompleted for \(slotName) slot (\(fileDesc))")
+    stateQueue.async { [weak self] in
+      guard let self else { return }
+      if let slot = self.slot(matching: audioPlayer) {
+        self.handleSeekCompleted(slot: slot)
+      }
     }
   }
 

@@ -169,8 +169,9 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       let positionMs = Self.readInt(call.arguments, key: "position") ?? 0
       debugPrint("[AudioCorePlugin] method=seek positionMs=\(positionMs)")
       do {
-        try engine.seek(positionMs: positionMs)
-        result(nil)
+        try engine.seek(positionMs: positionMs) {
+          result(nil)
+        }
       } catch {
         result(FlutterError(code: "SEEK_FAILED", message: error.localizedDescription, details: nil))
       }
