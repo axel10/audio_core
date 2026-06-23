@@ -1660,19 +1660,40 @@ class MyExoplayerPlugin :
                     return@Thread
                 }
 
-                var resolvedFileName = fileName
+                var currentDir = tree
+                val pathSegments = fileName.replace('\\', '/').split("/").filter { it.isNotEmpty() }
+                if (pathSegments.isEmpty()) {
+                    result.error("save_failed", "Invalid fileName: $fileName", null)
+                    return@Thread
+                }
+
+                for (i in 0 until pathSegments.size - 1) {
+                    val segment = pathSegments[i]
+                    var nextDir = currentDir.findFile(segment)
+                    if (nextDir == null) {
+                        nextDir = currentDir.createDirectory(segment)
+                    }
+                    if (nextDir == null || !nextDir.isDirectory) {
+                        result.error("save_failed", "Failed to resolve or create directory segment: $segment", null)
+                        return@Thread
+                    }
+                    currentDir = nextDir
+                }
+
+                val actualFileName = pathSegments.last()
+                var resolvedFileName = actualFileName
                 if (overwrite) {
-                    val existing = tree.findFile(fileName)
+                    val existing = currentDir.findFile(actualFileName)
                     existing?.delete()
                 } else {
-                    val existing = tree.findFile(fileName)
+                    val existing = currentDir.findFile(actualFileName)
                     if (existing != null) {
-                        val dotIndex = fileName.lastIndexOf('.')
-                        val baseName = if (dotIndex >= 0) fileName.substring(0, dotIndex) else fileName
-                        val ext = if (dotIndex >= 0) fileName.substring(dotIndex) else ""
+                        val dotIndex = actualFileName.lastIndexOf('.')
+                        val baseName = if (dotIndex >= 0) actualFileName.substring(0, dotIndex) else actualFileName
+                        val ext = if (dotIndex >= 0) actualFileName.substring(dotIndex) else ""
                         var index = 1
                         var candidate = "$baseName ($index)$ext"
-                        while (tree.findFile(candidate) != null && index < 1000) {
+                        while (currentDir.findFile(candidate) != null && index < 1000) {
                             index++
                             candidate = "$baseName ($index)$ext"
                         }
@@ -1680,7 +1701,7 @@ class MyExoplayerPlugin :
                     }
                 }
 
-                val created = tree.createFile(mimeTypeForFileName(resolvedFileName), resolvedFileName)
+                val created = currentDir.createFile(mimeTypeForFileName(resolvedFileName), resolvedFileName)
                 if (created == null) {
                     result.error("save_failed", "Failed to create the output file.", null)
                     return@Thread
@@ -1704,7 +1725,7 @@ class MyExoplayerPlugin :
 
                 val response = mapOf(
                     "savedUri" to created.uri.toString(),
-                    "displayPath" to resolveDisplayPath(treeUri) + "/" + resolvedFileName
+                    "displayPath" to resolveDisplayPath(treeUri) + "/" + pathSegments.dropLast(1).joinToString("/") + (if (pathSegments.size > 1) "/" else "") + resolvedFileName
                 )
                 result.success(response)
             } catch (error: java.io.IOException) {
