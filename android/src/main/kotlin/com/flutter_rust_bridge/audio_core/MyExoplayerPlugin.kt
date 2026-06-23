@@ -1660,7 +1660,7 @@ class MyExoplayerPlugin :
                     return@Thread
                 }
 
-                var currentDir = tree
+                var currentDir: DocumentFile = tree
                 val pathSegments = fileName.replace('\\', '/').split("/").filter { it.isNotEmpty() }
                 if (pathSegments.isEmpty()) {
                     result.error("save_failed", "Invalid fileName: $fileName", null)
