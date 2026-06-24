@@ -1584,6 +1584,9 @@ class MyExoplayerPlugin :
             "saveFileToDirectory" -> {
                 saveFileToDirectory(call.arguments, result)
             }
+            "fileExistsInDirectory" -> {
+                fileExistsInDirectory(call.arguments, result)
+            }
             else -> {
                 result.notImplemented()
             }
@@ -1734,6 +1737,63 @@ class MyExoplayerPlugin :
             } catch (error: Exception) {
                 NativeLog.e("AudioCore", "Unexpected error copying output file into SAF directory", error)
                 result.error("save_failed", error.message, null)
+            }
+        }.start()
+    }
+
+    private fun fileExistsInDirectory(arguments: Any?, result: Result) {
+        val safeActivity = activity ?: run {
+            result.error("no_activity", "Android activity is not available.", null)
+            return
+        }
+        if (arguments !is Map<*, *>) {
+            result.error("invalid_arguments", "Expected a map of arguments.", null)
+            return
+        }
+
+        val treeUriString = arguments["treeUri"]?.toString()
+        val fileName = arguments["fileName"]?.toString()
+
+        if (treeUriString.isNullOrEmpty()) {
+            result.error("invalid_arguments", "Missing treeUri.", null)
+            return
+        }
+        if (fileName.isNullOrEmpty()) {
+            result.error("invalid_arguments", "Missing fileName.", null)
+            return
+        }
+
+        val treeUri = Uri.parse(treeUriString)
+        Thread {
+            try {
+                val tree = DocumentFile.fromTreeUri(safeActivity, treeUri)
+                if (tree == null) {
+                    result.success(false)
+                    return@Thread
+                }
+
+                var currentDir: DocumentFile = tree
+                val pathSegments = fileName.replace('\\', '/').split("/").filter { it.isNotEmpty() }
+                if (pathSegments.isEmpty()) {
+                    result.success(false)
+                    return@Thread
+                }
+
+                for (i in 0 until pathSegments.size - 1) {
+                    val segment = pathSegments[i]
+                    val nextDir = currentDir.findFile(segment)
+                    if (nextDir == null || !nextDir.isDirectory) {
+                        result.success(false)
+                        return@Thread
+                    }
+                    currentDir = nextDir
+                }
+
+                val actualFileName = pathSegments.last()
+                val existing = currentDir.findFile(actualFileName)
+                result.success(existing != null && existing.isFile)
+            } catch (e: Exception) {
+                result.success(false)
             }
         }.start()
     }
