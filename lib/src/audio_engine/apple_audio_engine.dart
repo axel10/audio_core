@@ -3,7 +3,6 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:dart_chromaprint/dart_chromaprint.dart';
 
 import '../fft_processor.dart';
 import '../rust/api/simple/equalizer.dart';
@@ -279,14 +278,12 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
       '[AppleAudioEngine] getWaveform path=$targetPath expectedChunks=$expectedChunks',
     );
     try {
-      final List<dynamic>? result = await _channel.invokeMethod(
-        'getWaveform',
-        <String, Object?>{
-          'path': targetPath,
-          'expectedChunks': expectedChunks,
-          'sampleStride': sampleStride,
-        },
-      );
+      final List<dynamic>? result = await _channel
+          .invokeMethod('getWaveform', <String, Object?>{
+            'path': targetPath,
+            'expectedChunks': expectedChunks,
+            'sampleStride': sampleStride,
+          });
       if (result == null) {
         return const <double>[];
       }
@@ -331,24 +328,7 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   @override
   Future<String?> extractFingerprint(String path) async {
     try {
-      final result = await _channel.invokeMethod<Map<Object?, Object?>>(
-        'getFingerprintPcm',
-        <String, Object?>{'path': path, 'maxDurationMs': 20_000},
-      );
-      if (result == null) return null;
-
-      final samples = _int16SamplesFromFingerprintResult(result);
-      final sampleRate = (result['sampleRate'] as num?)?.toInt() ?? 0;
-      final channels = (result['channels'] as num?)?.toInt() ?? 0;
-      if (samples.isEmpty || sampleRate <= 0 || channels <= 0) {
-        return null;
-      }
-
-      return fingerprintFromPcm(
-        pcm: samples,
-        sampleRate: sampleRate,
-        channels: channels,
-      );
+      return await rust.getAudioFingerprint(path: path);
     } catch (e) {
       debugPrint('[AppleAudioEngine] Fingerprint extraction failed: $e');
       return null;
@@ -524,14 +504,10 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
-  Future<AudioDetails> getAudioDetails({
-    required String path,
-  }) async {
+  Future<AudioDetails> getAudioDetails({required String path}) async {
     final targetPath = _normalizePath(path);
     return _withAppleFileReadAccess(targetPath, () async {
-      return await getAudioDetailsWithFlutterTaglib(
-        path: targetPath,
-      );
+      return await getAudioDetailsWithFlutterTaglib(path: targetPath);
     });
   }
 
@@ -815,19 +791,5 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
       bassBoostQ: (map['bassBoostQ'] as num?)?.toDouble() ?? 0.75,
       bandGainsDb: gains,
     );
-  }
-
-  Int16List _int16SamplesFromFingerprintResult(Map<Object?, Object?> result) {
-    final rawSamples = result['samples'];
-    if (rawSamples is! List) {
-      return Int16List(0);
-    }
-
-    final samples = Int16List(rawSamples.length);
-    for (var i = 0; i < rawSamples.length; i++) {
-      final value = (rawSamples[i] as num?)?.toDouble() ?? 0.0;
-      samples[i] = (value * 32767.0).round().clamp(-32768, 32767);
-    }
-    return samples;
   }
 }

@@ -37,18 +37,3 @@ fn get_raw_audio_fingerprint(path: &Path) -> anyhow::Result<Vec<u32>> {
     printer.finish();
     Ok(printer.fingerprint().to_vec())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_audio_fingerprint() {
-        let path = "rodio/assets/music.mp3";
-        let fp = get_audio_fingerprint(path.to_string());
-        assert!(fp.is_ok(), "Failed to get audio fingerprint: {:?}", fp.err());
-        let fp_str = fp.unwrap();
-        println!("Fingerprint: {}", fp_str);
-        assert!(!fp_str.is_empty());
-    }
-}

@@ -1,4 +1,3 @@
-#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub mod audio_fingerprint;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 pub mod controller;
@@ -11,15 +10,6 @@ pub mod metadata;
 pub mod palette;
 
 use super::audio_converter;
-
-#[cfg(any(target_os = "ios", target_os = "macos", target_os = "android"))]
-pub mod audio_fingerprint {
-    pub fn get_audio_fingerprint(_path: String) -> anyhow::Result<String> {
-        Err(anyhow::anyhow!(
-            "Audio fingerprinting is not supported on this platform"
-        ))
-    }
-}
 
 #[cfg(any(target_os = "ios", target_os = "macos", target_os = "android"))]
 pub mod equalizer {

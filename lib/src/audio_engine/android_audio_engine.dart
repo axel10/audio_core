@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import '../fft_processor.dart';
 import '../rust/api/simple/equalizer.dart';
+import '../rust/api/simple_api.dart' as rust;
 import '../track_metadata.dart';
 import '../track_metadata_update.dart';
 import '../audio_details.dart';
@@ -351,11 +352,7 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   @override
   Future<String?> extractFingerprint(String path) async {
     try {
-      final String? fingerprint = await _channel.invokeMethod(
-        'extractFingerprint',
-        {'path': path},
-      );
-      return fingerprint;
+      return await rust.getAudioFingerprint(path: path);
     } catch (e) {
       debugPrint('[AndroidAudioEngine] Fingerprint extraction failed: $e');
       return null;

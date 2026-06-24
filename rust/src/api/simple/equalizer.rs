@@ -241,7 +241,8 @@ impl EqualizerChain {
 
         // Update the shared values first
         self.preamp_gain.set_value(preamp_gain);
-        self.bass_boost_freq.set_value(config.bass_boost_frequency_hz);
+        self.bass_boost_freq
+            .set_value(config.bass_boost_frequency_hz);
         self.bass_boost_q.set_value(config.bass_boost_q);
         self.bass_boost_gain.set_value(db_amp(config.bass_boost_db));
         for i in 0..band_count {
@@ -267,9 +268,8 @@ impl EqualizerChain {
             self.sample_rate = sample_rate;
         }
 
-        let structure_changed = !self.current_enabled
-            || self.current_band_count != band_count
-            || !config.enabled;
+        let structure_changed =
+            !self.current_enabled || self.current_band_count != band_count || !config.enabled;
 
         if structure_changed {
             if !config.enabled {
@@ -286,7 +286,10 @@ impl EqualizerChain {
             // Bass Boost (lowshelf)
             node = Box::new(
                 An(Unit::<U1, U1>::new(node))
-                    >> (pass() | var(&self.bass_boost_freq) | var(&self.bass_boost_q) | var(&self.bass_boost_gain))
+                    >> (pass()
+                        | var(&self.bass_boost_freq)
+                        | var(&self.bass_boost_q)
+                        | var(&self.bass_boost_gain))
                     >> lowshelf::<f32>(),
             );
 

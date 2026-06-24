@@ -37,8 +37,9 @@ export CARGOKIT_TOOL_TEMP_DIR=$TARGET_TEMP_DIR/build_tool
 # Directory inside root project. Not necessarily the top level directory of root project.
 export CARGOKIT_ROOT_PROJECT_DIR=$SRCROOT
 
-# Give ffmpeg-sys-next a concrete prebuilt FFmpeg root so it does not fall back
-# to pkg-config during iOS cross-compilation.
+# Give ffmpeg-sys-next a concrete prebuilt FFmpeg root for iOS cross-compilation.
+# macOS builds should fall back to the system/pkg-config path instead of using a
+# nonexistent repo-local FFmpeg bundle.
 case "$PLATFORM_NAME" in
   iphoneos)
     export FFMPEG_DIR="$BASEDIR/../ios/ffmpeg_lib/arm64"

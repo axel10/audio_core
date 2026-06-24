@@ -68,7 +68,9 @@ pub struct AudioDetails {
 }
 
 pub fn update_track_metadata(_path: String, _metadata: TrackMetadataUpdate) -> anyhow::Result<()> {
-    Err(anyhow::anyhow!("update_track_metadata is deprecated in Rust; use TagLib in Dart instead"))
+    Err(anyhow::anyhow!(
+        "update_track_metadata is deprecated in Rust; use TagLib in Dart instead"
+    ))
 }
 
 pub fn get_track_metadata(_path: String) -> TrackMetadataUpdate {
@@ -76,11 +78,15 @@ pub fn get_track_metadata(_path: String) -> TrackMetadataUpdate {
 }
 
 pub fn get_audio_details(_path: String) -> anyhow::Result<AudioDetails> {
-    Err(anyhow::anyhow!("get_audio_details is deprecated in Rust; use TagLib in Dart instead"))
+    Err(anyhow::anyhow!(
+        "get_audio_details is deprecated in Rust; use TagLib in Dart instead"
+    ))
 }
 
 pub fn remove_all_tags(_path: String) -> anyhow::Result<()> {
-    Err(anyhow::anyhow!("remove_all_tags is deprecated in Rust; use TagLib in Dart instead"))
+    Err(anyhow::anyhow!(
+        "remove_all_tags is deprecated in Rust; use TagLib in Dart instead"
+    ))
 }
 
 pub fn generate_track_artwork(
