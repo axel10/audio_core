@@ -37,21 +37,55 @@ export CARGOKIT_TOOL_TEMP_DIR=$TARGET_TEMP_DIR/build_tool
 # Directory inside root project. Not necessarily the top level directory of root project.
 export CARGOKIT_ROOT_PROJECT_DIR=$SRCROOT
 
+# Locate SFBAudioEngine directory robustly (supports local checkouts, SPM in DerivedData, and SPM global cache)
+SFBAUDIOENGINE_DIR=""
+if [ -d "$BASEDIR/../SFBAudioEngine" ]; then
+  SFBAUDIOENGINE_DIR="$BASEDIR/../SFBAudioEngine"
+fi
+
+if [ -z "$SFBAUDIOENGINE_DIR" ] && [ -n "$OBJROOT" ]; then
+  CURRENT_DIR="$OBJROOT"
+  while [ "$CURRENT_DIR" != "/" ] && [ "$CURRENT_DIR" != "." ]; do
+    if [ -d "$CURRENT_DIR/SourcePackages/checkouts/SFBAudioEngine" ]; then
+      SFBAUDIOENGINE_DIR="$CURRENT_DIR/SourcePackages/checkouts/SFBAudioEngine"
+      break
+    elif [ -d "$CURRENT_DIR/SourcePackages/checkouts/sfbaudioengine" ]; then
+      SFBAUDIOENGINE_DIR="$CURRENT_DIR/SourcePackages/checkouts/sfbaudioengine"
+      break
+    fi
+    CURRENT_DIR=$(dirname "$CURRENT_DIR")
+  done
+fi
+
+if [ -z "$SFBAUDIOENGINE_DIR" ]; then
+  GLOBAL_SPM_DIR="$HOME/Library/Caches/org.swift.swiftpm/checkouts"
+  if [ -d "$GLOBAL_SPM_DIR/SFBAudioEngine" ]; then
+    SFBAUDIOENGINE_DIR="$GLOBAL_SPM_DIR/SFBAudioEngine"
+  elif [ -d "$GLOBAL_SPM_DIR/sfbaudioengine" ]; then
+    SFBAUDIOENGINE_DIR="$GLOBAL_SPM_DIR/sfbaudioengine"
+  fi
+fi
+
+if [ -z "$SFBAUDIOENGINE_DIR" ] || [ ! -d "$SFBAUDIOENGINE_DIR" ]; then
+  echo "Error: SFBAudioEngine dependency directory not found!" >&2
+  exit 1
+fi
+
 # Give ffmpeg-sys-next a concrete prebuilt FFmpeg root for cross-compilation or local builds.
 SRC_DIR=""
 LINK_NAME=""
 
 case "$PLATFORM_NAME" in
   iphoneos)
-    SRC_DIR="$BASEDIR/../SFBAudioEngine/macos/Frameworks/FFmpeg.xcframework/ios-arm64"
+    SRC_DIR="$SFBAUDIOENGINE_DIR/macos/Frameworks/FFmpeg.xcframework/ios-arm64"
     LINK_NAME="ios-arm64"
     ;;
   iphonesimulator)
-    SRC_DIR="$BASEDIR/../SFBAudioEngine/macos/Frameworks/FFmpeg.xcframework/ios-arm64-simulator"
+    SRC_DIR="$SFBAUDIOENGINE_DIR/macos/Frameworks/FFmpeg.xcframework/ios-arm64-simulator"
     LINK_NAME="ios-sim-arm64"
     ;;
   macosx)
-    SRC_DIR="$BASEDIR/../SFBAudioEngine/macos/Frameworks/FFmpeg.xcframework/macos-arm64_x86_64"
+    SRC_DIR="$SFBAUDIOENGINE_DIR/macos/Frameworks/FFmpeg.xcframework/macos-arm64_x86_64"
     LINK_NAME="macos-universal"
     ;;
 esac
