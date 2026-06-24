@@ -349,6 +349,7 @@ configure_args=(
   --disable-avdevice
   --disable-network
   --disable-filters
+  --enable-avfilter
   --enable-filter=aformat
   --enable-filter=anull
   --enable-filter=aresample
