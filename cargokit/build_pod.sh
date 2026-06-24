@@ -39,17 +39,17 @@ export CARGOKIT_ROOT_PROJECT_DIR=$SRCROOT
 
 # Locate SFBAudioEngine directory robustly (supports local checkouts, SPM in DerivedData, and SPM global cache)
 SFBAUDIOENGINE_DIR=""
-if [ -d "$BASEDIR/../SFBAudioEngine" ]; then
+if [ -d "$BASEDIR/../SFBAudioEngine" ] && [ -f "$BASEDIR/../SFBAudioEngine/Package.swift" ]; then
   SFBAUDIOENGINE_DIR="$BASEDIR/../SFBAudioEngine"
 fi
 
 if [ -z "$SFBAUDIOENGINE_DIR" ] && [ -n "$OBJROOT" ]; then
   CURRENT_DIR="$OBJROOT"
   while [ "$CURRENT_DIR" != "/" ] && [ "$CURRENT_DIR" != "." ]; do
-    if [ -d "$CURRENT_DIR/SourcePackages/checkouts/SFBAudioEngine" ]; then
+    if [ -d "$CURRENT_DIR/SourcePackages/checkouts/SFBAudioEngine" ] && [ -f "$CURRENT_DIR/SourcePackages/checkouts/SFBAudioEngine/Package.swift" ]; then
       SFBAUDIOENGINE_DIR="$CURRENT_DIR/SourcePackages/checkouts/SFBAudioEngine"
       break
-    elif [ -d "$CURRENT_DIR/SourcePackages/checkouts/sfbaudioengine" ]; then
+    elif [ -d "$CURRENT_DIR/SourcePackages/checkouts/sfbaudioengine" ] && [ -f "$CURRENT_DIR/SourcePackages/checkouts/sfbaudioengine/Package.swift" ]; then
       SFBAUDIOENGINE_DIR="$CURRENT_DIR/SourcePackages/checkouts/sfbaudioengine"
       break
     fi
@@ -59,9 +59,9 @@ fi
 
 if [ -z "$SFBAUDIOENGINE_DIR" ]; then
   GLOBAL_SPM_DIR="$HOME/Library/Caches/org.swift.swiftpm/checkouts"
-  if [ -d "$GLOBAL_SPM_DIR/SFBAudioEngine" ]; then
+  if [ -d "$GLOBAL_SPM_DIR/SFBAudioEngine" ] && [ -f "$GLOBAL_SPM_DIR/SFBAudioEngine/Package.swift" ]; then
     SFBAUDIOENGINE_DIR="$GLOBAL_SPM_DIR/SFBAudioEngine"
-  elif [ -d "$GLOBAL_SPM_DIR/sfbaudioengine" ]; then
+  elif [ -d "$GLOBAL_SPM_DIR/sfbaudioengine" ] && [ -f "$GLOBAL_SPM_DIR/sfbaudioengine/Package.swift" ]; then
     SFBAUDIOENGINE_DIR="$GLOBAL_SPM_DIR/sfbaudioengine"
   fi
 fi
