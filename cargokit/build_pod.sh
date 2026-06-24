@@ -37,21 +37,41 @@ export CARGOKIT_TOOL_TEMP_DIR=$TARGET_TEMP_DIR/build_tool
 # Directory inside root project. Not necessarily the top level directory of root project.
 export CARGOKIT_ROOT_PROJECT_DIR=$SRCROOT
 
-# Give ffmpeg-sys-next a concrete prebuilt FFmpeg root for iOS cross-compilation.
-# macOS builds should fall back to the system/pkg-config path instead of using a
-# nonexistent repo-local FFmpeg bundle.
+# Give ffmpeg-sys-next a concrete prebuilt FFmpeg root for cross-compilation or local builds.
+SRC_DIR=""
+LINK_NAME=""
+
 case "$PLATFORM_NAME" in
   iphoneos)
-    export FFMPEG_DIR="$BASEDIR/../ios/ffmpeg_lib/arm64"
+    SRC_DIR="$BASEDIR/../SFBAudioEngine/macos/Frameworks/FFmpeg.xcframework/ios-arm64"
+    LINK_NAME="ios-arm64"
     ;;
   iphonesimulator)
-    if echo "${ARCHS:-}" | grep -qw x86_64; then
-      export FFMPEG_DIR="$BASEDIR/../ios/ffmpeg_lib/x86_64"
-    else
-      export FFMPEG_DIR="$BASEDIR/../ios/ffmpeg_lib/arm64-sim"
-    fi
+    SRC_DIR="$BASEDIR/../SFBAudioEngine/macos/Frameworks/FFmpeg.xcframework/ios-arm64-simulator"
+    LINK_NAME="ios-sim-arm64"
+    ;;
+  macosx)
+    SRC_DIR="$BASEDIR/../SFBAudioEngine/macos/Frameworks/FFmpeg.xcframework/macos-arm64_x86_64"
+    LINK_NAME="macos-universal"
     ;;
 esac
+
+if [ -n "$SRC_DIR" ] && [ -d "$SRC_DIR" ]; then
+  TARGET_LINK_DIR="$BASEDIR/../build/ffmpeg-link-sdk/$LINK_NAME"
+  mkdir -p "$TARGET_LINK_DIR/lib"
+  
+  # Symlink include directory to Headers
+  ln -sfn "$SRC_DIR/Headers" "$TARGET_LINK_DIR/include"
+  
+  # Symlink libffmpeg.a as individual static libraries to satisfy ffmpeg-sys-next
+  ln -sf "$SRC_DIR/libffmpeg.a" "$TARGET_LINK_DIR/lib/libavcodec.a"
+  ln -sf "$SRC_DIR/libffmpeg.a" "$TARGET_LINK_DIR/lib/libavformat.a"
+  ln -sf "$SRC_DIR/libffmpeg.a" "$TARGET_LINK_DIR/lib/libavutil.a"
+  ln -sf "$SRC_DIR/libffmpeg.a" "$TARGET_LINK_DIR/lib/libswresample.a"
+  ln -sf "$SRC_DIR/libffmpeg.a" "$TARGET_LINK_DIR/lib/libswscale.a"
+  
+  export FFMPEG_DIR="$TARGET_LINK_DIR"
+fi
 
 FLUTTER_EXPORT_BUILD_ENVIRONMENT=(
   "$PODS_ROOT/../Flutter/ephemeral/flutter_export_environment.sh" # macOS
