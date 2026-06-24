@@ -43,6 +43,31 @@ if [ -d "$BASEDIR/../SFBAudioEngine" ] && [ -f "$BASEDIR/../SFBAudioEngine/Packa
   SFBAUDIOENGINE_DIR="$BASEDIR/../SFBAudioEngine"
 fi
 
+if [ -z "$SFBAUDIOENGINE_DIR" ]; then
+  # Try to locate the Flutter project root (which contains the build/ directory)
+  PROJECT_ROOT=""
+  if [ -n "$PODS_ROOT" ]; then
+    PROJECT_ROOT=$(cd "$PODS_ROOT/../.." && pwd -P)
+  elif [ -n "$SRCROOT" ]; then
+    PROJECT_ROOT=$(cd "$SRCROOT/../.." && pwd -P)
+  fi
+
+  if [ -n "$PROJECT_ROOT" ]; then
+    # Look for checkouts directory specified via clonedSourcePackagesDirPath under build/
+    for platform in ios macos; do
+      if [ -d "$PROJECT_ROOT/build/$platform/SourcePackages/checkouts/SFBAudioEngine" ] && \
+         [ -f "$PROJECT_ROOT/build/$platform/SourcePackages/checkouts/SFBAudioEngine/Package.swift" ]; then
+        SFBAUDIOENGINE_DIR="$PROJECT_ROOT/build/$platform/SourcePackages/checkouts/SFBAudioEngine"
+        break
+      elif [ -d "$PROJECT_ROOT/build/$platform/SourcePackages/checkouts/sfbaudioengine" ] && \
+           [ -f "$PROJECT_ROOT/build/$platform/SourcePackages/checkouts/sfbaudioengine/Package.swift" ]; then
+        SFBAUDIOENGINE_DIR="$PROJECT_ROOT/build/$platform/SourcePackages/checkouts/sfbaudioengine"
+        break
+      fi
+    done
+  fi
+fi
+
 if [ -z "$SFBAUDIOENGINE_DIR" ] && [ -n "$OBJROOT" ]; then
   CURRENT_DIR="$OBJROOT"
   while [ "$CURRENT_DIR" != "/" ] && [ "$CURRENT_DIR" != "." ]; do
