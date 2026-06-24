@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -272,27 +270,12 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     required String path,
     required int expectedChunks,
     int sampleStride = 4,
-  }) async {
-    final targetPath = _resolvePath(path);
-    debugPrint(
-      '[AppleAudioEngine] getWaveform path=$targetPath expectedChunks=$expectedChunks',
-    );
-    try {
-      final List<dynamic>? result = await _channel
-          .invokeMethod('getWaveform', <String, Object?>{
-            'path': targetPath,
-            'expectedChunks': expectedChunks,
-            'sampleStride': sampleStride,
-          });
-      if (result == null) {
-        return const <double>[];
-      }
-      return result.map((e) => (e as num).toDouble()).toList(growable: false);
-    } catch (e) {
-      debugPrint('[AppleAudioEngine] getWaveform failed: $e');
-      return const <double>[];
-    }
-  }
+  }) =>
+      loadWaveformFromRust(
+        path: _resolvePath(path),
+        expectedChunks: expectedChunks,
+        sampleStride: sampleStride,
+      );
 
   @override
   Future<void> setEqualizerConfig(EqualizerConfig config) async {

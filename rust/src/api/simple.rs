@@ -10,6 +10,7 @@ pub mod metadata;
 pub mod palette;
 
 use super::audio_converter;
+use std::path::Path;
 
 #[cfg(any(target_os = "ios", target_os = "macos", target_os = "android"))]
 pub mod equalizer {
@@ -28,6 +29,12 @@ pub mod equalizer {
 #[cfg(any(target_os = "ios", target_os = "macos", target_os = "android"))]
 pub mod controller {
     use super::equalizer::EqualizerConfig;
+    use ffmpeg_core::AudioSource;
+    use std::cmp;
+    use std::path::Path;
+
+    const WAVEFORM_RMS_WINDOWS_PER_CHUNK: usize = 8;
+    const WAVEFORM_PRECISION_SCALE: f64 = 10000.0;
 
     #[derive(Debug, Clone, Copy, PartialEq)]
     pub enum FadeMode {
@@ -94,7 +101,10 @@ pub mod controller {
         0
     }
     pub fn get_audio_pcm_channel_count(_path: Option<String>) -> Result<i32, String> {
-        Ok(2)
+        let target_path = parse_target_path(_path, "path is required for channel count")?;
+        let source = AudioSource::open(Path::new(&target_path))
+            .map_err(|e| format!("open audio source failed: {e}"))?;
+        Ok(source.channels() as i32)
     }
     pub fn is_audio_playing() -> bool {
         false
@@ -108,15 +118,43 @@ pub mod controller {
     pub fn get_latest_fft() -> Vec<f32> {
         vec![]
     }
-    pub fn get_audio_pcm(_path: Option<String>, _sample_stride: usize) -> Result<Vec<f32>, String> {
-        Err("Not supported".to_string())
+    pub fn get_audio_pcm(path: Option<String>, sample_stride: usize) -> Result<Vec<f32>, String> {
+        let target_path = parse_target_path(path, "path is required for PCM extraction")?;
+        read_audio_pcm(&target_path, sample_stride)
     }
     pub fn get_audio_waveform(
-        _path: Option<String>,
-        _expected_chunks: usize,
-        _sample_stride: usize,
+        path: Option<String>,
+        expected_chunks: usize,
+        sample_stride: usize,
     ) -> Result<Vec<f64>, String> {
-        Err("Not supported".to_string())
+        if expected_chunks == 0 {
+            return Ok(Vec::new());
+        }
+
+        let target_path = match path {
+            Some(path) if path.trim().is_empty() => {
+                return Err("path is empty".to_string());
+            }
+            Some(path) => path,
+            None => return Err("path is required when no audio is loaded".to_string()),
+        };
+
+        let pcm = read_audio_pcm(&target_path, sample_stride)?;
+        let channels = get_audio_pcm_channel_count(Some(target_path.clone()))? as usize;
+
+        if pcm.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mono = mix_to_mono_samples(&pcm, channels);
+        if mono.is_empty() {
+            return Ok(vec![0.0; expected_chunks]);
+        }
+
+        Ok(reduce_waveform_chunks(&mono, expected_chunks)
+            .into_iter()
+            .map(round_waveform_precision)
+            .collect())
     }
     pub fn set_audio_equalizer_config(_config: EqualizerConfig) -> Result<(), String> {
         Ok(())
@@ -138,6 +176,130 @@ pub mod controller {
     }
     pub fn handle_device_changed() -> Result<(), String> {
         Ok(())
+    }
+
+    fn parse_target_path(path: Option<String>, empty_error: &str) -> Result<String, String> {
+        match path {
+            Some(path) if path.trim().is_empty() => Err("path is empty".to_string()),
+            Some(path) => Ok(path),
+            None => Err(empty_error.to_string()),
+        }
+    }
+
+    fn read_audio_pcm(path: &str, sample_stride: usize) -> Result<Vec<f32>, String> {
+        let mut source =
+            AudioSource::open(Path::new(path)).map_err(|e| format!("open audio source failed: {e}"))?;
+        let channels = source.channels() as usize;
+        let sample_rate = source.sample_rate();
+        if channels == 0 || sample_rate == 0 {
+            return Err("invalid audio source".to_string());
+        }
+
+        let stride = sample_stride.max(1);
+        let mut pcm = Vec::new();
+        if stride <= 1 {
+            for sample in &mut source {
+                pcm.push(sample);
+            }
+            return Ok(pcm);
+        }
+
+        let frames_per_window = 1024usize;
+        let mut window_index = 0usize;
+        let mut done = false;
+        while !done {
+            let keep_window = window_index.is_multiple_of(stride);
+            window_index = window_index.saturating_add(1);
+            for _ in 0..frames_per_window {
+                for _ in 0..channels {
+                    match source.next() {
+                        Some(sample) if keep_window => pcm.push(sample),
+                        Some(_) => {}
+                        None => {
+                            done = true;
+                            break;
+                        }
+                    }
+                }
+                if done {
+                    break;
+                }
+            }
+        }
+
+        Ok(pcm)
+    }
+
+    fn mix_to_mono_samples(pcm: &[f32], channels: usize) -> Vec<f64> {
+        let safe_channels = channels.max(1);
+        if safe_channels == 1 {
+            return pcm.iter().map(|sample| *sample as f64).collect();
+        }
+
+        let frame_count = pcm.len() / safe_channels;
+        let mut out = vec![0.0; frame_count];
+
+        for frame in 0..frame_count {
+            let base = frame * safe_channels;
+            let mut sum = 0.0;
+            for channel in 0..safe_channels {
+                sum += pcm[base + channel] as f64;
+            }
+            out[frame] = sum / safe_channels as f64;
+        }
+
+        out
+    }
+
+    fn reduce_waveform_chunks(samples: &[f64], expected_chunks: usize) -> Vec<f64> {
+        let mut out = vec![0.0; expected_chunks];
+        if samples.is_empty() {
+            return out;
+        }
+
+        let window_count = cmp::max(
+            expected_chunks,
+            cmp::min(
+                samples.len(),
+                expected_chunks.saturating_mul(WAVEFORM_RMS_WINDOWS_PER_CHUNK),
+            ),
+        );
+        let mut envelope = vec![0.0; window_count];
+
+        for window in 0..window_count {
+            let start = (window * samples.len()) / window_count;
+            let end = ((window + 1) * samples.len()) / window_count;
+            if end <= start {
+                continue;
+            }
+            envelope[window] = compute_rms(samples, start, end);
+        }
+
+        for chunk in 0..expected_chunks {
+            let start = (chunk * window_count) / expected_chunks;
+            let end = ((chunk + 1) * window_count) / expected_chunks;
+            let mut max_value = 0.0;
+            for value in &envelope[start..end] {
+                if *value > max_value {
+                    max_value = *value;
+                }
+            }
+            out[chunk] = max_value.clamp(0.0, 1.0);
+        }
+
+        out
+    }
+
+    fn compute_rms(samples: &[f64], start: usize, end: usize) -> f64 {
+        let mut sum = 0.0;
+        for sample in &samples[start..end] {
+            sum += sample * sample;
+        }
+        (sum / (end - start) as f64).sqrt()
+    }
+
+    fn round_waveform_precision(value: f64) -> f64 {
+        (value * WAVEFORM_PRECISION_SCALE).round() / WAVEFORM_PRECISION_SCALE
     }
 }
 

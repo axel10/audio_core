@@ -461,40 +461,11 @@ class MyExoplayerPlugin :
                 return
             }
             "getWaveform" -> {
-                val path = call.argument<String>("path") ?: return result.error("INVALID_ARGUMENT", "Path is null", null)
-                val expectedChunks = call.argument<Int>("expectedChunks") ?: 0
-                Thread {
-                    var localPath = path
-                    var isTemp = false
-                    try {
-                        val resolvedPath = ensureLocalPath(path)
-                        localPath = resolvedPath.first
-                        isTemp = resolvedPath.second
-
-                        val rawWaveform = ChromaprintNative
-                            .nativeGetWaveformFromFileFfmpeg(localPath, expectedChunks)
-                            ?.toList()
-
-                        if (rawWaveform != null) {
-                            // Scale values by 100.0 to match the 0.0 - 100.0 range expected by Dart
-                            val scaledWaveform = rawWaveform.map { it * 100.0 }
-                            val processedData = if (expectedChunks > 0) {
-                                downsampleWaveform(scaledWaveform, expectedChunks)
-                            } else {
-                                scaledWaveform
-                            }
-                            result.success(processedData)
-                        } else {
-                            result.error("WAVEFORM_ERROR", "Failed to extract waveform", null)
-                        }
-                    } catch (e: Exception) {
-                        result.error("WAVEFORM_ERROR", e.message, null)
-                    } finally {
-                        if (isTemp) {
-                            java.io.File(localPath).delete()
-                        }
-                    }
-                }.start()
+                result.error(
+                    "DEPRECATED",
+                    "Waveform extraction is handled in Rust now; use the Rust audio waveform API.",
+                    null,
+                )
                 return
             }
             "extractFingerprint" -> {
@@ -1828,19 +1799,28 @@ class MyExoplayerPlugin :
     }
 
     private fun ensureLocalPath(path: String): Pair<String, Boolean> {
-        if (!path.startsWith("content://")) return Pair(path, false)
+        if (!path.startsWith("content://")) {
+            NativeLog.v("AudioCore", "ensureLocalPath using direct path=$path")
+            return Pair(path, false)
+        }
         
         val ctx = context ?: return Pair(path, false)
         try {
             val uri = Uri.parse(path)
             val tempFile = java.io.File(ctx.cacheDir, "temp_waveform_" + System.currentTimeMillis())
+            NativeLog.d("AudioCore", "ensureLocalPath copying content uri=$path temp=${tempFile.absolutePath}")
             ctx.contentResolver.openInputStream(uri)?.use { input ->
                 tempFile.outputStream().use { output ->
                     input.copyTo(output)
                 }
             }
+            NativeLog.d(
+                "AudioCore",
+                "ensureLocalPath copy finished uri=$path temp=${tempFile.absolutePath} size=${tempFile.length()}",
+            )
             return Pair(tempFile.absolutePath, true)
         } catch (e: Exception) {
+            NativeLog.e("AudioCore", "ensureLocalPath failed for $path", e)
             e.printStackTrace()
             return Pair(path, false)
         }

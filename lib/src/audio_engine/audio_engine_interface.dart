@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import '../fft_processor.dart';
 import '../track_artwork.dart';
 import '../rust/api/simple/equalizer.dart';
+import '../rust/api/simple_api.dart' as rust;
 import '../track_metadata.dart';
 import '../track_metadata_update.dart';
 import '../audio_details.dart';
@@ -159,4 +160,18 @@ abstract class AudioEngine {
   }
 
   Future<void> removeAllTags({String? path});
+}
+
+Future<List<double>> loadWaveformFromRust({
+  required String path,
+  required int expectedChunks,
+  int sampleStride = 0,
+}) async {
+  if (expectedChunks <= 0) return const <double>[];
+  final waveform = await rust.getAudioWaveform(
+    path: path,
+    expectedChunks: BigInt.from(expectedChunks),
+    sampleStride: BigInt.from(sampleStride),
+  );
+  return waveform.toList(growable: false);
 }

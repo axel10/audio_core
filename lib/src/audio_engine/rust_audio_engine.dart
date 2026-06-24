@@ -147,13 +147,12 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
     required String path,
     required int expectedChunks,
     int sampleStride = 0,
-  }) => rust
-      .getAudioWaveform(
+  }) =>
+      loadWaveformFromRust(
         path: path,
-        expectedChunks: BigInt.from(expectedChunks),
-        sampleStride: BigInt.from(sampleStride),
-      )
-      .then((values) => values.toList(growable: false));
+        expectedChunks: expectedChunks,
+        sampleStride: sampleStride,
+      );
 
   @override
   Future<Float32List> getAudioPcm({String? path, int sampleStride = 0}) =>

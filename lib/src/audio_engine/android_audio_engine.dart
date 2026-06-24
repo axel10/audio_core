@@ -253,22 +253,13 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   Future<List<double>> getWaveform({
     required String path,
     required int expectedChunks,
-    int sampleStride = 0, // 这个参数在安卓端没用到，rust端根据这条参数跳过packet解码
-  }) async {
-    try {
-      // Direct native waveform extraction with downsampling
-      final List<dynamic>? result = await _channel.invokeMethod('getWaveform', {
-        'path': path,
-        'expectedChunks': expectedChunks,
-        'sampleStride': sampleStride,
-      });
-      if (result == null) return [];
-      // Native returns 0-100, we normalize to 0.0-1.0
-      return result.map((e) => (e as num).toDouble() / 100.0).toList();
-    } catch (e) {
-      return [];
-    }
-  }
+    int sampleStride = 0,
+  }) =>
+      loadWaveformFromRust(
+        path: path,
+        expectedChunks: expectedChunks,
+        sampleStride: sampleStride,
+      );
 
   @override
   Future<void> setEqualizerConfig(EqualizerConfig config) async {

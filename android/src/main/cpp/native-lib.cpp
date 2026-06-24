@@ -223,13 +223,36 @@ Java_com_flutter_1rust_1bridge_audio_1core_ChromaprintNative_nativeGetWaveformFr
         jint expectedChunks) {
     const auto fileName = JStringToStdString(env, path);
     if (fileName.empty()) {
+        __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "getWaveform: empty path");
         return nullptr;
     }
 
+    __android_log_print(
+            ANDROID_LOG_INFO,
+            LOG_TAG,
+            "getWaveform: opening path=%s expectedChunks=%d",
+            fileName.c_str(),
+            expectedChunks);
+
     chromaprint::FFmpegAudioReader reader;
     if (!reader.Open(fileName)) {
+        __android_log_print(
+                ANDROID_LOG_WARN,
+                LOG_TAG,
+                "getWaveform: FFmpegAudioReader.Open failed path=%s error=%s code=%d",
+                fileName.c_str(),
+                reader.GetError().c_str(),
+                reader.GetErrorCode());
         return nullptr;
     }
+
+    __android_log_print(
+            ANDROID_LOG_INFO,
+            LOG_TAG,
+            "getWaveform: open success path=%s channels=%d sampleRate=%d",
+            fileName.c_str(),
+            reader.GetChannels(),
+            reader.GetSampleRate());
 
     constexpr size_t kWindowFrames = 1024;
     std::vector<double> waveform;
@@ -242,6 +265,15 @@ Java_com_flutter_1rust_1bridge_audio_1core_ChromaprintNative_nativeGetWaveformFr
         const int16_t *frameData = nullptr;
         size_t frameSize = 0;
         if (!reader.Read(&frameData, &frameSize)) {
+            __android_log_print(
+                    ANDROID_LOG_WARN,
+                    LOG_TAG,
+                    "getWaveform: reader.Read failed path=%s frameCount=%zu waveformChunks=%zu error=%s code=%d",
+                    fileName.c_str(),
+                    frameCount,
+                    waveform.size(),
+                    reader.GetError().c_str(),
+                    reader.GetErrorCode());
             return nullptr;
         }
 
@@ -272,8 +304,20 @@ Java_com_flutter_1rust_1bridge_audio_1core_ChromaprintNative_nativeGetWaveformFr
     }
 
     if (waveform.empty()) {
+        __android_log_print(
+                ANDROID_LOG_WARN,
+                LOG_TAG,
+                "getWaveform: waveform empty after decode path=%s",
+                fileName.c_str());
         waveform.push_back(0.0);
     }
+
+    __android_log_print(
+            ANDROID_LOG_INFO,
+            LOG_TAG,
+            "getWaveform: finished path=%s chunks=%zu",
+            fileName.c_str(),
+            waveform.size());
 
     jdoubleArray result = env->NewDoubleArray(static_cast<jsize>(waveform.size()));
     if (!result) {
