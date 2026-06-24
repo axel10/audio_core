@@ -230,56 +230,6 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       emitLatestFftSnapshot()
       result(nil)
 
-    case "getWaveform":
-      guard let args = call.arguments as? [String: Any],
-            let path = args["path"] as? String else {
-        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
-        return
-      }
-      let expectedChunks = Self.readInt(call.arguments, key: "expectedChunks") ?? 0
-      let sampleStride = Self.readInt(call.arguments, key: "sampleStride") ?? 0
-      DispatchQueue.global(qos: .userInitiated).async {
-        do {
-          let waveform = try self.engine.getWaveform(
-            path: path,
-            expectedChunks: expectedChunks,
-            sampleStride: sampleStride
-          )
-          DispatchQueue.main.async {
-            result(waveform)
-          }
-        } catch {
-          self.sendPlayerState(error: error.localizedDescription)
-          DispatchQueue.main.async {
-            result(FlutterError(code: "WAVEFORM_FAILED", message: error.localizedDescription, details: nil))
-          }
-        }
-      }
-
-    case "extractFingerprint":
-      guard let args = call.arguments as? [String: Any],
-            let path = args["path"] as? String else {
-        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
-        return
-      }
-      let expectedChunks = Self.readInt(call.arguments, key: "expectedChunks") ?? 0
-      DispatchQueue.global(qos: .userInitiated).async {
-        do {
-          let fingerprint = try self.engine.extractFingerprint(
-            path: path,
-            expectedChunks: expectedChunks
-          )
-          DispatchQueue.main.async {
-            result(fingerprint)
-          }
-        } catch {
-          self.sendPlayerState(error: error.localizedDescription)
-          DispatchQueue.main.async {
-            result(FlutterError(code: "FINGERPRINT_FAILED", message: error.localizedDescription, details: nil))
-          }
-        }
-      }
-
     case "fitTrackMetadata":
       guard let args = call.arguments as? [String: Any] else {
         result(FlutterError(code: "INVALID_ARGUMENT", message: "Arguments are null", details: nil))

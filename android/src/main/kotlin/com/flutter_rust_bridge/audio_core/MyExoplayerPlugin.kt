@@ -99,7 +99,6 @@ class MyExoplayerPlugin :
         val player: ExoPlayer,
         val fftProcessor: FFTAudioProcessor,
         val cppEqualizerProcessor: CppEqualizerProcessor,
-        val cppFingerprintProcessor: CppFingerprintProcessor,
         var equalizer: Equalizer? = null,
         var bassBoost: BassBoost? = null,
         var volumeAnimator: ValueAnimator? = null,
@@ -277,8 +276,6 @@ class MyExoplayerPlugin :
         val safeContext = context!!
         val fftProcessor = FFTAudioProcessor(1024)
         val cppEqualizerProcessor = CppEqualizerProcessor()
-        val cppFingerprintProcessor = CppFingerprintProcessor()
-
         val renderersFactory = object : DefaultRenderersFactory(safeContext) {
             init {
                 // Keep the extension renderer in the normal position, but let
@@ -330,8 +327,7 @@ class MyExoplayerPlugin :
                 enableAudioTrackPlaybackParams: Boolean
             ): AudioSink? {
                 return DefaultAudioSink.Builder(context)
-                    // We must place cppFingerprintProcessor first, before it gets float-converted by EQ
-                    .setAudioProcessors(arrayOf(cppFingerprintProcessor, cppEqualizerProcessor, fftProcessor))
+                    .setAudioProcessors(arrayOf(cppEqualizerProcessor, fftProcessor))
                     .build()
             }
         }
@@ -355,7 +351,7 @@ class MyExoplayerPlugin :
         player.addAnalyticsListener(EventLogger())
         cppEqualizerProcessor.setNumBands(10)
         
-        val ctx = PlayerContext(id, player, fftProcessor, cppEqualizerProcessor, cppFingerprintProcessor)
+        val ctx = PlayerContext(id, player, fftProcessor, cppEqualizerProcessor)
         fftProcessor.updateGroupingOptions(
             fftGroupingConfig.frequencyGroups,
             fftGroupingConfig.skipHighFrequencyGroups,
@@ -469,22 +465,11 @@ class MyExoplayerPlugin :
                 return
             }
             "extractFingerprint" -> {
-                val path = call.argument<String>("path") ?: return result.error("INVALID_ARGUMENT", "Path is null", null)
-                val (localPath, isTemp) = ensureLocalPath(path)
-                val safeContext = context ?: return result.error("INTERNAL_ERROR", "Context is null", null)
-
-                Thread {
-                    val fingerprint = AudioFingerprintExtractor.extractFingerprint(safeContext, localPath)
-                    
-                    if (fingerprint != null) {
-                        result.success(fingerprint)
-                    } else {
-                        result.error("FINGERPRINT_FAILED", "Failed to decode or generate fingerprint", null)
-                    }
-                    if (isTemp) {
-                        java.io.File(localPath).delete()
-                    }
-                }.start()
+                result.error(
+                    "DEPRECATED",
+                    "Fingerprint extraction is handled in Rust now; use the Rust audio fingerprint API.",
+                    null,
+                )
                 return
             }
             "crossfade" -> {
@@ -1388,7 +1373,6 @@ class MyExoplayerPlugin :
         ctx.equalizer?.release()
         ctx.bassBoost?.release()
         ctx.cppEqualizerProcessor.release()
-        ctx.cppFingerprintProcessor.release()
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {

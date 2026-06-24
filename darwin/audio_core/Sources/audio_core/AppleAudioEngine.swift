@@ -309,8 +309,6 @@ final class AppleAudioEngine: NSObject {
   private var isFftTapInstalled = false
   private var isFftCaptureEnabled = false
   private var fftProcessingGeneration: UInt64 = 0
-  private let waveformRmsWindowsPerChunk = 8
-  private let waveformPrecisionScale = 10000.0
   private var fftGroupingConfig = AppleFftGroupingConfig()
 
   var onPlayerStateChanged: ((String?, String?) -> Void)?
@@ -584,24 +582,6 @@ final class AppleAudioEngine: NSObject {
         removeFftCaptureTap()
       }
     }
-  }
-
-  func getWaveform(path: String, expectedChunks: Int, sampleStride: Int) throws -> [Double] {
-    guard expectedChunks > 0 else { return [] }
-    let normalizedPath = normalizedFilePath(path)
-    return try fileAccess.withTemporaryAccess(for: normalizedPath) { url in
-      try AppleWaveformProcessor.decodeWaveform(
-        url: url,
-        expectedChunks: expectedChunks,
-        sampleStride: sampleStride
-      )
-    }
-  }
-
-  func extractFingerprint(path: String, expectedChunks: Int) throws -> String? {
-    _ = path
-    _ = expectedChunks
-    return nil
   }
 
   func fitTrackMetadata(_ entry: [String: Any]) -> [String: Any] {
