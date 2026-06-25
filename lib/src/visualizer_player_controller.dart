@@ -11,16 +11,16 @@ import 'player_controller.dart';
 import 'playlist_controller.dart';
 import 'visualizer_controller.dart';
 import 'rust/api/simple_api.dart'
-    hide FadeSettings, FadeMode, TrackMetadataUpdate;
+    hide FadeSettings, FadeMode, TrackMetadataUpdate, AudioDetails;
 import 'rust/frb_generated.dart';
 import 'fft_processor.dart';
 import 'player_state_snapshot.dart';
 import 'equalizer_controller.dart';
 import 'audio_engine/audio_engine_interface.dart';
-import 'audio_engine/apple_audio_engine.dart';
-import 'audio_engine/android_audio_engine.dart';
-import 'audio_engine/rust_audio_engine.dart';
+import 'audio_engine/audio_engine_factory.dart';
 import 'android_media_library.dart';
+import 'audio_details.dart';
+import 'metadata_service.dart';
 import 'track_artwork.dart';
 import 'track_metadata.dart';
 import 'track_metadata_update.dart';
@@ -53,12 +53,16 @@ class AudioCoreController extends ChangeNotifier
     FadeSettings fadeSettings = const FadeSettings(),
     VisualizerOptimizationOptions visualOptions =
         const VisualizerOptimizationOptions(),
+    AudioEngine? engine,
+    MetadataService? metadataService,
   }) {
     return _instance ??= AudioCoreController._internal(
       fftSize: fftSize,
       analysisFrequencyHz: analysisFrequencyHz,
       fadeSettings: fadeSettings,
       visualOptions: visualOptions,
+      engine: engine ?? createDefaultAudioEngine(),
+      metadataService: metadataService ?? const FlutterTaglibMetadataService(),
     );
   }
 
@@ -68,15 +72,11 @@ class AudioCoreController extends ChangeNotifier
     required FadeSettings fadeSettings,
     VisualizerOptimizationOptions visualOptions =
         const VisualizerOptimizationOptions(),
+    required AudioEngine engine,
+    required MetadataService metadataService,
   }) {
-    if (Platform.isAndroid) {
-      _engine = AndroidAudioEngine();
-    } else if (Platform.isIOS || Platform.isMacOS) {
-      _engine = AppleAudioEngine();
-    } else {
-      _engine = RustAudioEngine();
-    }
-
+    _engine = engine;
+    _metadataService = metadataService;
     player = PlayerController(parent: this);
     _initialFadeSettings = fadeSettings;
 
@@ -159,6 +159,7 @@ class AudioCoreController extends ChangeNotifier
   @override
   AudioEngine get engine => _engine;
   late final AudioEngine _engine;
+  late final MetadataService _metadataService;
 
   Future<void> initialize() async {
     debugPrint('AudioCoreController: Starting initialization');
@@ -999,7 +1000,7 @@ class AudioCoreController extends ChangeNotifier
     if (targetPath == null || targetPath.trim().isEmpty) {
       throw StateError('No path provided and no current track is playing.');
     }
-    await _engine.removeAllTags(path: targetPath.trim());
+    await _metadataService.removeAllTags(path: targetPath.trim());
   }
 
   String _resolveTrackPath(AudioTrack track) {
@@ -1121,10 +1122,13 @@ class AudioCoreController extends ChangeNotifier
       }
 
       if (clearBeforeWrite && !Platform.isAndroid) {
-        await _engine.removeAllTags(path: path);
+        await _metadataService.removeAllTags(
+          path: path,
+          fallbackMediaUri: fallbackMediaUri,
+        );
       }
 
-      final success = await _engine.updateTrackMetadata(
+      final success = await _metadataService.updateTrackMetadata(
         path: path,
         metadata: <String, Object?>{
           ...metadata.toMap(includeEmptyCollections: clearBeforeWrite),
@@ -1168,7 +1172,6 @@ class AudioCoreController extends ChangeNotifier
   /// pauses and reloads the track around the write so playback resumes from
   /// the preserved position after the tag update.
   /// Batch copy operations use the same sync behavior.
-  ///
   Future<bool> updateMetadata(
     AudioTrack track, {
     required TrackMetadataUpdate metadata,
@@ -1195,19 +1198,6 @@ class AudioCoreController extends ChangeNotifier
       return current == path;
     }
     return normCurrent == normPath;
-  }
-
-  Future<bool> _writeMetadataRequest(
-    TrackMetadataWriteRequest request, {
-    bool managePlaybackSync = true,
-  }) async {
-    return _updateMetadataAtPath(
-      path: request.path,
-      fallbackMediaUri: request.fallbackMediaUri,
-      metadata: request.metadata,
-      clearBeforeWrite: request.clearBeforeWrite,
-      managePlaybackSync: managePlaybackSync,
-    );
   }
 
   Future<List<bool>> updateMetadataBatch(
@@ -1249,10 +1239,14 @@ class AudioCoreController extends ChangeNotifier
     for (var i = 0; i < normalizedRequests.length; i++) {
       final request = normalizedRequests[i];
       final origIndex = normalizedIndexes[i];
-      final file = request.path.startsWith('content://') ? null : File(request.path);
+      final file = request.path.startsWith('content://')
+          ? null
+          : File(request.path);
       if (file != null && await _isFileOccupied(request.path)) {
         taglib.TagLibFile.lastError = 'file_occupied';
-        debugPrint('[AudioCore][Metadata] File occupied by another app: ${request.path}');
+        debugPrint(
+          '[AudioCore][Metadata] File occupied by another app: ${request.path}',
+        );
         finalResults[origIndex] = false;
       } else {
         unoccupiedRequests.add(request);
@@ -1276,13 +1270,9 @@ class AudioCoreController extends ChangeNotifier
         preparedForWrite = true;
       }
 
-      final batchSupported = await _engine.supportsBatchMetadataWrite();
-      final operationResults = batchSupported
-          ? await _engine.updateTrackMetadataBatch(requests: unoccupiedRequests)
-          : [
-              for (final request in unoccupiedRequests)
-                await _writeMetadataRequest(request, managePlaybackSync: false),
-            ];
+      final operationResults = await _metadataService.updateTrackMetadataBatch(
+        requests: unoccupiedRequests,
+      );
 
       for (var i = 0; i < unoccupiedIndexes.length; i++) {
         finalResults[unoccupiedIndexes[i]] = operationResults[i];
@@ -1319,7 +1309,20 @@ class AudioCoreController extends ChangeNotifier
       throw StateError('No path provided and no current track is playing.');
     }
 
-    return _engine.getTrackMetadata(path: targetPath);
+    return _metadataService.getTrackMetadata(path: targetPath);
+  }
+
+  /// Reads audio stream details for the current track or an explicit file path.
+  ///
+  /// If [path] is omitted, this uses the currently playing track.
+  /// If [path] is provided, it reads details from that file instead.
+  Future<AudioDetails> getAudioDetails({String? path}) async {
+    final targetPath = _resolveMetadataPath(path);
+    if (targetPath == null) {
+      throw StateError('No path provided and no current track is playing.');
+    }
+
+    return _metadataService.getAudioDetails(path: targetPath);
   }
 
   Future<GeneratedTrackArtwork> generateTrackArtwork({
@@ -1383,10 +1386,14 @@ class AudioCoreController extends ChangeNotifier
     for (var i = 0; i < requests.length; i++) {
       final request = requests[i];
       final targetPath = request.targetPath.trim();
-      final file = targetPath.startsWith('content://') ? null : File(targetPath);
+      final file = targetPath.startsWith('content://')
+          ? null
+          : File(targetPath);
       if (file != null && await _isFileOccupied(targetPath)) {
         taglib.TagLibFile.lastError = 'file_occupied';
-        debugPrint('[AudioCore][Metadata] Target file occupied by another app: $targetPath');
+        debugPrint(
+          '[AudioCore][Metadata] Target file occupied by another app: $targetPath',
+        );
         finalResults[i] = false;
       } else {
         unoccupiedRequests.add(request);
@@ -1410,7 +1417,9 @@ class AudioCoreController extends ChangeNotifier
         preparedForWrite = true;
       }
 
-      final operationResults = await _engine.copyTrackMetadataBatch(requests: unoccupiedRequests);
+      final operationResults = await _metadataService.copyTrackMetadataBatch(
+        requests: unoccupiedRequests,
+      );
       for (var i = 0; i < unoccupiedIndexes.length; i++) {
         finalResults[unoccupiedIndexes[i]] = operationResults[i];
       }

@@ -439,7 +439,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                     animation: _controller,
                     builder: (context, _) => _buildPlayerControls(),
                   ),
-                   const SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   _buildEngineInfo(context),
                   const SizedBox(height: 8),
                   _buildAudioDetailsControls(context),
@@ -611,7 +611,11 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
             ElevatedButton.icon(
               onPressed: _handleGetAudioDetails,
               icon: const Icon(Icons.info),
-              label: Text(_showCurrentPlayingDetails ? 'Get Current Playing Details' : 'Select File Details'),
+              label: Text(
+                _showCurrentPlayingDetails
+                    ? 'Get Current Playing Details'
+                    : 'Select File Details',
+              ),
             ),
             const SizedBox(width: 12),
             Row(
@@ -661,7 +665,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
     }
 
     try {
-      final details = await _controller.engine.getAudioDetails(path: path);
+      final details = await _controller.getAudioDetails(path: path);
       if (!mounted) return;
 
       await showDialog<void>(
@@ -676,13 +680,21 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                   const SizedBox(height: 8),
                   Text('Format: ${details.formatName}'),
                   Text('Codec: ${details.codecName}'),
-                  Text('Duration: ${details.duration.inMinutes}:${(details.duration.inSeconds % 60).toString().padLeft(2, '0')} (${details.duration.inMilliseconds} ms)'),
-                  Text('Bitrate: ${(details.bitrate / 1000).toStringAsFixed(1)} kbps'),
+                  Text(
+                    'Duration: ${details.duration.inMinutes}:${(details.duration.inSeconds % 60).toString().padLeft(2, '0')} (${details.duration.inMilliseconds} ms)',
+                  ),
+                  Text(
+                    'Bitrate: ${(details.bitrate / 1000).toStringAsFixed(1)} kbps',
+                  ),
                   Text('Sample Rate: ${details.sampleRate} Hz'),
                   Text('Channels: ${details.channels}'),
-                  Text('Bit Depth: ${details.bitDepth != null ? "${details.bitDepth} bit" : "N/A"}'),
+                  Text(
+                    'Bit Depth: ${details.bitDepth != null ? "${details.bitDepth} bit" : "N/A"}',
+                  ),
                   Text('Bitrate Mode: ${details.bitrateMode}'),
-                  Text('File Size: ${(details.fileSize / 1024 / 1024).toStringAsFixed(2)} MB (${details.fileSize} bytes)'),
+                  Text(
+                    'File Size: ${(details.fileSize / 1024 / 1024).toStringAsFixed(2)} MB (${details.fileSize} bytes)',
+                  ),
                 ],
               ),
             ),
