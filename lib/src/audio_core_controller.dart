@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_taglib/flutter_taglib.dart' as taglib;
 import 'package:flutter/services.dart';
 
 import 'player_models.dart';
@@ -24,6 +23,7 @@ import 'metadata_service.dart';
 import 'track_artwork.dart';
 import 'track_metadata.dart';
 import 'track_metadata_update.dart';
+import 'track_metadata_coordinator.dart';
 
 export 'player_controller.dart';
 export 'playlist_controller.dart';
@@ -76,7 +76,13 @@ class AudioCoreController extends ChangeNotifier
     required MetadataService metadataService,
   }) {
     _engine = engine;
-    _metadataService = metadataService;
+    _metadataCoordinator = TrackMetadataCoordinator(
+      engine: engine,
+      metadataService: metadataService,
+      currentPlaybackPath: () => player.currentPath,
+      notifyListeners: () => notifyListeners(),
+      reportError: (message) => player.setError(message),
+    );
     player = PlayerController(parent: this);
     _initialFadeSettings = fadeSettings;
 
@@ -159,7 +165,7 @@ class AudioCoreController extends ChangeNotifier
   @override
   AudioEngine get engine => _engine;
   late final AudioEngine _engine;
-  late final MetadataService _metadataService;
+  late final TrackMetadataCoordinator _metadataCoordinator;
 
   Future<void> initialize() async {
     debugPrint('AudioCoreController: Starting initialization');
@@ -1000,7 +1006,7 @@ class AudioCoreController extends ChangeNotifier
     if (targetPath == null || targetPath.trim().isEmpty) {
       throw StateError('No path provided and no current track is playing.');
     }
-    await _metadataService.removeAllTags(path: targetPath.trim());
+    await _metadataCoordinator.removeAllTags(path: targetPath.trim());
   }
 
   String _resolveTrackPath(AudioTrack track) {
@@ -1065,106 +1071,6 @@ class AudioCoreController extends ChangeNotifier
     return _resolveTrackPath(currentTrack).trim();
   }
 
-  Future<bool> _isFileOccupied(String filePath) async {
-    try {
-      final file = File(filePath);
-      if (!await file.exists()) {
-        return false;
-      }
-      final access = await file.open(mode: FileMode.append);
-      await access.close();
-      return false;
-    } catch (e) {
-      if (e is FileSystemException) {
-        final code = e.osError?.errorCode;
-        if (Platform.isWindows) {
-          if (code == 32 || code == 33) {
-            return true;
-          }
-        } else {
-          if (code == 11 || code == 26 || code == 32 || code == 33) {
-            return true;
-          }
-        }
-      }
-      return false;
-    }
-  }
-
-  Future<bool> _updateMetadataAtPath({
-    required String path,
-    String? fallbackMediaUri,
-    required TrackMetadataUpdate metadata,
-    bool clearBeforeWrite = false,
-    bool managePlaybackSync = true,
-  }) async {
-    final file = path.startsWith('content://') ? null : File(path);
-    if (file != null && !file.existsSync()) {
-      debugPrint(
-        '[AudioCore][Metadata] updateMetadata: File does not exist: $path',
-      );
-      return false;
-    }
-
-    if (file != null && await _isFileOccupied(path)) {
-      taglib.TagLibFile.lastError = 'file_occupied';
-      debugPrint('[AudioCore][Metadata] File occupied by another app: $path');
-      return false;
-    }
-
-    final needsSync =
-        managePlaybackSync && _needsMetadataWriteSyncForPath(path);
-
-    try {
-      if (needsSync) {
-        await _engine.prepareForFileWrite();
-        await Future.delayed(const Duration(milliseconds: 200));
-      }
-
-      if (clearBeforeWrite && !Platform.isAndroid) {
-        await _metadataService.removeAllTags(
-          path: path,
-          fallbackMediaUri: fallbackMediaUri,
-        );
-      }
-
-      final success = await _metadataService.updateTrackMetadata(
-        path: path,
-        metadata: <String, Object?>{
-          ...metadata.toMap(includeEmptyCollections: clearBeforeWrite),
-          'fallbackMediaUri': fallbackMediaUri,
-          if (clearBeforeWrite) 'clearBeforeWrite': true,
-        },
-      );
-      if (!success) {
-        throw StateError('Metadata update failed.');
-      }
-
-      if (needsSync) {
-        await _engine.finishFileWrite();
-      }
-
-      notifyListeners();
-      return true;
-    } catch (e) {
-      final errorText = e is PlatformException
-          ? [
-              if (e.code.isNotEmpty) e.code,
-              if (e.message != null && e.message!.isNotEmpty) e.message!,
-              if (e.details != null) 'details: ${e.details}',
-            ].join(' | ')
-          : e.toString();
-
-      debugPrint('[AudioCore][Metadata] updateMetadata failed: $errorText');
-      player.setError('Metadata update failed: $errorText');
-
-      if (needsSync) {
-        await _engine.finishFileWrite().catchError((_) {});
-      }
-      return false;
-    }
-  }
-
   /// Updates the metadata of a given track.
   ///
   /// Pass [metadata] to write the supplied fields to the track.
@@ -1179,7 +1085,7 @@ class AudioCoreController extends ChangeNotifier
   }) async {
     final path = _resolveTrackPath(track);
     final fallbackMediaUri = track.metadataValue<String>('mediaUri');
-    return _updateMetadataAtPath(
+    return _metadataCoordinator.updateMetadata(
       path: path,
       fallbackMediaUri: fallbackMediaUri,
       metadata: metadata,
@@ -1187,116 +1093,10 @@ class AudioCoreController extends ChangeNotifier
     );
   }
 
-  bool _needsMetadataWriteSyncForPath(String path) {
-    final current = player.currentPath;
-    if (current == null) {
-      return false;
-    }
-    final normCurrent = _normalizeLocalPathKey(current);
-    final normPath = _normalizeLocalPathKey(path);
-    if (normCurrent == null || normPath == null) {
-      return current == path;
-    }
-    return normCurrent == normPath;
-  }
-
   Future<List<bool>> updateMetadataBatch(
     List<TrackMetadataWriteRequest> requests,
   ) async {
-    if (requests.isEmpty) return const <bool>[];
-
-    final normalizedRequests = <TrackMetadataWriteRequest>[];
-    final normalizedIndexes = <int>[];
-    final finalResults = List<bool>.filled(
-      requests.length,
-      false,
-      growable: false,
-    );
-    for (var i = 0; i < requests.length; i++) {
-      final request = requests[i];
-      final path = request.path.trim();
-      if (path.isEmpty) {
-        continue;
-      }
-      normalizedRequests.add(
-        TrackMetadataWriteRequest(
-          path: path,
-          metadata: request.metadata,
-          clearBeforeWrite: request.clearBeforeWrite,
-          fallbackMediaUri: request.fallbackMediaUri,
-        ),
-      );
-      normalizedIndexes.add(i);
-    }
-
-    if (normalizedRequests.isEmpty) {
-      return finalResults;
-    }
-
-    final unoccupiedRequests = <TrackMetadataWriteRequest>[];
-    final unoccupiedIndexes = <int>[];
-
-    for (var i = 0; i < normalizedRequests.length; i++) {
-      final request = normalizedRequests[i];
-      final origIndex = normalizedIndexes[i];
-      final file = request.path.startsWith('content://')
-          ? null
-          : File(request.path);
-      if (file != null && await _isFileOccupied(request.path)) {
-        taglib.TagLibFile.lastError = 'file_occupied';
-        debugPrint(
-          '[AudioCore][Metadata] File occupied by another app: ${request.path}',
-        );
-        finalResults[origIndex] = false;
-      } else {
-        unoccupiedRequests.add(request);
-        unoccupiedIndexes.add(origIndex);
-      }
-    }
-
-    if (unoccupiedRequests.isEmpty) {
-      return finalResults;
-    }
-
-    final needsSync = unoccupiedRequests.any((request) {
-      return _needsMetadataWriteSyncForPath(request.path);
-    });
-
-    var preparedForWrite = false;
-    try {
-      if (needsSync) {
-        await _engine.prepareForFileWrite();
-        await Future.delayed(const Duration(milliseconds: 200));
-        preparedForWrite = true;
-      }
-
-      final operationResults = await _metadataService.updateTrackMetadataBatch(
-        requests: unoccupiedRequests,
-      );
-
-      for (var i = 0; i < unoccupiedIndexes.length; i++) {
-        finalResults[unoccupiedIndexes[i]] = operationResults[i];
-      }
-      notifyListeners();
-      return finalResults;
-    } catch (e) {
-      final errorText = e is PlatformException
-          ? [
-              if (e.code.isNotEmpty) e.code,
-              if (e.message != null && e.message!.isNotEmpty) e.message!,
-              if (e.details != null) 'details: ${e.details}',
-            ].join(' | ')
-          : e.toString();
-      debugPrint(
-        '[AudioCore][Metadata] updateMetadataBatch failed: $errorText',
-      );
-      player.setError('Metadata batch update failed: $errorText');
-      return finalResults;
-    } finally {
-      if (preparedForWrite) {
-        await _engine.finishFileWrite().catchError((_) {});
-      }
-    }
+    return _metadataCoordinator.updateMetadataBatch(requests: requests);
   }
 
   /// Reads metadata for the current track or an explicit file path.
@@ -1309,7 +1109,7 @@ class AudioCoreController extends ChangeNotifier
       throw StateError('No path provided and no current track is playing.');
     }
 
-    return _metadataService.getTrackMetadata(path: targetPath);
+    return _metadataCoordinator.getTrackMetadata(path: targetPath);
   }
 
   /// Reads audio stream details for the current track or an explicit file path.
@@ -1322,7 +1122,7 @@ class AudioCoreController extends ChangeNotifier
       throw StateError('No path provided and no current track is playing.');
     }
 
-    return _metadataService.getAudioDetails(path: targetPath);
+    return _metadataCoordinator.getAudioDetails(path: targetPath);
   }
 
   Future<GeneratedTrackArtwork> generateTrackArtwork({
@@ -1368,78 +1168,6 @@ class AudioCoreController extends ChangeNotifier
         ),
     ];
 
-    return _copyMetadataBatch(requests);
-  }
-
-  Future<List<bool>> _copyMetadataBatch(
-    List<TrackMetadataCopyRequest> requests,
-  ) async {
-    final finalResults = List<bool>.filled(
-      requests.length,
-      false,
-      growable: false,
-    );
-
-    final unoccupiedRequests = <TrackMetadataCopyRequest>[];
-    final unoccupiedIndexes = <int>[];
-
-    for (var i = 0; i < requests.length; i++) {
-      final request = requests[i];
-      final targetPath = request.targetPath.trim();
-      final file = targetPath.startsWith('content://')
-          ? null
-          : File(targetPath);
-      if (file != null && await _isFileOccupied(targetPath)) {
-        taglib.TagLibFile.lastError = 'file_occupied';
-        debugPrint(
-          '[AudioCore][Metadata] Target file occupied by another app: $targetPath',
-        );
-        finalResults[i] = false;
-      } else {
-        unoccupiedRequests.add(request);
-        unoccupiedIndexes.add(i);
-      }
-    }
-
-    if (unoccupiedRequests.isEmpty) {
-      return finalResults;
-    }
-
-    final needsSync = unoccupiedRequests.any((request) {
-      return _needsMetadataWriteSyncForPath(request.targetPath.trim());
-    });
-
-    var preparedForWrite = false;
-    try {
-      if (needsSync) {
-        await _engine.prepareForFileWrite();
-        await Future.delayed(const Duration(milliseconds: 200));
-        preparedForWrite = true;
-      }
-
-      final operationResults = await _metadataService.copyTrackMetadataBatch(
-        requests: unoccupiedRequests,
-      );
-      for (var i = 0; i < unoccupiedIndexes.length; i++) {
-        finalResults[unoccupiedIndexes[i]] = operationResults[i];
-      }
-      notifyListeners();
-      return finalResults;
-    } catch (e) {
-      final errorText = e is PlatformException
-          ? [
-              if (e.code.isNotEmpty) e.code,
-              if (e.message != null && e.message!.isNotEmpty) e.message!,
-              if (e.details != null) 'details: ${e.details}',
-            ].join(' | ')
-          : e.toString();
-      debugPrint('[AudioCore][Metadata] copyMetadataBatch failed: $errorText');
-      player.setError('Metadata batch copy failed: $errorText');
-      return finalResults;
-    } finally {
-      if (preparedForWrite) {
-        await _engine.finishFileWrite().catchError((_) {});
-      }
-    }
+    return _metadataCoordinator.copyMetadataBatch(requests: requests);
   }
 }
