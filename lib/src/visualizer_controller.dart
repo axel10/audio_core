@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'audio_core_controller_delegate.dart';
 import 'fft_frame.dart';
 import 'fft_processor.dart';
-import 'player_models.dart';
 import 'visualizer_output_config.dart';
 import 'visualizer_output_stream.dart';
 import 'visualizer_output_manager.dart';
@@ -16,17 +16,17 @@ class VisualizerController extends ChangeNotifier {
     VisualizerOptimizationOptions visualOptions =
         const VisualizerOptimizationOptions(),
     required List<double> Function() getLatestFft,
-    required AudioVisualizerParent parent,
+    required AudioCoreControllerDelegate delegate,
     required bool sourceAlreadyGrouped,
   }) : _getLatestFft = getLatestFft,
-       _parent = parent,
+       _delegate = delegate,
        _sourceAlreadyGrouped = sourceAlreadyGrouped {
     _fftProcessor = FftProcessor(fftSize: fftSize, options: visualOptions);
     _initVisualizerOutputManager();
   }
 
   final List<double> Function() _getLatestFft;
-  final AudioVisualizerParent _parent;
+  final AudioCoreControllerDelegate _delegate;
   final bool _sourceAlreadyGrouped;
 
   late final FftProcessor _fftProcessor;
@@ -70,7 +70,7 @@ class VisualizerController extends ChangeNotifier {
 
   void updateOptions(VisualizerOptimizationOptions options) {
     _fftProcessor.updateOptions(options);
-    unawaited(_parent.engine.updateVisualizerFftOptions(options));
+    unawaited(_delegate.engine.updateVisualizerFftOptions(options));
     notifyListeners();
   }
 
@@ -116,7 +116,7 @@ class VisualizerController extends ChangeNotifier {
       dtSec,
       sourceAlreadyGrouped: sourceAlreadyGrouped ||
           _sourceAlreadyGrouped ||
-          _parent.engine.fftDataIsPreGrouped,
+          _delegate.engine.fftDataIsPreGrouped,
     );
     _emitFrames(position, isPlaying);
   }
@@ -159,7 +159,7 @@ class VisualizerController extends ChangeNotifier {
   @override
   void notifyListeners() {
     super.notifyListeners();
-    _parent.notifyListeners();
+    _delegate.notifyListeners();
   }
 
   // --- Output Manager Proxy ---

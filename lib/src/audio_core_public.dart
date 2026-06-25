@@ -4,7 +4,7 @@ export 'android_media_library.dart';
 export 'app_log.dart';
 export 'fft_frame.dart';
 export 'fft_processor.dart';
-export 'player_models.dart' hide AudioVisualizerParent;
+export 'player_models.dart';
 export 'playlist_models.dart';
 export 'random_playback_models.dart';
 export 'audio_engine/audio_analysis_service.dart';

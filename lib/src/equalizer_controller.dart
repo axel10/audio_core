@@ -2,15 +2,15 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
-import 'player_models.dart';
+import 'audio_core_controller_delegate.dart';
 import 'rust/api/simple/equalizer.dart';
 
 /// Manages equalizer and bass boost configuration.
 class EqualizerController extends ChangeNotifier {
-  EqualizerController({required AudioVisualizerParent parent})
-    : _parent = parent;
+  EqualizerController({required AudioCoreControllerDelegate delegate})
+    : _delegate = delegate;
 
-  final AudioVisualizerParent _parent;
+  final AudioCoreControllerDelegate _delegate;
 
   static const int maxEqualizerBands = 20;
   static const double minFrequencyHz = 32.0;
@@ -33,7 +33,7 @@ class EqualizerController extends ChangeNotifier {
   @internal
   Future<void> initialize() async {
     try {
-      _config = await _parent.engine.getEqualizerConfig();
+      _config = await _delegate.engine.getEqualizerConfig();
       notifyListeners();
     } catch (e) {
       debugPrint('[EqualizerController] initialization error: $e');
@@ -61,7 +61,7 @@ class EqualizerController extends ChangeNotifier {
   Future<void> setConfig(EqualizerConfig config) async {
     final normalized = _normalizeConfig(config);
     try {
-      await _parent.engine.setEqualizerConfig(normalized);
+      await _delegate.engine.setEqualizerConfig(normalized);
       _config = normalized;
       notifyListeners();
     } catch (e) {
@@ -180,6 +180,6 @@ class EqualizerController extends ChangeNotifier {
   @override
   void notifyListeners() {
     super.notifyListeners();
-    _parent.notifyListeners();
+    _delegate.notifyListeners();
   }
 }

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'audio_core_controller_delegate.dart';
 import 'player_models.dart';
 import 'playlist_models.dart';
 import 'player_controller.dart';
@@ -43,7 +44,7 @@ bool shouldAutoAdvanceFromStatus(AudioStatus status) {
 
 /// The top-level modular controller for audio playback and visualization.
 class AudioCoreController extends ChangeNotifier
-    implements AudioVisualizerParent {
+    implements AudioCoreControllerDelegate {
   static const MethodChannel _androidMediaLibraryChannel = MethodChannel(
     'audio_core.media_library',
   );
@@ -68,20 +69,20 @@ class AudioCoreController extends ChangeNotifier
       notifyListeners: () => notifyListeners(),
       reportError: (message) => player.setError(message),
     );
-    player = PlayerController(parent: this);
+    player = PlayerController(delegate: this);
     _initialFadeSettings = fadeSettings;
 
-    playlist = PlaylistController(parent: this);
+    playlist = PlaylistController(delegate: this);
 
     visualizer = VisualizerController(
       fftSize: fftSize,
       visualOptions: visualOptions,
       getLatestFft: () => _latestFftCache,
       sourceAlreadyGrouped: _engine.fftDataIsPreGrouped,
-      parent: this,
+      delegate: this,
     );
 
-    equalizer = EqualizerController(parent: this);
+    equalizer = EqualizerController(delegate: this);
   }
 
   static const int maxEqualizerBands = EqualizerController.maxEqualizerBands;
@@ -167,118 +168,15 @@ class AudioCoreController extends ChangeNotifier
     }
     debugPrint('AudioCoreController: isSupported = true');
 
-    if (!_rustLibInitialized) {
-      try {
-        debugPrint('AudioCoreController: Initializing RustLib');
-        await RustLib.init();
-        _rustLibInitialized = true;
-      } catch (e) {
-        if (!e.toString().contains(
-          'Should not initialize flutter_rust_bridge twice',
-        )) {
-          debugPrint('AudioCoreController: RustLib init failed: $e');
-          player.setError('Rust bridge init failed: $e');
-          return;
-        }
-        _rustLibInitialized = true;
-      }
-    }
+    if (!await _initializeRustBridgeIfNeeded()) return;
 
     // Apply initial fade settings now that RustLib is ready
     player.setFadeSettings(_initialFadeSettings);
 
-    try {
-      if (_usesRustPlaybackBackend) {
-        if (!_rustAppInitialized) {
-          debugPrint('AudioCoreController: Initializing Rust App engine');
-          await initApp();
-          _rustAppInitialized = true;
-        }
-      }
-    } catch (e) {
-      debugPrint('AudioCoreController: Rust App engine init failed: $e');
-      player.setError('Audio engine init failed: $e');
-      return;
-    }
-
-    try {
-      debugPrint('AudioCoreController: Initializing Equalizer');
-      await equalizer.initialize();
-      debugPrint('AudioCoreController: Equalizer initialized');
-    } catch (e) {
-      debugPrint('AudioCoreController: Equalizer init failed: $e');
-      player.setError('Equalizer sync failed: $e');
-      return;
-    }
-
-    // Initialize Audio Engine
-    try {
-      await _engine.initialize();
-      await _engine.updateVisualizerFftOptions(visualizer.options);
-      _playbackStateSubscription = _engine.statusStream.listen((status) {
-        // debugPrint(
-        //   '[AudioCoreController] status '
-        //   'state=${status.playbackState ?? "nil"} '
-        //   'path=${status.path ?? "nil"} '
-        //   'posMs=${status.position.inMilliseconds} '
-        //   'durMs=${status.duration.inMilliseconds} '
-        //   'playing=${status.isPlaying} '
-        //   'currentPath=${player.currentPath ?? "nil"} '
-        //   'playerState=${player.currentState}',
-        // );
-        final currentPath = player.currentPath;
-        if (status.playbackState == 'ENDED' &&
-            status.path != null &&
-            currentPath != null &&
-            status.path != currentPath) {
-          debugPrint(
-            '[AudioCoreController] ignoring stale ENDED from ${status.path} '
-            'while current path is $currentPath',
-          );
-          return;
-        }
-
-        var adjustedPosition = status.position;
-        final updateTimeMs = status.updateTimeSinceEpochMs;
-        if (updateTimeMs != null && status.isPlaying) {
-          final offset = DateTime.now().millisecondsSinceEpoch - updateTimeMs;
-          if (offset > 0) {
-            adjustedPosition += Duration(milliseconds: offset);
-          }
-        }
-
-        player.applySnapshot(
-          status.path,
-          status.playbackState,
-          adjustedPosition,
-          status.duration,
-          status.isPlaying,
-          status.volume,
-          error: status.error,
-        );
-        // Use the native snapshot for handoff. Some backends emit ENDED
-        // explicitly; Flutter no longer infers completion from position.
-        if (shouldAutoAdvanceFromStatus(status)) {
-          final endedPath = status.path;
-          if (endedPath == null || endedPath != _lastEndedAutoAdvancePath) {
-            _lastEndedAutoAdvancePath = endedPath;
-            unawaited(_handleAutoTransition());
-          }
-        } else if (status.playbackState != 'ENDED' &&
-            player.currentState != PlayerState.completed) {
-          _lastEndedAutoAdvancePath = null;
-        }
-      });
-    } catch (e) {
-      player.setError('Audio engine init failed: $e');
-      return;
-    }
-
-    _analysisTick = Timer.periodic(
-      _analysisInterval,
-      (_) => unawaited(_onAnalysisTick()),
-    );
-    _renderTick = Timer.periodic(_renderInterval, (_) => _onRenderTick());
+    if (!await _initializeRustPlaybackBackendIfNeeded()) return;
+    if (!await _initializeEqualizerIfNeeded()) return;
+    if (!await _initializeAudioEngineIfNeeded()) return;
+    _startControllerLoops();
 
     debugPrint('AudioCoreController: Starting visualizer outputs');
     visualizer.visualizerOutputManager.startAll();
@@ -299,7 +197,122 @@ class AudioCoreController extends ChangeNotifier
     super.dispose();
   }
 
-  // --- AudioVisualizerParent Implementation ---
+  Future<bool> _initializeRustBridgeIfNeeded() async {
+    if (_rustLibInitialized) return true;
+
+    try {
+      debugPrint('AudioCoreController: Initializing RustLib');
+      await RustLib.init();
+      _rustLibInitialized = true;
+      return true;
+    } catch (e) {
+      if (!e.toString().contains(
+        'Should not initialize flutter_rust_bridge twice',
+      )) {
+        debugPrint('AudioCoreController: RustLib init failed: $e');
+        player.setError('Rust bridge init failed: $e');
+        return false;
+      }
+      _rustLibInitialized = true;
+      return true;
+    }
+  }
+
+  Future<bool> _initializeRustPlaybackBackendIfNeeded() async {
+    try {
+      if (_usesRustPlaybackBackend && !_rustAppInitialized) {
+        debugPrint('AudioCoreController: Initializing Rust App engine');
+        await initApp();
+        _rustAppInitialized = true;
+      }
+      return true;
+    } catch (e) {
+      debugPrint('AudioCoreController: Rust App engine init failed: $e');
+      player.setError('Audio engine init failed: $e');
+      return false;
+    }
+  }
+
+  Future<bool> _initializeEqualizerIfNeeded() async {
+    try {
+      debugPrint('AudioCoreController: Initializing Equalizer');
+      await equalizer.initialize();
+      debugPrint('AudioCoreController: Equalizer initialized');
+      return true;
+    } catch (e) {
+      debugPrint('AudioCoreController: Equalizer init failed: $e');
+      player.setError('Equalizer sync failed: $e');
+      return false;
+    }
+  }
+
+  Future<bool> _initializeAudioEngineIfNeeded() async {
+    try {
+      await _engine.initialize();
+      await _engine.updateVisualizerFftOptions(visualizer.options);
+      _playbackStateSubscription = _engine.statusStream.listen(
+        _handlePlaybackStatusUpdate,
+      );
+      return true;
+    } catch (e) {
+      player.setError('Audio engine init failed: $e');
+      return false;
+    }
+  }
+
+  void _startControllerLoops() {
+    _analysisTick = Timer.periodic(
+      _analysisInterval,
+      (_) => unawaited(_onAnalysisTick()),
+    );
+    _renderTick = Timer.periodic(_renderInterval, (_) => _onRenderTick());
+  }
+
+  void _handlePlaybackStatusUpdate(AudioStatus status) {
+    final currentPath = player.currentPath;
+    if (status.playbackState == 'ENDED' &&
+        status.path != null &&
+        currentPath != null &&
+        status.path != currentPath) {
+      debugPrint(
+        '[AudioCoreController] ignoring stale ENDED from ${status.path} '
+        'while current path is $currentPath',
+      );
+      return;
+    }
+
+    var adjustedPosition = status.position;
+    final updateTimeMs = status.updateTimeSinceEpochMs;
+    if (updateTimeMs != null && status.isPlaying) {
+      final offset = DateTime.now().millisecondsSinceEpoch - updateTimeMs;
+      if (offset > 0) {
+        adjustedPosition += Duration(milliseconds: offset);
+      }
+    }
+
+    player.applySnapshot(
+      status.path,
+      status.playbackState,
+      adjustedPosition,
+      status.duration,
+      status.isPlaying,
+      status.volume,
+      error: status.error,
+    );
+
+    if (shouldAutoAdvanceFromStatus(status)) {
+      final endedPath = status.path;
+      if (endedPath == null || endedPath != _lastEndedAutoAdvancePath) {
+        _lastEndedAutoAdvancePath = endedPath;
+        unawaited(_handleAutoTransition());
+      }
+    } else if (status.playbackState != 'ENDED' &&
+        player.currentState != PlayerState.completed) {
+      _lastEndedAutoAdvancePath = null;
+    }
+  }
+
+  // --- AudioCoreControllerDelegate Implementation ---
 
   @override
   void notifyListeners() => super.notifyListeners();

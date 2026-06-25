@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'audio_core_controller_delegate.dart';
 import 'player_models.dart';
 import 'playlist_models.dart';
 import 'random_playback_models.dart';
@@ -7,10 +8,10 @@ import 'random_playback_manager.dart';
 
 /// Manages playlists, tracks, and playback order.
 class PlaylistController extends ChangeNotifier {
-  PlaylistController({required AudioVisualizerParent parent})
-    : _parent = parent;
+  PlaylistController({required AudioCoreControllerDelegate delegate})
+    : _delegate = delegate;
 
-  final AudioVisualizerParent _parent;
+  final AudioCoreControllerDelegate _delegate;
 
   static const String _defaultPlaylistId = '__default__';
   final List<Playlist> _playlists = <Playlist>[];
@@ -124,7 +125,7 @@ class PlaylistController extends ChangeNotifier {
     final oldTrack = currentTrack;
     final isSamePlaylist = _activePlaylistId == id;
     if (isSamePlaylist && _currentIndex == startIndex) {
-      await _parent.loadTrack(
+      await _delegate.loadTrack(
         autoPlay: autoPlay,
         reason: PlaybackReason.playlistChanged,
         fadeSetting: fadeSetting,
@@ -285,7 +286,7 @@ class PlaylistController extends ChangeNotifier {
       if (current != null &&
           current.id == track.id &&
           current.uri != track.uri) {
-        await _parent.loadTrack(
+        await _delegate.loadTrack(
           autoPlay: false,
           reason: PlaybackReason.playlistChanged,
           fadeSetting: fadeSetting,
@@ -636,7 +637,7 @@ class PlaylistController extends ChangeNotifier {
   }
 
   Future<bool> _isPlayableTrack(AudioTrack track) async =>
-      await _parent.canPlayTrack(track);
+      await _delegate.canPlayTrack(track);
 
   _RandomStateSnapshot _captureRandomState() {
     return _RandomStateSnapshot(
@@ -743,13 +744,13 @@ class PlaylistController extends ChangeNotifier {
     }
 
     if (shouldLoad && track != null) {
-      await _parent.loadTrack(
+      await _delegate.loadTrack(
         autoPlay: autoPlay,
         reason: reason,
         fadeSetting: fadeSetting,
       );
     } else if (oldTrack != null && track == null) {
-      await _parent.clearPlayback();
+      await _delegate.clearPlayback();
     }
 
     notifyListeners();
@@ -785,7 +786,7 @@ class PlaylistController extends ChangeNotifier {
   @override
   void notifyListeners() {
     super.notifyListeners();
-    _parent.notifyListeners();
+    _delegate.notifyListeners();
   }
 }
 

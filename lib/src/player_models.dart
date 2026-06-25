@@ -1,36 +1,5 @@
-import 'package:meta/meta.dart';
 import 'playlist_models.dart';
 import 'random_playback_models.dart';
-import 'audio_engine/audio_engine_interface.dart';
-
-/// Internal interface for sub-controllers to communicate with the main controller.
-@internal
-abstract class AudioVisualizerParent {
-  void notifyListeners();
-
-  /// Access to the underlying audio engine.
-  AudioEngine get engine;
-
-  /// Whether the given track can be played right now.
-  ///
-  /// Callers use this to skip deleted or otherwise unavailable tracks when
-  /// navigating the queue.
-  Future<bool> canPlayTrack(AudioTrack track);
-
-  /// Called when a track needs to be loaded (e.g., from playlist navigation).
-  Future<void> loadTrack({
-    required bool autoPlay,
-    Duration? position,
-    PlaybackReason reason,
-    FadeSettings? fadeSetting,
-  });
-
-  /// Called when playback should be cleared.
-  Future<void> clearPlayback();
-
-  /// Called when a play request is made.
-  Future<bool> handlePlayRequested();
-}
 
 /// Track transition mode.
 enum FadeMode {

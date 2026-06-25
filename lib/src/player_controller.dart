@@ -1,14 +1,16 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 
+import 'audio_core_controller_delegate.dart';
 import 'player_models.dart';
 import 'playlist_models.dart';
 
 /// Manages the actual audio engine session and transitions.
 class PlayerController extends ChangeNotifier {
-  PlayerController({required AudioVisualizerParent parent}) : _parent = parent;
+  PlayerController({required AudioCoreControllerDelegate delegate})
+    : _delegate = delegate;
 
-  final AudioVisualizerParent _parent;
+  final AudioCoreControllerDelegate _delegate;
 
   String? _selectedPath;
   String? _error;
@@ -72,7 +74,7 @@ class PlayerController extends ChangeNotifier {
       'fadeOnSwitch=${effectiveFadeSettings.fadeOnSwitch} '
       'mode=${effectiveFadeSettings.mode} durationMs=${effectiveFadeSettings.duration.inMilliseconds} '
       'shouldFade=$shouldFade nativeCrossfadeCandidate='
-      '${shouldFade && isActivelyPlaying && effectiveFadeSettings.mode == FadeMode.crossfade && _parent.engine.supportsCrossfade}',
+      '${shouldFade && isActivelyPlaying && effectiveFadeSettings.mode == FadeMode.crossfade && _delegate.engine.supportsCrossfade}',
     );
 
     PlaybackTransition strategy = const ImmediateTransition();
@@ -80,7 +82,7 @@ class PlayerController extends ChangeNotifier {
     if (shouldFade) {
       if (isActivelyPlaying &&
           effectiveFadeSettings.mode == FadeMode.crossfade &&
-          _parent.engine.supportsCrossfade) {
+          _delegate.engine.supportsCrossfade) {
         debugPrint('[PlayerController] transition strategy=NativeCrossfade');
         strategy = NativeCrossfadeTransition(
           duration: effectiveFadeSettings.duration,
@@ -89,7 +91,7 @@ class PlayerController extends ChangeNotifier {
         // Fallback to sequential fade
         debugPrint(
           '[PlayerController] transition strategy=SequentialFade '
-          'isActivelyPlaying=$isActivelyPlaying supportsCrossfade=${_parent.engine.supportsCrossfade}',
+          'isActivelyPlaying=$isActivelyPlaying supportsCrossfade=${_delegate.engine.supportsCrossfade}',
         );
         strategy = SequentialFadeTransition(
           duration: effectiveFadeSettings.duration,
@@ -127,11 +129,11 @@ class PlayerController extends ChangeNotifier {
       debugPrint(
         '[PlayerController] load path=$path nativeVolume=${nativeVolume ?? _volume}',
       );
-      await _parent.engine.load(path);
+      await _delegate.engine.load(path);
       if (nativeVolume != null || _volume != 1.0) {
         await applyNativeVolume(nativeVolume ?? _volume);
       }
-      final duration = await _parent.engine.getDuration();
+      final duration = await _delegate.engine.getDuration();
       _selectedPath = path;
       _position = Duration.zero;
       _duration = duration;
@@ -155,7 +157,7 @@ class PlayerController extends ChangeNotifier {
 
     // Fetch fingerprint in background
     _lastFingerprint = null;
-    // _parent.engine.extractFingerprint(path).then((value) {
+    // _delegate.engine.extractFingerprint(path).then((value) {
     //   if (_selectedPath == path) {
     //      debugPrint('Audio Fingerprint for $path: $value');
     //      _lastFingerprint = value;
@@ -192,7 +194,7 @@ class PlayerController extends ChangeNotifier {
         withFade: withFade && _isPlaying,
         fadeSetting: fadeSetting,
       );
-      await _parent.engine.pause(fadeDuration: fadeDuration);
+      await _delegate.engine.pause(fadeDuration: fadeDuration);
       _lastCommandTime = DateTime.now();
       _isPlaying = false;
       _playerState = PlayerState.paused;
@@ -214,7 +216,7 @@ class PlayerController extends ChangeNotifier {
     if (_selectedPath == null) return;
 
     if (_playerState == PlayerState.completed) {
-      final handled = await _parent.handlePlayRequested();
+      final handled = await _delegate.handlePlayRequested();
       if (handled) return;
     }
 
@@ -236,7 +238,7 @@ class PlayerController extends ChangeNotifier {
         'wasReady=$wasReady fadeDurationMs=${fadeDuration?.inMilliseconds ?? 0} '
         'current=$_selectedPath',
       );
-      await _parent.engine.play(fadeDuration: fadeDuration);
+      await _delegate.engine.play(fadeDuration: fadeDuration);
       _lastCommandTime = DateTime.now();
       _lastPlayCommandTime = _lastCommandTime;
       _isPlaying = true;
@@ -251,7 +253,7 @@ class PlayerController extends ChangeNotifier {
     if (_selectedPath == null) return;
     try {
       debugPrint('[PlayerController] seek targetMs=${target.inMilliseconds}');
-      await _parent.engine.seek(target);
+      await _delegate.engine.seek(target);
       _lastCommandTime = DateTime.now();
       _position = target;
     } catch (e) {
@@ -309,7 +311,7 @@ class PlayerController extends ChangeNotifier {
 
   @internal
   Future<void> applyNativeVolume(double volume) async {
-    await _parent.engine.setVolume(volume.clamp(0.0, 1.0));
+    await _delegate.engine.setVolume(volume.clamp(0.0, 1.0));
   }
 
   Future<void> stopPlayback() async {
@@ -453,7 +455,7 @@ class PlayerController extends ChangeNotifier {
   @override
   void notifyListeners() {
     super.notifyListeners();
-    _parent.notifyListeners();
+    _delegate.notifyListeners();
   }
 }
 
@@ -489,7 +491,7 @@ class SequentialFadeTransition extends PlaybackTransition {
       'initialIsPlaying=${player.isPlaying} currentVolume=${player.volume}',
     );
 
-    await player._parent.engine.transition(
+    await player._delegate.engine.transition(
       uri,
       duration,
       position: position,
@@ -497,7 +499,7 @@ class SequentialFadeTransition extends PlaybackTransition {
       targetVolume: targetVolume,
     );
 
-    final loadedDuration = await player._parent.engine.getDuration();
+    final loadedDuration = await player._delegate.engine.getDuration();
     player._selectedPath = uri;
     player._position = position ?? Duration.zero;
     player._duration = loadedDuration;
@@ -542,7 +544,7 @@ class NativeCrossfadeTransition extends PlaybackTransition {
       '[NativeCrossfadeTransition] start uri=$uri autoPlay=$autoPlay '
       'positionMs=${position?.inMilliseconds} durationMs=${duration.inMilliseconds}',
     );
-    await player._parent.engine.crossfade(uri, duration, position: position);
+    await player._delegate.engine.crossfade(uri, duration, position: position);
 
     // We update local state immediately
     player._selectedPath = uri;
