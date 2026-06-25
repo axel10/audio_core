@@ -391,6 +391,7 @@ configure_args=(
   --enable-muxer=ogg
   --enable-muxer=opus
   --enable-muxer=wav
+  --enable-encoder=aac
   --enable-encoder=libopus
   --enable-encoder=libmp3lame
   --enable-encoder=flac
