@@ -4,11 +4,7 @@ import 'package:flutter/foundation.dart';
 import '../fft_processor.dart';
 import '../rust/api/simple/equalizer.dart';
 import '../rust/api/simple_api.dart' as rust;
-import '../track_metadata.dart';
-import '../track_metadata_update.dart';
-import '../audio_details.dart';
 import 'audio_engine_interface.dart';
-import 'flutter_taglib_metadata_bridge.dart';
 import 'track_artwork_support.dart';
 
 class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
@@ -254,12 +250,11 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
     required String path,
     required int expectedChunks,
     int sampleStride = 0,
-  }) =>
-      loadWaveformFromRust(
-        path: path,
-        expectedChunks: expectedChunks,
-        sampleStride: sampleStride,
-      );
+  }) => loadWaveformFromRust(
+    path: path,
+    expectedChunks: expectedChunks,
+    sampleStride: sampleStride,
+  );
 
   @override
   Future<void> setEqualizerConfig(EqualizerConfig config) async {
@@ -415,81 +410,6 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
 
   @override
   Future<void> endScopedAccess(String path) async {}
-
-  @override
-  Future<bool> updateTrackMetadata({
-    required String path,
-    required Map<String, Object?> metadata,
-  }) async {
-    final fallbackMediaUri = metadata['fallbackMediaUri'] as String?;
-    return updateTrackMetadataWithFlutterTaglib(
-      path: path,
-      fallbackMediaUri: fallbackMediaUri,
-      metadata: metadata,
-    );
-  }
-
-  @override
-  Future<List<bool>> updateTrackMetadataBatch({
-    required List<TrackMetadataWriteRequest> requests,
-  }) async {
-    return updateTrackMetadataBatchWithFlutterTaglib(requests: requests);
-  }
-
-  @override
-  Future<bool> supportsBatchMetadataWrite() async {
-    return true;
-  }
-
-  @override
-  Future<List<bool>> copyTrackMetadataBatch({
-    required List<TrackMetadataCopyRequest> requests,
-  }) async {
-    return copyTrackMetadataBatchWithFlutterTaglib(requests: requests);
-  }
-
-  @override
-  Future<TrackMetadata> getTrackMetadata({
-    required String path,
-    String? fallbackMediaUri,
-  }) async {
-    try {
-      final metadata = await readTrackMetadataWithFlutterTaglib(
-        path,
-        fallbackMediaUri: fallbackMediaUri,
-      );
-      return metadata ??
-          TrackMetadata(
-            error: 'Failed to read metadata via flutter_taglib.',
-            genres: const <String>[],
-            pictures: const [],
-          );
-    } catch (e) {
-      return TrackMetadata(
-        error: e.toString(),
-        genres: const <String>[],
-        pictures: const [],
-      );
-    }
-  }
-
-  @override
-  Future<AudioDetails> getAudioDetails({required String path}) async {
-    return getAudioDetailsWithFlutterTaglib(path: path);
-  }
-
-  @override
-  Future<void> removeAllTags({String? path}) async {
-    final targetPath = path?.trim();
-    if (targetPath == null || targetPath.isEmpty) {
-      throw ArgumentError.value(path, 'path', 'Path is required here.');
-    }
-
-    final success = await removeAllTagsWithFlutterTaglib(targetPath);
-    if (!success) {
-      throw StateError('Failed to remove tags via flutter_taglib.');
-    }
-  }
 }
 
 class _PendingAndroidEdit {

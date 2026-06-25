@@ -4,9 +4,6 @@ import '../fft_processor.dart';
 import '../track_artwork.dart';
 import '../rust/api/simple/equalizer.dart';
 import '../rust/api/simple_api.dart' as rust;
-import '../track_metadata.dart';
-import '../track_metadata_update.dart';
-import '../audio_details.dart';
 
 /// Define a snapshot for highly accurate position synchronization.
 class PositionSnapshot {
@@ -106,47 +103,6 @@ abstract class AudioEngine {
   Future<bool> beginScopedAccess(String path);
   Future<void> endScopedAccess(String path);
 
-  // Native metadata updates
-  Future<bool> updateTrackMetadata({
-    required String path,
-    required Map<String, Object?> metadata,
-  });
-
-  Future<List<bool>> updateTrackMetadataBatch({
-    required List<TrackMetadataWriteRequest> requests,
-  }) async {
-    throw UnimplementedError(
-      'updateTrackMetadataBatch is not implemented on this platform.',
-    );
-  }
-
-  Future<bool> supportsBatchMetadataWrite() async => true;
-
-  Future<List<bool>> copyTrackMetadataBatch({
-    required List<TrackMetadataCopyRequest> requests,
-  }) async {
-    throw UnimplementedError(
-      'copyTrackMetadataBatch is not implemented on this platform.',
-    );
-  }
-
-  Future<TrackMetadata> getTrackMetadata({
-    required String path,
-    String? fallbackMediaUri,
-  }) async {
-    throw UnimplementedError(
-      'getTrackMetadata is not implemented on this platform.',
-    );
-  }
-
-  Future<AudioDetails> getAudioDetails({
-    required String path,
-  }) async {
-    throw UnimplementedError(
-      'getAudioDetails is not implemented on this platform.',
-    );
-  }
-
   Future<GeneratedTrackArtwork> generateTrackArtwork({
     required String path,
     Uint8List? artworkBytes,
@@ -158,8 +114,6 @@ abstract class AudioEngine {
       'generateTrackArtwork is not implemented on this platform.',
     );
   }
-
-  Future<void> removeAllTags({String? path});
 }
 
 Future<List<double>> loadWaveformFromRust({

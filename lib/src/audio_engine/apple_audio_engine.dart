@@ -6,12 +6,8 @@ import '../fft_processor.dart';
 import '../rust/api/simple/equalizer.dart';
 import '../rust/api/simple_api.dart' as rust;
 import '../track_artwork.dart';
-import '../track_metadata.dart';
-import '../track_metadata_update.dart';
-import '../audio_details.dart';
 import 'audio_engine_interface.dart';
 import 'track_artwork_support.dart';
-import 'flutter_taglib_metadata_bridge.dart';
 
 class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   static const MethodChannel _channel = MethodChannel('audio_core.player');
@@ -270,12 +266,11 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     required String path,
     required int expectedChunks,
     int sampleStride = 4,
-  }) =>
-      loadWaveformFromRust(
-        path: _resolvePath(path),
-        expectedChunks: expectedChunks,
-        sampleStride: sampleStride,
-      );
+  }) => loadWaveformFromRust(
+    path: _resolvePath(path),
+    expectedChunks: expectedChunks,
+    sampleStride: sampleStride,
+  );
 
   @override
   Future<void> setEqualizerConfig(EqualizerConfig config) async {
@@ -406,95 +401,6 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
-  Future<bool> updateTrackMetadata({
-    required String path,
-    required Map<String, Object?> metadata,
-  }) async {
-    final targetPath = _normalizePath(path);
-    return _withAppleFileWriteAccess(targetPath, () async {
-      return await updateTrackMetadataWithFlutterTaglib(
-        path: targetPath,
-        metadata: metadata,
-      );
-    });
-  }
-
-  @override
-  Future<List<bool>> updateTrackMetadataBatch({
-    required List<TrackMetadataWriteRequest> requests,
-  }) async {
-    if (requests.isEmpty) return const <bool>[];
-
-    final normalizedRequests = requests
-        .map(
-          (request) => TrackMetadataWriteRequest(
-            path: _normalizePath(request.path),
-            metadata: request.metadata,
-            clearBeforeWrite: request.clearBeforeWrite,
-            fallbackMediaUri: request.fallbackMediaUri,
-          ),
-        )
-        .toList(growable: false);
-    final paths = normalizedRequests.map((request) => request.path).toSet();
-
-    return _withAppleBatchFileWriteAccess(paths, () async {
-      return await updateTrackMetadataBatchWithFlutterTaglib(
-        requests: normalizedRequests,
-      );
-    });
-  }
-
-  @override
-  Future<bool> supportsBatchMetadataWrite() async => true;
-
-  @override
-  Future<List<bool>> copyTrackMetadataBatch({
-    required List<TrackMetadataCopyRequest> requests,
-  }) async {
-    final normalizedRequests = requests
-        .map(
-          (request) => TrackMetadataCopyRequest(
-            sourcePath: _normalizePath(request.sourcePath),
-            targetPath: _normalizePath(request.targetPath),
-          ),
-        )
-        .toList(growable: false);
-    final targetPaths = normalizedRequests.map((r) => r.targetPath).toSet();
-    return _withAppleBatchFileWriteAccess(targetPaths, () async {
-      return await copyTrackMetadataBatchWithFlutterTaglib(
-        requests: normalizedRequests,
-      );
-    });
-  }
-
-  @override
-  Future<TrackMetadata> getTrackMetadata({
-    required String path,
-    String? fallbackMediaUri,
-  }) async {
-    final targetPath = _normalizePath(path);
-    final fallback = _normalizeNullablePath(fallbackMediaUri);
-    return _withAppleFileReadAccess(targetPath, () async {
-      final metadata = await readTrackMetadataWithFlutterTaglib(
-        targetPath,
-        fallbackMediaUri: fallback,
-      );
-      if (metadata == null) {
-        throw Exception('Failed to read track metadata with flutter_taglib');
-      }
-      return metadata;
-    });
-  }
-
-  @override
-  Future<AudioDetails> getAudioDetails({required String path}) async {
-    final targetPath = _normalizePath(path);
-    return _withAppleFileReadAccess(targetPath, () async {
-      return await getAudioDetailsWithFlutterTaglib(path: targetPath);
-    });
-  }
-
-  @override
   Future<GeneratedTrackArtwork> generateTrackArtwork({
     required String path,
     Uint8List? artworkBytes,
@@ -524,21 +430,6 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     return GeneratedTrackArtwork.fromRust(result);
   }
 
-  @override
-  Future<void> removeAllTags({String? path}) async {
-    final targetPath = path?.trim();
-    if (targetPath == null || targetPath.isEmpty) {
-      throw ArgumentError.value(path, 'path', 'Path is required here.');
-    }
-    final normalizedPath = _normalizePath(targetPath);
-    await _withAppleFileWriteAccess(normalizedPath, () async {
-      final success = await removeAllTagsWithFlutterTaglib(normalizedPath);
-      if (!success) {
-        throw Exception('Failed to remove all tags with flutter_taglib');
-      }
-    });
-  }
-
   String _resolvePath(String? path) {
     final targetPath = path?.trim();
     if (targetPath != null && targetPath.isNotEmpty) {
@@ -561,12 +452,6 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
 
   @override
   String normalizeArtworkPath(String path) => _normalizePath(path);
-
-  String? _normalizeNullablePath(String? path) {
-    final targetPath = path?.trim();
-    if (targetPath == null || targetPath.isEmpty) return null;
-    return _normalizePath(targetPath);
-  }
 
   void _handleFftEvent(dynamic event) {
     final receivedAtMs = DateTime.now().millisecondsSinceEpoch;
@@ -657,29 +542,6 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     }
   }
 
-  Future<T> _withAppleFileWriteAccess<T>(
-    String path,
-    Future<T> Function() action,
-  ) async {
-    if (_preparedWritePaths.contains(path)) {
-      return await action();
-    }
-
-    final arguments = <String, Object?>{
-      'playerId': 'main',
-      if (_normalizeNullablePath(_currentPath) != path) 'path': path,
-    };
-
-    _preparedWritePaths.add(path);
-    try {
-      await _channel.invokeMethod('prepareForFileWrite', arguments);
-      return await action();
-    } finally {
-      await _channel.invokeMethod('finishFileWrite', arguments);
-      _preparedWritePaths.remove(path);
-    }
-  }
-
   Future<T> _withAppleFileReadAccess<T>(
     String path,
     Future<T> Function() action,
@@ -691,40 +553,6 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     } finally {
       if (beganScopedAccess) {
         await endScopedAccess(normalizedPath);
-      }
-    }
-  }
-
-  Future<T> _withAppleBatchFileWriteAccess<T>(
-    Iterable<String> paths,
-    Future<T> Function() action,
-  ) async {
-    final uniquePaths = <String>[];
-    final alreadyPrepared = <String>{};
-    for (final path in paths) {
-      final normalized = _normalizePath(path);
-      if (alreadyPrepared.add(normalized) &&
-          !_preparedWritePaths.contains(normalized)) {
-        uniquePaths.add(normalized);
-      }
-    }
-
-    if (uniquePaths.isEmpty) {
-      return await action();
-    }
-
-    _preparedWritePaths.addAll(uniquePaths);
-    final arguments = <String, Object?>{
-      'playerId': 'main',
-      'paths': uniquePaths,
-    };
-    try {
-      await _channel.invokeMethod('prepareForFileWrite', arguments);
-      return await action();
-    } finally {
-      await _channel.invokeMethod('finishFileWrite', arguments);
-      for (final path in uniquePaths) {
-        _preparedWritePaths.remove(path);
       }
     }
   }
