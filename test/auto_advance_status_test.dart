@@ -1,5 +1,5 @@
 import 'package:audio_core/src/audio_engine/audio_engine_interface.dart';
-import 'package:audio_core/src/visualizer_player_controller.dart';
+import 'package:audio_core/src/audio_core_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

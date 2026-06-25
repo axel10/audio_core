@@ -17,6 +17,6 @@ export 'track_metadata_update.dart';
 export 'visualizer_output_config.dart';
 export 'visualizer_output_manager.dart';
 export 'visualizer_output_stream.dart';
-export 'visualizer_player_controller.dart'
+export 'audio_core_controller.dart'
     show AudioCoreController, shouldAutoAdvanceFromStatus;
 export 'waveform_pcm_processor.dart';

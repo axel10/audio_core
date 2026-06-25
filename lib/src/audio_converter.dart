@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import 'package:flutter/foundation.dart';
-import 'visualizer_player_controller.dart';
+import 'audio_core_controller.dart';
 import 'rust/api/simple.dart' as rust_api;
 
 enum AudioFormat { aac, alac, aiff, caf, flac, m4a, m4b, mp3, ogg, opus, wav }
