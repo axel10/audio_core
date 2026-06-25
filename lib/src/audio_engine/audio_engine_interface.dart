@@ -1,9 +1,6 @@
 import 'dart:async';
-import 'dart:typed_data';
 import '../fft_processor.dart';
-import '../track_artwork.dart';
 import '../rust/api/simple/equalizer.dart';
-import '../rust/api/simple_api.dart' as rust;
 
 /// Define a snapshot for highly accurate position synchronization.
 class PositionSnapshot {
@@ -67,14 +64,6 @@ abstract class AudioEngine {
     VisualizerOptimizationOptions options,
   );
   bool get fftDataIsPreGrouped;
-  Future<Float32List> getAudioPcm({String? path, int sampleStride});
-
-  Future<int> getAudioPcmChannelCount({String? path});
-  Future<List<double>> getWaveform({
-    required String path,
-    required int expectedChunks,
-    int sampleStride = 0,
-  });
 
   // Effects
   Future<void> setEqualizerConfig(EqualizerConfig config);
@@ -84,48 +73,8 @@ abstract class AudioEngine {
   bool get supportsCrossfade;
 
   // Audio Fingerprinting
-  Future<String?> extractFingerprint(String path);
-
   // Status updates
   Stream<AudioStatus> get statusStream;
 
   Future<String> getDecodeEngine();
-
-  // File synchronization (locking)
-  Future<void> prepareForFileWrite();
-  Future<void> finishFileWrite();
-
-  // Apple security-scoped access persistence
-  Future<bool> registerPersistentAccess(String path);
-  Future<void> forgetPersistentAccess(String path);
-  Future<bool> hasPersistentAccess(String path);
-  Future<List<String>> listPersistentAccessPaths();
-  Future<bool> beginScopedAccess(String path);
-  Future<void> endScopedAccess(String path);
-
-  Future<GeneratedTrackArtwork> generateTrackArtwork({
-    required String path,
-    Uint8List? artworkBytes,
-    required String cacheRootPath,
-    required bool saveLargeArtwork,
-    TrackArtworkOptions options = const TrackArtworkOptions(),
-  }) async {
-    throw UnimplementedError(
-      'generateTrackArtwork is not implemented on this platform.',
-    );
-  }
-}
-
-Future<List<double>> loadWaveformFromRust({
-  required String path,
-  required int expectedChunks,
-  int sampleStride = 0,
-}) async {
-  if (expectedChunks <= 0) return const <double>[];
-  final waveform = await rust.getAudioWaveform(
-    path: path,
-    expectedChunks: BigInt.from(expectedChunks),
-    sampleStride: BigInt.from(sampleStride),
-  );
-  return waveform.toList(growable: false);
 }

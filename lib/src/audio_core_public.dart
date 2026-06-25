@@ -7,6 +7,9 @@ export 'fft_processor.dart';
 export 'player_models.dart' hide AudioVisualizerParent;
 export 'playlist_models.dart';
 export 'random_playback_models.dart';
+export 'audio_engine/audio_analysis_service.dart';
+export 'audio_engine/audio_file_access.dart';
+export 'audio_engine/audio_engine_interface.dart';
 export 'rust/api/simple/equalizer.dart';
 export 'rust/api/simple_api.dart'
     hide FadeSettings, FadeMode, TrackMetadataUpdate, AudioDetails;

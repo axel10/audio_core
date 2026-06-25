@@ -4,12 +4,9 @@ import 'package:flutter/services.dart';
 
 import '../fft_processor.dart';
 import '../rust/api/simple/equalizer.dart';
-import '../rust/api/simple_api.dart' as rust;
-import '../track_artwork.dart';
 import 'audio_engine_interface.dart';
-import 'track_artwork_support.dart';
 
-class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
+class AppleAudioEngine implements AudioEngine {
   static const MethodChannel _channel = MethodChannel('audio_core.player');
   static const EventChannel _fftChannel = EventChannel('audio_core.player/fft');
 
@@ -18,7 +15,6 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   String? _currentPath;
   double _currentVolume = 1.0;
   EqualizerConfig? _lastConfig;
-  final Set<String> _preparedWritePaths = <String>{};
   List<double> _latestFftCache = const <double>[];
   int _fftEventCount = 0;
 
@@ -79,7 +75,6 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     // re-initialized.
     await _channel.invokeMethod('dispose');
     _currentPath = null;
-    _preparedWritePaths.clear();
   }
 
   @override
@@ -90,13 +85,11 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
     _fftEventCount = 0;
     await _statusController.close();
     await _channel.invokeMethod('dispose');
-    _preparedWritePaths.clear();
   }
 
   @override
   Future<void> load(String path) async {
     _currentPath = path;
-    _preparedWritePaths.clear();
     _latestFftCache = const <double>[];
     _fftEventCount = 0;
     await _channel.invokeMethod('load', <String, Object?>{
@@ -237,42 +230,6 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   bool get fftDataIsPreGrouped => false;
 
   @override
-  Future<Float32List> getAudioPcm({String? path, int sampleStride = 0}) async {
-    final targetPath = _resolvePath(path);
-    final List<dynamic>? result = await _channel.invokeMethod(
-      'getAudioPcm',
-      <String, Object?>{'path': targetPath, 'sampleStride': sampleStride},
-    );
-    if (result == null) {
-      return Float32List(0);
-    }
-    return Float32List.fromList(
-      result.map((e) => (e as num).toDouble()).toList(growable: false),
-    );
-  }
-
-  @override
-  Future<int> getAudioPcmChannelCount({String? path}) async {
-    final targetPath = _resolvePath(path);
-    final int? result = await _channel.invokeMethod<int>(
-      'getAudioPcmChannelCount',
-      <String, Object?>{'path': targetPath},
-    );
-    return result ?? 1;
-  }
-
-  @override
-  Future<List<double>> getWaveform({
-    required String path,
-    required int expectedChunks,
-    int sampleStride = 4,
-  }) => loadWaveformFromRust(
-    path: _resolvePath(path),
-    expectedChunks: expectedChunks,
-    sampleStride: sampleStride,
-  );
-
-  @override
   Future<void> setEqualizerConfig(EqualizerConfig config) async {
     await _channel.invokeMethod(
       'setEqualizerConfig',
@@ -302,156 +259,6 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
 
   @override
   bool get supportsCrossfade => true;
-
-  @override
-  Future<String?> extractFingerprint(String path) async {
-    try {
-      return await rust.getAudioFingerprint(path: path);
-    } catch (e) {
-      debugPrint('[AppleAudioEngine] Fingerprint extraction failed: $e');
-      return null;
-    }
-  }
-
-  @override
-  Future<void> prepareForFileWrite() async {
-    final targetPath = _currentPath?.trim();
-    if (targetPath != null && targetPath.isNotEmpty) {
-      _preparedWritePaths.add(_normalizePath(targetPath));
-    }
-    try {
-      await _channel.invokeMethod('prepareForFileWrite', <String, Object?>{
-        'playerId': 'main',
-      });
-    } catch (_) {
-      if (targetPath != null && targetPath.isNotEmpty) {
-        _preparedWritePaths.remove(_normalizePath(targetPath));
-      }
-      rethrow;
-    }
-  }
-
-  @override
-  Future<void> finishFileWrite() async {
-    final targetPath = _currentPath?.trim();
-    if (targetPath != null && targetPath.isNotEmpty) {
-      _preparedWritePaths.remove(_normalizePath(targetPath));
-    }
-    await _channel.invokeMethod('finishFileWrite', <String, Object?>{
-      'playerId': 'main',
-    });
-  }
-
-  @override
-  Future<bool> registerPersistentAccess(String path) async {
-    final normalizedPath = _normalizePath(path);
-    final bool? result = await _channel.invokeMethod<bool>(
-      'registerPersistentAccess',
-      <String, Object?>{'path': normalizedPath},
-    );
-    return result ?? false;
-  }
-
-  @override
-  Future<void> forgetPersistentAccess(String path) async {
-    final normalizedPath = _normalizePath(path);
-    await _channel.invokeMethod('forgetPersistentAccess', <String, Object?>{
-      'path': normalizedPath,
-    });
-  }
-
-  @override
-  Future<bool> hasPersistentAccess(String path) async {
-    final normalizedPath = _normalizePath(path);
-    final bool? result = await _channel.invokeMethod<bool>(
-      'hasPersistentAccess',
-      <String, Object?>{'path': normalizedPath},
-    );
-    return result ?? false;
-  }
-
-  @override
-  Future<List<String>> listPersistentAccessPaths() async {
-    final List<dynamic>? result = await _channel.invokeMethod(
-      'listPersistentAccessPaths',
-    );
-    if (result == null) return const <String>[];
-    return result
-        .map((entry) => entry.toString())
-        .where((entry) => entry.trim().isNotEmpty)
-        .toList(growable: false);
-  }
-
-  @override
-  Future<bool> beginScopedAccess(String path) async {
-    final normalizedPath = _normalizePath(path);
-    final bool? result = await _channel.invokeMethod<bool>(
-      'beginScopedAccess',
-      <String, Object?>{'path': normalizedPath},
-    );
-    return result ?? false;
-  }
-
-  @override
-  Future<void> endScopedAccess(String path) async {
-    final normalizedPath = _normalizePath(path);
-    await _channel.invokeMethod('endScopedAccess', <String, Object?>{
-      'path': normalizedPath,
-    });
-  }
-
-  @override
-  Future<GeneratedTrackArtwork> generateTrackArtwork({
-    required String path,
-    Uint8List? artworkBytes,
-    required String cacheRootPath,
-    required bool saveLargeArtwork,
-    TrackArtworkOptions options = const TrackArtworkOptions(),
-  }) async {
-    final targetPath = _normalizePath(path);
-    final normalizedCacheRootPath = _normalizePath(cacheRootPath);
-    final result = await _withAppleFileReadAccess(targetPath, () async {
-      return rust.generateTrackArtwork(
-        path: targetPath,
-        artworkBytes: artworkBytes,
-        cacheRootPath: normalizedCacheRootPath,
-        saveLargeArtwork: saveLargeArtwork,
-        thumbnailSize: options.thumbnailSize,
-        meshStylePreset: options.meshStylePreset.index,
-        hueCohesion: options.hueCohesion,
-        paletteBlurRadius: options.paletteBlurRadius,
-        meshMuddyPenaltyMultiplier: options.meshMuddyPenaltyMultiplier,
-        meshPopulationStrength: options.meshPopulationStrength,
-        meshContrastStrength: options.meshContrastStrength,
-        meshHarmonyStrength: options.meshHarmonyStrength,
-        meshVibrancyStrength: options.meshVibrancyStrength,
-      );
-    });
-    return GeneratedTrackArtwork.fromRust(result);
-  }
-
-  String _resolvePath(String? path) {
-    final targetPath = path?.trim();
-    if (targetPath != null && targetPath.isNotEmpty) {
-      return targetPath;
-    }
-    final current = _currentPath?.trim();
-    if (current != null && current.isNotEmpty) {
-      return current;
-    }
-    throw StateError('A path is required for PCM extraction.');
-  }
-
-  String _normalizePath(String path) {
-    final targetPath = path.trim();
-    if (targetPath.startsWith('file://')) {
-      return Uri.parse(targetPath).toFilePath();
-    }
-    return targetPath;
-  }
-
-  @override
-  String normalizeArtworkPath(String path) => _normalizePath(path);
 
   void _handleFftEvent(dynamic event) {
     final receivedAtMs = DateTime.now().millisecondsSinceEpoch;
@@ -539,21 +346,6 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
       //   'receivedAtMs=$receivedAtMs '
       //   'nativeEmittedAtMs=${emittedAtMs?.toString() ?? "nil"}',
       // );
-    }
-  }
-
-  Future<T> _withAppleFileReadAccess<T>(
-    String path,
-    Future<T> Function() action,
-  ) async {
-    final normalizedPath = _normalizePath(path);
-    final beganScopedAccess = await beginScopedAccess(normalizedPath);
-    try {
-      return await action();
-    } finally {
-      if (beganScopedAccess) {
-        await endScopedAccess(normalizedPath);
-      }
     }
   }
 

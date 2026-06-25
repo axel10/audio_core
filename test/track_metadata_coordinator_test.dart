@@ -1,22 +1,18 @@
-import 'dart:typed_data';
 import 'dart:io';
 
 import 'package:audio_core/src/audio_details.dart';
-import 'package:audio_core/src/audio_engine/audio_engine_interface.dart';
-import 'package:audio_core/src/fft_processor.dart';
-import 'package:audio_core/src/rust/api/simple/equalizer.dart';
+import 'package:audio_core/src/audio_engine/audio_file_access.dart';
 import 'package:audio_core/src/rust/api/simple/metadata.dart' as rust_meta;
 import 'package:audio_core/src/metadata_service.dart';
 import 'package:audio_core/src/track_metadata.dart';
 import 'package:audio_core/src/track_metadata_coordinator.dart';
 import 'package:audio_core/src/track_metadata_update.dart';
-import 'package:audio_core/src/track_artwork.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('TrackMetadataCoordinator', () {
     late Directory tempDir;
-    late _FakeAudioEngine engine;
+    late _FakeFileAccess engine;
     late _FakeMetadataService metadataService;
     late List<String> errors;
     late int notificationCount;
@@ -27,13 +23,13 @@ void main() {
       tempDir = Directory.systemTemp.createTempSync(
         'track_metadata_coordinator_test',
       );
-      engine = _FakeAudioEngine();
+      engine = _FakeFileAccess();
       metadataService = _FakeMetadataService();
       errors = <String>[];
       notificationCount = 0;
       currentPath = null;
       coordinator = TrackMetadataCoordinator(
-        engine: engine,
+        fileAccess: engine,
         metadataService: metadataService,
         currentPlaybackPath: () => currentPath,
         notifyListeners: () {
@@ -145,7 +141,7 @@ void main() {
   });
 }
 
-final class _FakeAudioEngine extends Fake implements AudioEngine {
+final class _FakeFileAccess extends Fake implements AudioFileAccess {
   int prepareForFileWriteCalls = 0;
   int finishFileWriteCalls = 0;
 
@@ -158,104 +154,6 @@ final class _FakeAudioEngine extends Fake implements AudioEngine {
   Future<void> finishFileWrite() async {
     finishFileWriteCalls++;
   }
-
-  @override
-  Future<void> initialize() async {}
-
-  @override
-  Future<void> stop() async {}
-
-  @override
-  Future<void> dispose() async {}
-
-  @override
-  Future<void> load(String path) async {}
-
-  @override
-  Future<void> crossfade(
-    String path,
-    Duration duration, {
-    Duration? position,
-  }) async {}
-
-  @override
-  Future<void> play({Duration? fadeDuration}) async {}
-
-  @override
-  Future<void> pause({Duration? fadeDuration}) async {}
-
-  @override
-  Future<void> seek(Duration position) async {}
-
-  @override
-  Future<void> setVolume(double volume) async {}
-
-  @override
-  Future<Duration> getDuration() async => Duration.zero;
-
-  @override
-  Future<PositionSnapshot> getCurrentPosition() async {
-    return PositionSnapshot(
-      position: Duration.zero,
-      takenAtMs: DateTime.now().millisecondsSinceEpoch,
-    );
-  }
-
-  @override
-  Future<List<double>> getLatestFft() async => const <double>[];
-
-  @override
-  Future<void> updateVisualizerFftOptions(
-    VisualizerOptimizationOptions options,
-  ) async {}
-
-  @override
-  bool get fftDataIsPreGrouped => false;
-
-  @override
-  Future<Float32List> getAudioPcm({String? path, int sampleStride = 0}) async {
-    return Float32List(0);
-  }
-
-  @override
-  Future<int> getAudioPcmChannelCount({String? path}) async => 1;
-
-  @override
-  Future<List<double>> getWaveform({
-    required String path,
-    required int expectedChunks,
-    int sampleStride = 0,
-  }) async {
-    return const <double>[];
-  }
-
-  @override
-  Future<void> setEqualizerConfig(EqualizerConfig config) async {}
-
-  @override
-  Future<EqualizerConfig> getEqualizerConfig() async {
-    return EqualizerConfig(
-      enabled: false,
-      bandCount: 0,
-      preampDb: 0.0,
-      bassBoostDb: 0.0,
-      bassBoostFrequencyHz: 0.0,
-      bassBoostQ: 1.0,
-      bandGainsDb: Float32List(0),
-    );
-  }
-
-  @override
-  bool get supportsCrossfade => false;
-
-  @override
-  Future<String?> extractFingerprint(String path) async => null;
-
-  @override
-  Stream<AudioStatus> get statusStream => const Stream<AudioStatus>.empty();
-
-  @override
-  Future<String> getDecodeEngine() async => 'test';
 
   @override
   Future<bool> registerPersistentAccess(String path) async => false;
@@ -274,17 +172,6 @@ final class _FakeAudioEngine extends Fake implements AudioEngine {
 
   @override
   Future<void> endScopedAccess(String path) async {}
-
-  @override
-  Future<GeneratedTrackArtwork> generateTrackArtwork({
-    required String path,
-    Uint8List? artworkBytes,
-    required String cacheRootPath,
-    required bool saveLargeArtwork,
-    TrackArtworkOptions options = const TrackArtworkOptions(),
-  }) async {
-    return const GeneratedTrackArtwork(artworkFound: false);
-  }
 }
 
 final class _FakeMetadataService extends Fake implements MetadataService {

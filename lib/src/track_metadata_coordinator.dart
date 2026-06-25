@@ -5,25 +5,25 @@ import 'package:flutter/services.dart';
 import 'package:flutter_taglib/flutter_taglib.dart' as taglib;
 
 import 'audio_details.dart';
-import 'audio_engine/audio_engine_interface.dart';
+import 'audio_engine/audio_file_access.dart';
 import 'metadata_service.dart';
 import 'track_metadata.dart';
 import 'track_metadata_update.dart';
 
 final class TrackMetadataCoordinator {
   TrackMetadataCoordinator({
-    required AudioEngine engine,
+    required AudioFileAccess fileAccess,
     required MetadataService metadataService,
     required String? Function() currentPlaybackPath,
     required VoidCallback notifyListeners,
     required void Function(String message) reportError,
-  }) : _engine = engine,
+  }) : _fileAccess = fileAccess,
        _metadataService = metadataService,
        _currentPlaybackPath = currentPlaybackPath,
        _notifyListeners = notifyListeners,
        _reportError = reportError;
 
-  final AudioEngine _engine;
+  final AudioFileAccess _fileAccess;
   final MetadataService _metadataService;
   final String? Function() _currentPlaybackPath;
   final VoidCallback _notifyListeners;
@@ -243,7 +243,7 @@ final class TrackMetadataCoordinator {
     var preparedForWrite = false;
     try {
       if (needsSync) {
-        await _engine.prepareForFileWrite();
+        await _fileAccess.prepareForFileWrite();
         await Future<void>.delayed(const Duration(milliseconds: 200));
         preparedForWrite = true;
       }
@@ -260,7 +260,7 @@ final class TrackMetadataCoordinator {
       return false;
     } finally {
       if (preparedForWrite) {
-        await _engine.finishFileWrite().catchError((_) {});
+        await _fileAccess.finishFileWrite().catchError((_) {});
       }
     }
   }
@@ -276,7 +276,7 @@ final class TrackMetadataCoordinator {
     var preparedForWrite = false;
     try {
       if (needsSync) {
-        await _engine.prepareForFileWrite();
+        await _fileAccess.prepareForFileWrite();
         await Future<void>.delayed(const Duration(milliseconds: 200));
         preparedForWrite = true;
       }
@@ -296,7 +296,7 @@ final class TrackMetadataCoordinator {
       return results;
     } finally {
       if (preparedForWrite) {
-        await _engine.finishFileWrite().catchError((_) {});
+        await _fileAccess.finishFileWrite().catchError((_) {});
       }
     }
   }

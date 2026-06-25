@@ -1,12 +1,10 @@
 import 'dart:async';
-import 'dart:typed_data';
 import '../fft_processor.dart';
 import '../rust/api/simple_api.dart' as rust;
 import '../rust/api/simple/equalizer.dart';
 import 'audio_engine_interface.dart';
-import 'track_artwork_support.dart';
 
-class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
+class RustAudioEngine implements AudioEngine {
   final _statusController = StreamController<AudioStatus>.broadcast();
   StreamSubscription? _subscription;
   double _currentVolume = 1.0;
@@ -139,25 +137,6 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   bool get fftDataIsPreGrouped => false;
 
   @override
-  Future<List<double>> getWaveform({
-    required String path,
-    required int expectedChunks,
-    int sampleStride = 0,
-  }) => loadWaveformFromRust(
-    path: path,
-    expectedChunks: expectedChunks,
-    sampleStride: sampleStride,
-  );
-
-  @override
-  Future<Float32List> getAudioPcm({String? path, int sampleStride = 0}) =>
-      rust.getAudioPcm(path: path, sampleStride: BigInt.from(sampleStride));
-
-  @override
-  Future<int> getAudioPcmChannelCount({String? path}) =>
-      rust.getAudioPcmChannelCount(path: path);
-
-  @override
   Future<void> setEqualizerConfig(EqualizerConfig config) =>
       rust.setAudioEqualizerConfig(config: config);
 
@@ -167,40 +146,4 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
 
   @override
   bool get supportsCrossfade => true;
-
-  @override
-  String normalizeArtworkPath(String path) => path;
-
-  @override
-  Future<String?> extractFingerprint(String path) async {
-    try {
-      return await rust.getAudioFingerprint(path: path);
-    } catch (e) {
-      return null;
-    }
-  }
-
-  @override
-  Future<void> prepareForFileWrite() => rust.prepareForFileWrite();
-
-  @override
-  Future<void> finishFileWrite() => rust.finishFileWrite();
-
-  @override
-  Future<bool> registerPersistentAccess(String path) async => false;
-
-  @override
-  Future<void> forgetPersistentAccess(String path) async {}
-
-  @override
-  Future<bool> hasPersistentAccess(String path) async => false;
-
-  @override
-  Future<List<String>> listPersistentAccessPaths() async => const <String>[];
-
-  @override
-  Future<bool> beginScopedAccess(String path) async => true;
-
-  @override
-  Future<void> endScopedAccess(String path) async {}
 }

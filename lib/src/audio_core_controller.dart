@@ -17,6 +17,8 @@ import 'player_state_snapshot.dart';
 import 'equalizer_controller.dart';
 import 'audio_engine/audio_engine_interface.dart';
 import 'audio_engine/audio_engine_factory.dart';
+import 'audio_engine/audio_analysis_service.dart';
+import 'audio_engine/audio_file_access.dart';
 import 'android_media_library.dart';
 import 'audio_details.dart';
 import 'metadata_service.dart';
@@ -52,11 +54,15 @@ class AudioCoreController extends ChangeNotifier
     VisualizerOptimizationOptions visualOptions =
         const VisualizerOptimizationOptions(),
     AudioEngine? engine,
+    AudioAnalysisService? analysisService,
+    AudioFileAccess? fileAccess,
     MetadataService? metadataService,
   }) {
     _engine = engine ?? createDefaultAudioEngine();
+    _analysisService = analysisService ?? createDefaultAudioAnalysisService();
+    _fileAccess = fileAccess ?? createDefaultAudioFileAccess();
     _metadataCoordinator = TrackMetadataCoordinator(
-      engine: _engine,
+      fileAccess: _fileAccess,
       metadataService: metadataService ?? const FlutterTaglibMetadataService(),
       currentPlaybackPath: () => player.currentPath,
       notifyListeners: () => notifyListeners(),
@@ -145,6 +151,8 @@ class AudioCoreController extends ChangeNotifier
   @override
   AudioEngine get engine => _engine;
   late final AudioEngine _engine;
+  late final AudioAnalysisService _analysisService;
+  late final AudioFileAccess _fileAccess;
   late final TrackMetadataCoordinator _metadataCoordinator;
 
   Future<void> initialize() async {
@@ -773,7 +781,7 @@ class AudioCoreController extends ChangeNotifier
       '[AudioCore][Waveform] request path=$targetPath expectedChunks=$expectedChunks sampleStride=$sampleStride normalize=$normalize',
     );
     try {
-      final finalData = await _engine.getWaveform(
+      final finalData = await _analysisService.getWaveform(
         path: targetPath,
         expectedChunks: expectedChunks,
         sampleStride: sampleStride,
@@ -826,7 +834,7 @@ class AudioCoreController extends ChangeNotifier
       throw StateError('AudioCoreController is not initialized.');
     }
 
-    return _engine.getAudioPcm(path: path, sampleStride: sampleStride);
+    return _analysisService.getAudioPcm(path: path, sampleStride: sampleStride);
   }
 
   /// Registers a persistent Apple security-scoped bookmark for [path].
@@ -837,40 +845,40 @@ class AudioCoreController extends ChangeNotifier
   Future<bool> registerPersistentAccess({String? path}) async {
     final targetPath = _resolvePersistentAccessPath(path);
     if (targetPath == null) return false;
-    return _engine.registerPersistentAccess(targetPath);
+    return _fileAccess.registerPersistentAccess(targetPath);
   }
 
   /// Forgets a previously saved persistent Apple security-scoped bookmark.
   Future<void> forgetPersistentAccess({String? path}) async {
     final targetPath = _resolvePersistentAccessPath(path);
     if (targetPath == null) return;
-    await _engine.forgetPersistentAccess(targetPath);
+    await _fileAccess.forgetPersistentAccess(targetPath);
   }
 
   /// Returns whether the controller has a stored persistent access entry.
   Future<bool> hasPersistentAccess({String? path}) async {
     final targetPath = _resolvePersistentAccessPath(path);
     if (targetPath == null) return false;
-    return _engine.hasPersistentAccess(targetPath);
+    return _fileAccess.hasPersistentAccess(targetPath);
   }
 
   /// Returns all stored persistent access paths known to the Apple backend.
   Future<List<String>> listPersistentAccessPaths() async {
-    return _engine.listPersistentAccessPaths();
+    return _fileAccess.listPersistentAccessPaths();
   }
 
   /// Begins an Apple security-scoped access session for [path].
   Future<bool> beginScopedAccess({required String path}) async {
     final targetPath = _resolvePersistentAccessPath(path);
     if (targetPath == null) return false;
-    return _engine.beginScopedAccess(targetPath);
+    return _fileAccess.beginScopedAccess(targetPath);
   }
 
   /// Ends an Apple security-scoped access session for [path].
   Future<void> endScopedAccess({required String path}) async {
     final targetPath = _resolvePersistentAccessPath(path);
     if (targetPath == null) return;
-    await _engine.endScopedAccess(targetPath);
+    await _fileAccess.endScopedAccess(targetPath);
   }
 
   /// Requests Android audio library permission through the platform bridge.
@@ -1122,7 +1130,7 @@ class AudioCoreController extends ChangeNotifier
       throw StateError('AudioCoreController is not initialized.');
     }
 
-    return _engine.generateTrackArtwork(
+    return _analysisService.generateTrackArtwork(
       path: path,
       artworkBytes: artworkBytes,
       cacheRootPath: cacheRootPath,

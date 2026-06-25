@@ -3,11 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import '../fft_processor.dart';
 import '../rust/api/simple/equalizer.dart';
-import '../rust/api/simple_api.dart' as rust;
 import 'audio_engine_interface.dart';
-import 'track_artwork_support.dart';
 
-class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
+class AndroidAudioEngine implements AudioEngine {
   static const MethodChannel _channel = MethodChannel('my_exoplayer');
   static const EventChannel _fftChannel = EventChannel('my_exoplayer/fft');
 
@@ -17,9 +15,7 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   double _currentVolume = 1.0;
   final String _activePlayerId = 'main';
   EqualizerConfig? _lastConfig;
-  bool _isPlaying = false;
   List<double> _latestFftCache = const <double>[];
-  _PendingAndroidEdit? _pendingEdit;
 
   @override
   Stream<AudioStatus> get statusStream => _statusController.stream;
@@ -38,8 +34,6 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
           final int updateTimeMs =
               call.arguments['updateTime'] ??
               DateTime.now().millisecondsSinceEpoch;
-
-          _isPlaying = isPlaying;
 
           _statusController.add(
             AudioStatus(
@@ -66,7 +60,6 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
 
   @override
   Future<void> dispose() async {
-    _pendingEdit = null;
     await _fftSubscription?.cancel();
     _fftSubscription = null;
     _latestFftCache = const <double>[];
@@ -77,7 +70,6 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
 
   @override
   Future<void> stop() async {
-    _pendingEdit = null;
     _latestFftCache = const <double>[];
     await _channel.invokeMethod('dispose', {'playerId': 'main'});
     await _channel.invokeMethod('dispose', {'playerId': 'crossfade'});
@@ -236,27 +228,6 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
-  Future<Float32List> getAudioPcm({String? path, int sampleStride = 0}) {
-    throw UnsupportedError('PCM extraction is not available on Android.');
-  }
-
-  @override
-  Future<int> getAudioPcmChannelCount({String? path}) {
-    throw UnsupportedError('PCM extraction is not available on Android.');
-  }
-
-  @override
-  Future<List<double>> getWaveform({
-    required String path,
-    required int expectedChunks,
-    int sampleStride = 0,
-  }) => loadWaveformFromRust(
-    path: path,
-    expectedChunks: expectedChunks,
-    sampleStride: sampleStride,
-  );
-
-  @override
   Future<void> setEqualizerConfig(EqualizerConfig config) async {
     final previous = _lastConfig;
     await _applyConfigToPlayer(
@@ -331,95 +302,4 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
 
   @override
   bool get supportsCrossfade => true;
-
-  @override
-  String normalizeArtworkPath(String path) => path;
-
-  @override
-  Future<String?> extractFingerprint(String path) async {
-    try {
-      return await rust.getAudioFingerprint(path: path);
-    } catch (e) {
-      debugPrint('[AndroidAudioEngine] Fingerprint extraction failed: $e');
-      return null;
-    }
-  }
-
-  // Internal helper for non-AudioEngine interface methods if needed
-  Future<Map<String, dynamic>?> getSystemEqualizerParams() async {
-    final Map<dynamic, dynamic>? result = await _channel.invokeMethod(
-      'getSystemEqualizerParams',
-      {'playerId': _activePlayerId},
-    );
-    return result?.cast<String, dynamic>();
-  }
-
-  @override
-  Future<void> prepareForFileWrite() async {
-    final path = _currentPath;
-    if (path == null) return;
-
-    final pos = await getCurrentPosition();
-    _pendingEdit = _PendingAndroidEdit(
-      path: path,
-      position: pos.position,
-      wasPlaying: _isPlaying,
-    );
-
-    await _channel.invokeMethod('prepareForFileWrite', {
-      'playerId': _activePlayerId,
-    });
-  }
-
-  @override
-  Future<void> finishFileWrite() async {
-    final edit = _pendingEdit;
-    if (edit == null) return;
-
-    try {
-      // Reload the audio file and restore the previous playback point.
-      await load(edit.path);
-      await seek(edit.position);
-      if (edit.wasPlaying) {
-        await _channel.invokeMethod('play', {
-          'playerId': _activePlayerId,
-          'fadeDurationMs': 0,
-        });
-      }
-      _pendingEdit = null;
-    } catch (_) {
-      // Keep the pending snapshot so callers can attempt recovery again.
-      rethrow;
-    }
-  }
-
-  @override
-  Future<bool> registerPersistentAccess(String path) async => false;
-
-  @override
-  Future<void> forgetPersistentAccess(String path) async {}
-
-  @override
-  Future<bool> hasPersistentAccess(String path) async => false;
-
-  @override
-  Future<List<String>> listPersistentAccessPaths() async => const <String>[];
-
-  @override
-  Future<bool> beginScopedAccess(String path) async => true;
-
-  @override
-  Future<void> endScopedAccess(String path) async {}
-}
-
-class _PendingAndroidEdit {
-  final String path;
-  final Duration position;
-  final bool wasPlaying;
-
-  _PendingAndroidEdit({
-    required this.path,
-    required this.position,
-    required this.wasPlaying,
-  });
 }
