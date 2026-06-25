@@ -21,5 +21,5 @@ export 'visualizer_output_config.dart';
 export 'visualizer_output_manager.dart';
 export 'visualizer_output_stream.dart';
 export 'audio_core_controller.dart'
-    show AudioCoreController, shouldAutoAdvanceFromStatus;
+    show AudioCoreController, EqualizerController, shouldAutoAdvanceFromStatus;
 export 'waveform_pcm_processor.dart';
