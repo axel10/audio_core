@@ -265,6 +265,7 @@ configure_args=(
   --enable-muxer=opus
   --enable-muxer=wav
 
+  --enable-encoder=aac
   --enable-encoder=libfdk_aac
   --enable-encoder=flac
   --enable-encoder=libopus

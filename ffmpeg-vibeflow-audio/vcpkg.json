@@ -266,10 +266,7 @@
             "avcodec",
             "avfilter",
             "avformat",
-            "fdk-aac",
-            "gpl",
             "mp3lame",
-            "nonfree",
             "opus",
             "swresample"
           ]
@@ -389,6 +386,7 @@
     },
     "fdk-aac": {
       "description": "AAC de/encoding via libfdk-aac, **including GPL-incompatible patent-encumbered HE-AAC**. If you do not require HE-AAC, use the built-in FFmpeg AAC codec.",
+      "supports": "!windows",
       "dependencies": [
         {
           "name": "fdk-aac",

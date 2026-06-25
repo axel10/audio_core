@@ -256,6 +256,7 @@ if("audio" IN_LIST FEATURES)
         --enable-muxer=opus
         --enable-muxer=wav
 
+        --enable-encoder=aac
         --enable-encoder=libfdk_aac
         --enable-encoder=flac
         --enable-encoder=libopus
@@ -402,7 +403,7 @@ else()
     set(WITH_DAV1D OFF)
 endif()
 
-if("fdk-aac" IN_LIST FEATURES)
+if("fdk-aac" IN_LIST FEATURES AND NOT VCPKG_TARGET_IS_WINDOWS)
     set(OPTIONS "${OPTIONS} --enable-libfdk-aac")
     set(WITH_AAC ON)
 else()

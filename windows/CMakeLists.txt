@@ -35,7 +35,6 @@ set(audio_core_bundled_libraries
   "${FFMPEG_DIR}/bin/avfilter-11.dll"
   "${FFMPEG_DIR}/bin/avformat-62.dll"
   "${FFMPEG_DIR}/bin/avutil-60.dll"
-  "${FFMPEG_DIR}/bin/fdk-aac.dll"
   "${FFMPEG_DIR}/bin/libmp3lame.dll"
   "${FFMPEG_DIR}/bin/opus.dll"
   "${FFMPEG_DIR}/bin/swresample-6.dll"
