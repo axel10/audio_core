@@ -6,7 +6,7 @@
 import '../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `build_square_thumbnail`, `current_time_millis`, `extract_embedded_artwork_with_id3`, `extract_embedded_artwork_with_lofty`, `extract_embedded_artwork`, `file_token`, `first_extended_text_value`, `first_tag_value`, `first_text_frame_value`, `id3_picture_type_to_label`, `lofty_picture_type_to_label`, `path_to_string`, `read_track_metadata_with_id3`, `read_track_metadata_with_lofty`, `replace_id3_pictures`, `replace_lofty_pictures`, `should_use_id3`, `update_track_metadata_with_id3`, `update_track_metadata_with_lofty`
+// These functions are ignored because they are not marked as `pub`: `build_square_thumbnail`, `current_time_millis`, `file_token`, `path_to_string`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`
 
 Future<void> updateTrackMetadata({
@@ -22,6 +22,9 @@ Future<TrackMetadataUpdate> getTrackMetadata({required String path}) =>
 
 Future<AudioDetails> getAudioDetails({required String path}) =>
     RustLib.instance.api.crateApiSimpleMetadataGetAudioDetails(path: path);
+
+Future<void> removeAllTags({required String path}) =>
+    RustLib.instance.api.crateApiSimpleMetadataRemoveAllTags(path: path);
 
 Future<TrackArtworkResult> generateTrackArtwork({
   required String path,
@@ -52,9 +55,6 @@ Future<TrackArtworkResult> generateTrackArtwork({
   meshHarmonyStrength: meshHarmonyStrength,
   meshVibrancyStrength: meshVibrancyStrength,
 );
-
-Future<void> removeAllTags({required String path}) =>
-    RustLib.instance.api.crateApiSimpleMetadataRemoveAllTags(path: path);
 
 class AudioDetails {
   final String formatName;
