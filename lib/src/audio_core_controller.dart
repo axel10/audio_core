@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'audio_core_controller_delegate.dart';
+import 'audio_core_playback_coordinator.dart';
 import 'player_models.dart';
 import 'playlist_models.dart';
 import 'player_controller.dart';
@@ -36,11 +37,7 @@ export 'equalizer_controller.dart';
 export 'playlist_models.dart';
 export 'player_state_snapshot.dart';
 export 'android_media_library.dart';
-
-@visibleForTesting
-bool shouldAutoAdvanceFromStatus(AudioStatus status) {
-  return status.playbackState == 'ENDED';
-}
+export 'audio_core_playback_coordinator.dart' show shouldAutoAdvanceFromStatus;
 
 /// The top-level modular controller for audio playback and visualization.
 class AudioCoreController extends ChangeNotifier
@@ -83,6 +80,12 @@ class AudioCoreController extends ChangeNotifier
     );
 
     equalizer = EqualizerController(delegate: this);
+    _playbackCoordinator = AudioCorePlaybackCoordinator(
+      player: player,
+      playlist: playlist,
+      loadTrack: loadTrack,
+      notifyListeners: notifyListeners,
+    );
   }
 
   static const int maxEqualizerBands = EqualizerController.maxEqualizerBands;
@@ -101,6 +104,7 @@ class AudioCoreController extends ChangeNotifier
   late final PlaylistController playlist;
   late final VisualizerController visualizer;
   late final EqualizerController equalizer;
+  late final AudioCorePlaybackCoordinator _playbackCoordinator;
   late final FadeSettings _initialFadeSettings;
 
   List<double> _latestFftCache = const [];
@@ -108,8 +112,6 @@ class AudioCoreController extends ChangeNotifier
   static bool _rustLibInitialized = false;
   static bool _rustAppInitialized = false;
   bool _initialized = false;
-  bool _isTransitioning = false;
-  String? _lastEndedAutoAdvancePath;
   Timer? _analysisTick;
   Timer? _renderTick;
   StreamSubscription<AudioStatus>? _playbackStateSubscription;
@@ -146,7 +148,7 @@ class AudioCoreController extends ChangeNotifier
     previousTrack: playlist.previousTrack,
     error: player.error,
     equalizerConfig: equalizer.config,
-    isTransitioning: _isTransitioning,
+    isTransitioning: _playbackCoordinator.isTransitioning,
   );
 
   @override
@@ -251,7 +253,7 @@ class AudioCoreController extends ChangeNotifier
       await _engine.initialize();
       await _engine.updateVisualizerFftOptions(visualizer.options);
       _playbackStateSubscription = _engine.statusStream.listen(
-        _handlePlaybackStatusUpdate,
+        _playbackCoordinator.handlePlaybackStatusUpdate,
       );
       return true;
     } catch (e) {
@@ -266,50 +268,6 @@ class AudioCoreController extends ChangeNotifier
       (_) => unawaited(_onAnalysisTick()),
     );
     _renderTick = Timer.periodic(_renderInterval, (_) => _onRenderTick());
-  }
-
-  void _handlePlaybackStatusUpdate(AudioStatus status) {
-    final currentPath = player.currentPath;
-    if (status.playbackState == 'ENDED' &&
-        status.path != null &&
-        currentPath != null &&
-        status.path != currentPath) {
-      debugPrint(
-        '[AudioCoreController] ignoring stale ENDED from ${status.path} '
-        'while current path is $currentPath',
-      );
-      return;
-    }
-
-    var adjustedPosition = status.position;
-    final updateTimeMs = status.updateTimeSinceEpochMs;
-    if (updateTimeMs != null && status.isPlaying) {
-      final offset = DateTime.now().millisecondsSinceEpoch - updateTimeMs;
-      if (offset > 0) {
-        adjustedPosition += Duration(milliseconds: offset);
-      }
-    }
-
-    player.applySnapshot(
-      status.path,
-      status.playbackState,
-      adjustedPosition,
-      status.duration,
-      status.isPlaying,
-      status.volume,
-      error: status.error,
-    );
-
-    if (shouldAutoAdvanceFromStatus(status)) {
-      final endedPath = status.path;
-      if (endedPath == null || endedPath != _lastEndedAutoAdvancePath) {
-        _lastEndedAutoAdvancePath = endedPath;
-        unawaited(_handleAutoTransition());
-      }
-    } else if (status.playbackState != 'ENDED' &&
-        player.currentState != PlayerState.completed) {
-      _lastEndedAutoAdvancePath = null;
-    }
   }
 
   // --- AudioCoreControllerDelegate Implementation ---
@@ -361,10 +319,7 @@ class AudioCoreController extends ChangeNotifier
       position: position,
       reason: reason,
       fadeSetting: fadeSetting,
-      onStateChanged: (progressing) {
-        _isTransitioning = progressing;
-        notifyListeners();
-      },
+      onStateChanged: _playbackCoordinator.updateTransitioning,
     );
     visualizer.resetState();
 
@@ -641,7 +596,7 @@ class AudioCoreController extends ChangeNotifier
     await _engine.stop();
     player.stopPlayback();
     visualizer.resetState();
-    _lastEndedAutoAdvancePath = null;
+    _playbackCoordinator.clearEndedTracking();
   }
 
   /// Resets the playback session to the initial empty state.
@@ -651,8 +606,7 @@ class AudioCoreController extends ChangeNotifier
     visualizer.resetState();
     await playlist.resetPlaybackState();
     _latestFftCache = const [];
-    _isTransitioning = false;
-    _lastEndedAutoAdvancePath = null;
+    _playbackCoordinator.reset();
     notifyListeners();
   }
 
@@ -735,35 +689,6 @@ class AudioCoreController extends ChangeNotifier
           player.updatePosition(adjustedPos);
         }
       });
-    }
-  }
-
-  Future<void> _handleAutoTransition() async {
-    if (_isTransitioning || player.currentState != PlayerState.completed) {
-      debugPrint(
-        '[AudioCoreController] autoTransition skipped '
-        'isTransitioning=$_isTransitioning playerState=${player.currentState} '
-        'currentPath=${player.currentPath ?? "nil"}',
-      );
-      return;
-    }
-
-    debugPrint(
-      '[AudioCoreController] autoTransition mode=${playlist.mode} '
-      'current=${playlist.currentTrack?.id} next=${playlist.nextTrack?.id} '
-      'lastEnded=$_lastEndedAutoAdvancePath',
-    );
-
-    if (playlist.mode == PlaylistMode.singleLoop) {
-      await loadTrack(autoPlay: true, reason: PlaybackReason.autoNext);
-      return;
-    }
-
-    if (playlist.mode == PlaylistMode.single) return;
-
-    final success = await playlist.playNext(reason: PlaybackReason.autoNext);
-    if (!success) {
-      // End of queue logic could go here
     }
   }
 

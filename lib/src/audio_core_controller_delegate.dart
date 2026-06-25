@@ -1,8 +1,8 @@
 import 'package:meta/meta.dart';
 
 import 'audio_engine/audio_engine_interface.dart';
+import 'player_models.dart';
 import 'playlist_models.dart';
-import 'random_playback_models.dart';
 
 /// Internal delegate shared by sub-controllers owned by [AudioCoreController].
 @internal
