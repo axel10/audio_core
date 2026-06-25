@@ -19,6 +19,14 @@ find_library( # Sets the name of the path variable.
         # you want CMake to locate.
         log)
 
+set(AUDIO_CONVERTER_FFMPEG_ROOT
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../ffmpeg_lib/${CMAKE_ANDROID_ARCH_ABI}
+        CACHE PATH "FFmpeg root directory for Android fallback"
+)
+set(FFMPEG_AVCODEC_LIB ${AUDIO_CONVERTER_FFMPEG_ROOT}/lib/libavcodec.so)
+set(FFMPEG_AVUTIL_LIB ${AUDIO_CONVERTER_FFMPEG_ROOT}/lib/libavutil.so)
+set(FFMPEG_SWRESAMPLE_LIB ${AUDIO_CONVERTER_FFMPEG_ROOT}/lib/libswresample.so)
+
 set(MEDIA3_FFMPEG_JNI_SOURCE
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../media3-src/decoder_ffmpeg/src/main/jni/ffmpeg_jni.cc)
 if(EXISTS "${MEDIA3_FFMPEG_JNI_SOURCE}"
