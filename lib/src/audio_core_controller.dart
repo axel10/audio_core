@@ -45,40 +45,19 @@ class AudioCoreController extends ChangeNotifier
   static const MethodChannel _androidMediaLibraryChannel = MethodChannel(
     'audio_core.media_library',
   );
-  static AudioCoreController? _instance;
-
-  factory AudioCoreController({
-    int fftSize = 1024,
-    double analysisFrequencyHz = 30.0,
+  AudioCoreController({
+    this.fftSize = 1024,
+    this.analysisFrequencyHz = 30.0,
     FadeSettings fadeSettings = const FadeSettings(),
     VisualizerOptimizationOptions visualOptions =
         const VisualizerOptimizationOptions(),
     AudioEngine? engine,
     MetadataService? metadataService,
   }) {
-    return _instance ??= AudioCoreController._internal(
-      fftSize: fftSize,
-      analysisFrequencyHz: analysisFrequencyHz,
-      fadeSettings: fadeSettings,
-      visualOptions: visualOptions,
-      engine: engine ?? createDefaultAudioEngine(),
-      metadataService: metadataService ?? const FlutterTaglibMetadataService(),
-    );
-  }
-
-  AudioCoreController._internal({
-    required this.fftSize,
-    required this.analysisFrequencyHz,
-    required FadeSettings fadeSettings,
-    VisualizerOptimizationOptions visualOptions =
-        const VisualizerOptimizationOptions(),
-    required AudioEngine engine,
-    required MetadataService metadataService,
-  }) {
-    _engine = engine;
+    _engine = engine ?? createDefaultAudioEngine();
     _metadataCoordinator = TrackMetadataCoordinator(
-      engine: engine,
-      metadataService: metadataService,
+      engine: _engine,
+      metadataService: metadataService ?? const FlutterTaglibMetadataService(),
       currentPlaybackPath: () => player.currentPath,
       notifyListeners: () => notifyListeners(),
       reportError: (message) => player.setError(message),
@@ -120,6 +99,7 @@ class AudioCoreController extends ChangeNotifier
   List<double> _latestFftCache = const [];
 
   static bool _rustLibInitialized = false;
+  static bool _rustAppInitialized = false;
   bool _initialized = false;
   bool _isTransitioning = false;
   String? _lastEndedAutoAdvancePath;
@@ -201,8 +181,11 @@ class AudioCoreController extends ChangeNotifier
 
     try {
       if (_usesRustPlaybackBackend) {
-        debugPrint('AudioCoreController: Initializing Rust App engine');
-        await initApp();
+        if (!_rustAppInitialized) {
+          debugPrint('AudioCoreController: Initializing Rust App engine');
+          await initApp();
+          _rustAppInitialized = true;
+        }
       }
     } catch (e) {
       debugPrint('AudioCoreController: Rust App engine init failed: $e');

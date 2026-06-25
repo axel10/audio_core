@@ -748,8 +748,9 @@ class AudioConverter {
     if (sourcePath.trim().isEmpty || targetPath.trim().isEmpty) {
       return;
     }
+    final createdController = controller == null;
+    final activeController = controller ?? AudioCoreController();
     try {
-      final activeController = controller ?? AudioCoreController();
       if (!activeController.isInitialized) {
         await activeController.initialize();
       }
@@ -761,6 +762,10 @@ class AudioConverter {
       debugPrint(
         '[AudioConverter] Failed to copy metadata from $sourcePath to $targetPath: $e',
       );
+    } finally {
+      if (createdController) {
+        activeController.dispose();
+      }
     }
   }
 
