@@ -10,7 +10,7 @@ if [[ -f "$target_dir/lib/pkgconfig/libavcodec.pc" ]]; then
   exit 0
 fi
 
-download_url="https://github.com/axel10/audio_core/releases/download/0.2/ffmpeg_lib_linux.tar.gz"
+download_url="https://github.com/axel10/audio_core/releases/download/0.6/ffmpeg_lib_linux.tar.gz"
 temp_file="$repo_root/ffmpeg_lib_linux_temp.tar.gz"
 
 echo "Downloading precompiled FFmpeg Linux libraries from $download_url..."

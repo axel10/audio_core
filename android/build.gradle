@@ -125,7 +125,7 @@ task downloadFFmpeg {
             println "--------------------------------------------------------"
             
             targetDir.mkdirs()
-            def downloadUrl = "https://github.com/axel10/audio_core/releases/download/0.5/ffmpeg_lib_android.tar.gz"
+            def downloadUrl = "https://github.com/axel10/audio_core/releases/download/0.6/ffmpeg_lib_android.tar.gz"
             def tempFile = file("ffmpeg_lib_temp.tar.gz")
             
             try {

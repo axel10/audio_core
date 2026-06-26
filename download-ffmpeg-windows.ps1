@@ -11,7 +11,7 @@ if (Test-Path -LiteralPath $checkFile) {
     Exit 0
 }
 
-$downloadUrl = "https://github.com/axel10/audio_core/releases/download/0.4/ffmpeg_lib_windows.zip"
+$downloadUrl = "https://github.com/axel10/audio_core/releases/download/0.6/ffmpeg_lib_windows.zip"
 $tempFile = Join-Path -Path $repoRoot -ChildPath "ffmpeg_lib_windows_temp.zip"
 
 Write-Host "Downloading precompiled FFmpeg Windows libraries from $downloadUrl..."
