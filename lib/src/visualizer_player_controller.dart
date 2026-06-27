@@ -258,6 +258,9 @@ class AudioCoreController extends ChangeNotifier
           status.volume,
           error: status.error,
         );
+        if (status.isPlaying) {
+          _startVisualizerTicks();
+        }
         // Use the native snapshot for handoff. Some backends emit ENDED
         // explicitly; Flutter no longer infers completion from position.
         if (shouldAutoAdvanceFromStatus(status)) {
@@ -276,11 +279,7 @@ class AudioCoreController extends ChangeNotifier
       return;
     }
 
-    _analysisTick = Timer.periodic(
-      _analysisInterval,
-      (_) => unawaited(_onAnalysisTick()),
-    );
-    _renderTick = Timer.periodic(_renderInterval, (_) => _onRenderTick());
+    _startVisualizerTicks();
 
     debugPrint('AudioCoreController: Starting visualizer outputs');
     visualizer.visualizerOutputManager.startAll();
@@ -684,6 +683,28 @@ class AudioCoreController extends ChangeNotifier
       _renderInterval.inMicroseconds,
       _analysisInterval.inMicroseconds,
     );
+    if (!player.isPlaying) {
+      final isAllZero = visualizer.optimizedMagnitudes.every((v) => v < 1e-4);
+      if (isAllZero) {
+        _stopVisualizerTicks();
+      }
+    }
+  }
+
+  void _startVisualizerTicks() {
+    if (_analysisTick != null || _renderTick != null) return;
+    _analysisTick = Timer.periodic(
+      _analysisInterval,
+      (_) => unawaited(_onAnalysisTick()),
+    );
+    _renderTick = Timer.periodic(_renderInterval, (_) => _onRenderTick());
+  }
+
+  void _stopVisualizerTicks() {
+    _analysisTick?.cancel();
+    _analysisTick = null;
+    _renderTick?.cancel();
+    _renderTick = null;
   }
 
   DateTime? _lastLocalAdvanceTime;
