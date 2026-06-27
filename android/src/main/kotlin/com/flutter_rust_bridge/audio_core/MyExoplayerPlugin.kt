@@ -1542,6 +1542,9 @@ class MyExoplayerPlugin :
             "fileExistsInDirectory" -> {
                 fileExistsInDirectory(call.arguments, result)
             }
+            "directoryExists" -> {
+                directoryExists(call.arguments, result)
+            }
             else -> {
                 result.notImplemented()
             }
@@ -1747,6 +1750,34 @@ class MyExoplayerPlugin :
                 val actualFileName = pathSegments.last()
                 val existing = currentDir.findFile(actualFileName)
                 result.success(existing != null && existing.isFile)
+            } catch (e: Exception) {
+                result.success(false)
+            }
+        }.start()
+    }
+
+    private fun directoryExists(arguments: Any?, result: Result) {
+        val safeActivity = activity ?: run {
+            result.error("no_activity", "Android activity is not available.", null)
+            return
+        }
+        if (arguments !is Map<*, *>) {
+            result.error("invalid_arguments", "Expected a map of arguments.", null)
+            return
+        }
+
+        val treeUriString = arguments["treeUri"]?.toString()
+        if (treeUriString.isNullOrEmpty()) {
+            result.error("invalid_arguments", "Missing treeUri.", null)
+            return
+        }
+
+        val treeUri = Uri.parse(treeUriString)
+        Thread {
+            try {
+                val tree = DocumentFile.fromTreeUri(safeActivity, treeUri)
+                val exists = tree != null && tree.exists() && tree.isDirectory
+                result.success(exists)
             } catch (e: Exception) {
                 result.success(false)
             }
