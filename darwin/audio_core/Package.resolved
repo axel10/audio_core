@@ -64,15 +64,6 @@
       }
     },
     {
-      "identity" : "cxxtaglib",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/sbooth/CXXTagLib",
-      "state" : {
-        "revision" : "b570acead5e27006cb41ab5ff7443c8797b3b8e5",
-        "version" : "2.3.0"
-      }
-    },
-    {
       "identity" : "cxxunfairlock",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/sbooth/CXXUnfairLock",
@@ -124,15 +115,6 @@
       "state" : {
         "revision" : "8e23828b9d88f0ff1ff2d7c4bcb65739a4bdeff8",
         "version" : "0.3.0"
-      }
-    },
-    {
-      "identity" : "sfbaudioengine",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/axel10/SFBAudioEngine",
-      "state" : {
-        "branch" : "main",
-        "revision" : "4c3ead79aaa8460c63e22cc2e47be0d1bda3adcd"
       }
     },
     {
