@@ -101,9 +101,6 @@ enum PlaylistMode {
 
   /// 队列循环：顺序播放当前队列，播完最后一首后回到第一首继续。
   queueLoop,
-
-  /// 自动队列循环：播完当前队列后，自动加载并播放下一个播放列表。
-  autoQueueLoop,
 }
 
 /// Repeat behavior used by playlist playback.

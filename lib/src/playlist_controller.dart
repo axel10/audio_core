@@ -542,8 +542,7 @@ class PlaylistController extends ChangeNotifier {
             tracks: _activePlaylistTracks,
             currentTrack: currentTrack,
             loop:
-                _playlistMode == PlaylistMode.queueLoop ||
-                _playlistMode == PlaylistMode.autoQueueLoop,
+                _playlistMode == PlaylistMode.queueLoop,
             peek: false,
           );
           if (resolution == null) {
@@ -601,8 +600,7 @@ class PlaylistController extends ChangeNotifier {
     if (length == 0) return null;
 
     final loop =
-        _playlistMode == PlaylistMode.queueLoop ||
-        _playlistMode == PlaylistMode.autoQueueLoop;
+        _playlistMode == PlaylistMode.queueLoop;
     var steps = 0;
     var index = _currentIndex!;
 
@@ -664,8 +662,7 @@ class PlaylistController extends ChangeNotifier {
         tracks: _activePlaylistTracks,
         currentTrack: currentTrack,
         loop:
-            _playlistMode == PlaylistMode.queueLoop ||
-            _playlistMode == PlaylistMode.autoQueueLoop,
+            _playlistMode == PlaylistMode.queueLoop,
         peek: peek,
       );
     }
@@ -682,16 +679,14 @@ class PlaylistController extends ChangeNotifier {
 
     if (next) {
       if (cursor < _playOrder.length - 1) return _playOrder[cursor + 1];
-      if (_playlistMode == PlaylistMode.queueLoop ||
-          _playlistMode == PlaylistMode.autoQueueLoop) {
+      if (_playlistMode == PlaylistMode.queueLoop) {
         return _playOrder[0];
       }
       return null;
     }
 
     if (cursor > 0) return _playOrder[cursor - 1];
-    if (_playlistMode == PlaylistMode.queueLoop ||
-        _playlistMode == PlaylistMode.autoQueueLoop) {
+    if (_playlistMode == PlaylistMode.queueLoop) {
       return _playOrder.last;
     }
     return null;

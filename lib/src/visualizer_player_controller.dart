@@ -649,8 +649,7 @@ class AudioCoreController extends ChangeNotifier
     if (playlist.items.isEmpty) return false;
 
     if (playlist.mode == PlaylistMode.queue ||
-        playlist.mode == PlaylistMode.queueLoop ||
-        playlist.mode == PlaylistMode.autoQueueLoop) {
+        playlist.mode == PlaylistMode.queueLoop) {
       final hasNext = playlist.resolveAdjacentIndex(next: true);
       if (hasNext == null) {
         await playlist.setActivePlaylist(
