@@ -1,5 +1,9 @@
 // swift-tools-version: 5.9
 import PackageDescription
+import Foundation
+
+let packageDir = URL(fileURLWithPath: #file).resolvingSymlinksInPath().deletingLastPathComponent()
+let sfbPath = packageDir.appendingPathComponent("../../SFBAudioEngine").path
 
 let package = Package(
     name: "audio_core",
@@ -11,7 +15,7 @@ let package = Package(
         .library(name: "audio-core", targets: ["audio_core"])
     ],
     dependencies: [
-        .package(url: "https://github.com/axel10/SFBAudioEngine", branch: "main")
+        .package(path: sfbPath)
     ],
     targets: [
         .target(
