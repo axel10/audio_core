@@ -8,7 +8,6 @@ import Foundation
 import audio_core
 import audio_service
 import audio_session
-import dart_chromaprint
 import desktop_drop
 import file_picker
 import shared_preferences_foundation
@@ -18,7 +17,6 @@ func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
   AudioCorePlugin.register(with: registry.registrar(forPlugin: "AudioCorePlugin"))
   AudioServicePlugin.register(with: registry.registrar(forPlugin: "AudioServicePlugin"))
   AudioSessionPlugin.register(with: registry.registrar(forPlugin: "AudioSessionPlugin"))
-  DartChromaprintPlugin.register(with: registry.registrar(forPlugin: "DartChromaprintPlugin"))
   DesktopDropPlugin.register(with: registry.registrar(forPlugin: "DesktopDropPlugin"))
   FilePickerPlugin.register(with: registry.registrar(forPlugin: "FilePickerPlugin"))
   SharedPreferencesPlugin.register(with: registry.registrar(forPlugin: "SharedPreferencesPlugin"))
