@@ -12,7 +12,7 @@ let package = Package(
         .macOS("13.0")
     ],
     products: [
-        .library(name: "audio-core", targets: ["audio_core"])
+        .library(name: "audio-core", type: .dynamic, targets: ["audio_core"])
     ],
     dependencies: [
         .package(path: sfbPath)
