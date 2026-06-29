@@ -371,9 +371,10 @@ final class AppleAudioEngine: NSObject {
         return
       }
 
+      let outgoingKind = activeSlotKind
       let incomingKind = activeSlotKind.opposite
       let incomingSlot = slot(for: incomingKind)
-      print("[AppleAudioEngine] crossfade: outgoingKind=\(activeSlotKind) (url: \(outgoingSlot.url?.lastPathComponent ?? "nil")), incomingKind=\(incomingKind)")
+      print("[AppleAudioEngine] crossfade: outgoingKind=\(outgoingKind) (url: \(outgoingSlot.url?.lastPathComponent ?? "nil")), incomingKind=\(incomingKind)")
       if let oldURL = incomingSlot.url {
         print("[AppleAudioEngine] crossfade: release access for old url: \(oldURL.path)")
         fileAccess.releaseAccess(for: oldURL)
@@ -400,9 +401,13 @@ final class AppleAudioEngine: NSObject {
       incomingSlot.gain = 0.0
       incomingSlot.applyBaseVolume(latestVolume)
 
+      // Update activeSlotKind to incomingKind immediately so that status queries and
+      // delegate events refer to the incoming track during crossfade.
+      activeSlotKind = incomingKind
+
       print("[AppleAudioEngine] crossfade: starting crossfade timer with durationMs=\(fadeDurationMs)")
       startCrossfadeTimer(
-        outgoingKind: activeSlotKind,
+        outgoingKind: outgoingKind,
         incomingKind: incomingKind,
         durationMs: fadeDurationMs
       )
