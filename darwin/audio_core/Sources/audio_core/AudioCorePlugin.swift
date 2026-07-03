@@ -230,6 +230,17 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       emitLatestFftSnapshot()
       result(nil)
 
+    case "setFftCaptureEnabled":
+      let enabled = (call.arguments as? [String: Any])?["enabled"] as? Bool ?? false
+      engine.setFftCaptureEnabled(enabled)
+      if enabled {
+        startFftTimerIfNeeded()
+        emitLatestFftSnapshot()
+      } else {
+        stopFftTimer()
+      }
+      result(nil)
+
     case "fitTrackMetadata":
       guard let args = call.arguments as? [String: Any] else {
         result(FlutterError(code: "INVALID_ARGUMENT", message: "Arguments are null", details: nil))

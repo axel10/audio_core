@@ -720,6 +720,14 @@ class MyExoplayerPlugin :
                 }
                 result.success(null)
             }
+            "setFftCaptureEnabled" -> {
+                val enabled = call.argument<Boolean>("enabled") ?: false
+                val isPaused = !enabled
+                playerContexts.values.forEach { playerContext ->
+                    playerContext.fftProcessor.isPaused = isPaused
+                }
+                result.success(null)
+            }
             "getCurrentPosition" -> {
                 val snapshotCtx = if (playerId == MAIN_PLAYER_ID && activeCrossfadeSession != null) {
                     publicPlaybackContext() ?: ctx

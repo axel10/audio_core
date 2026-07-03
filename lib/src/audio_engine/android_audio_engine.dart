@@ -240,6 +240,13 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
+  Future<void> setFftCaptureEnabled(bool enabled) {
+    return _channel.invokeMethod('setFftCaptureEnabled', {
+      'enabled': enabled,
+    });
+  }
+
+  @override
   Future<Float32List> getAudioPcm({String? path, int sampleStride = 0}) {
     throw UnsupportedError('PCM extraction is not available on Android.');
   }

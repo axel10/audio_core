@@ -140,6 +140,9 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   ) async {}
 
   @override
+  Future<void> setFftCaptureEnabled(bool enabled) async {}
+
+  @override
   bool get fftDataIsPreGrouped => false;
 
   @override

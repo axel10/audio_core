@@ -27,13 +27,18 @@ where
     output_buffer: Vec<Complex<f32>>,
     index: usize,
     latest_fft: Arc<Mutex<Vec<f32>>>,
+    last_fft_request_time: Arc<Mutex<std::time::Instant>>,
 }
 
 impl<S> FftSource<S>
 where
     S: Source<Item = f32>,
 {
-    pub fn new(inner: S, latest_fft: Arc<Mutex<Vec<f32>>>) -> Self {
+    pub fn new(
+        inner: S,
+        latest_fft: Arc<Mutex<Vec<f32>>>,
+        last_fft_request_time: Arc<Mutex<std::time::Instant>>,
+    ) -> Self {
         let mut planner = RealFftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(FFT_SIZE);
         let channels = usize::from(inner.channels().get().max(1));
@@ -57,6 +62,7 @@ where
             window_sum,
             index: 0,
             latest_fft,
+            last_fft_request_time,
         }
     }
 
@@ -71,6 +77,21 @@ where
     }
 
     fn compute_fft(&mut self) {
+        let should_compute = if let Ok(last_time) = self.last_fft_request_time.lock() {
+            last_time.elapsed() < Duration::from_millis(1500)
+        } else {
+            false
+        };
+
+        if !should_compute {
+            if let Ok(mut shared) = self.latest_fft.lock() {
+                if !shared.iter().all(|&x| x == 0.0) {
+                    shared.fill(0.0);
+                }
+            }
+            return;
+        }
+
         for (s, w) in self.input_buffer.iter_mut().zip(self.hann_window.iter()) {
             *s *= *w;
         }

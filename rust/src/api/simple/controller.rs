@@ -257,6 +257,7 @@ struct PlayerController {
     pause_fade_in_progress: bool,
     pending_playback_state: Option<String>,
     last_decode_engine: Option<String>,
+    last_fft_request_time: Arc<Mutex<std::time::Instant>>,
 }
 
 struct PendingEdit {
@@ -350,6 +351,13 @@ impl PlayerController {
             pause_fade_in_progress: false,
             pending_playback_state: None,
             last_decode_engine: None,
+            last_fft_request_time: Arc::new(Mutex::new(std::time::Instant::now())),
+        }
+    }
+
+    fn record_fft_request(&self) {
+        if let Ok(mut last) = self.last_fft_request_time.lock() {
+            *last = std::time::Instant::now();
         }
     }
 
@@ -473,7 +481,11 @@ impl PlayerController {
         };
         let end_path = path.to_string();
         let notifying_source = EndNotifySource::new(
-            FftSource::new(audio_source, Arc::clone(&latest_fft)),
+            FftSource::new(
+                audio_source,
+                Arc::clone(&latest_fft),
+                Arc::clone(&self.last_fft_request_time),
+            ),
             move || {
                 if let Ok(mut c) = controller().lock() {
                     c.mark_track_ended(&end_path);
@@ -1303,6 +1315,7 @@ pub fn get_audio_position_ms() -> i64 {
 
 pub fn get_latest_fft() -> Vec<f32> {
     if let Ok(c) = controller().lock() {
+        c.record_fft_request();
         if let Some(deck) = c.public_deck() {
             if let Ok(fft) = deck.latest_fft.lock() {
                 return fft.clone();

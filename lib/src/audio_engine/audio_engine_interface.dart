@@ -69,6 +69,7 @@ abstract class AudioEngine {
   Future<void> updateVisualizerFftOptions(
     VisualizerOptimizationOptions options,
   );
+  Future<void> setFftCaptureEnabled(bool enabled) async {}
   bool get fftDataIsPreGrouped;
   Future<Float32List> getAudioPcm({String? path, int sampleStride});
 

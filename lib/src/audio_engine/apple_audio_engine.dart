@@ -238,6 +238,13 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
+  Future<void> setFftCaptureEnabled(bool enabled) async {
+    await _channel.invokeMethod('setFftCaptureEnabled', <String, Object?>{
+      'enabled': enabled,
+    });
+  }
+
+  @override
   bool get fftDataIsPreGrouped => false;
 
   @override

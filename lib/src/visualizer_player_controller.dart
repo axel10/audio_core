@@ -218,6 +218,7 @@ class AudioCoreController extends ChangeNotifier
     // Initialize Audio Engine
     try {
       await _engine.initialize();
+      await _engine.setFftCaptureEnabled(visualizer.enabled);
       await _engine.updateVisualizerFftOptions(visualizer.options);
       _playbackStateSubscription = _engine.statusStream.listen((status) {
         // debugPrint(
@@ -711,6 +712,7 @@ class AudioCoreController extends ChangeNotifier
   }
 
   void _handleVisualizerChanges() {
+    unawaited(_engine.setFftCaptureEnabled(visualizer.enabled));
     if (visualizer.enabled) {
       if (player.isPlaying) {
         _startVisualizerTicks();
