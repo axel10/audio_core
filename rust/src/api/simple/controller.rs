@@ -376,6 +376,7 @@ impl PlayerController {
         let device_name = describe_output_device(&device);
         let sink = DeviceSinkBuilder::from_device(device)
             .map_err(|e| format!("open default audio device failed: {e}"))?
+            .with_buffer_size(rodio::cpal::BufferSize::Fixed(2048))
             .open_stream()
             .map_err(|e| format!("open default audio device failed: {e}"))?;
         Ok((sink, device_name))
