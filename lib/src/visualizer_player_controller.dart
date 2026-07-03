@@ -42,37 +42,33 @@ bool shouldAutoAdvanceFromStatus(AudioStatus status) {
 
 /// The top-level modular controller for audio playback and visualization.
 class AudioCoreController extends ChangeNotifier
-    with WidgetsBindingObserver
     implements AudioVisualizerParent {
   static const MethodChannel _androidMediaLibraryChannel = MethodChannel(
     'audio_core.media_library',
   );
   static AudioCoreController? _instance;
-
+ 
   factory AudioCoreController({
     int fftSize = 1024,
     double analysisFrequencyHz = 30.0,
     FadeSettings fadeSettings = const FadeSettings(),
     VisualizerOptimizationOptions visualOptions =
         const VisualizerOptimizationOptions(),
-    bool suspendVisualizerInBackground = true,
   }) {
     return _instance ??= AudioCoreController._internal(
       fftSize: fftSize,
       analysisFrequencyHz: analysisFrequencyHz,
       fadeSettings: fadeSettings,
       visualOptions: visualOptions,
-      suspendVisualizerInBackground: suspendVisualizerInBackground,
     );
   }
-
+ 
   AudioCoreController._internal({
     required this.fftSize,
     required this.analysisFrequencyHz,
     required FadeSettings fadeSettings,
     VisualizerOptimizationOptions visualOptions =
         const VisualizerOptimizationOptions(),
-    this.suspendVisualizerInBackground = true,
   }) {
     if (Platform.isAndroid) {
       _engine = AndroidAudioEngine();
@@ -81,12 +77,12 @@ class AudioCoreController extends ChangeNotifier
     } else {
       _engine = RustAudioEngine();
     }
-
+ 
     player = PlayerController(parent: this);
     _initialFadeSettings = fadeSettings;
-
+ 
     playlist = PlaylistController(parent: this);
-
+ 
     visualizer = VisualizerController(
       fftSize: fftSize,
       visualOptions: visualOptions,
@@ -94,7 +90,8 @@ class AudioCoreController extends ChangeNotifier
       sourceAlreadyGrouped: _engine.fftDataIsPreGrouped,
       parent: this,
     );
-
+    visualizer.addListener(_handleVisualizerChanges);
+ 
     equalizer = EqualizerController(parent: this);
   }
 
@@ -109,7 +106,6 @@ class AudioCoreController extends ChangeNotifier
 
   final int fftSize;
   final double analysisFrequencyHz;
-  final bool suspendVisualizerInBackground;
 
   late final PlayerController player;
   late final PlaylistController playlist;
@@ -126,7 +122,6 @@ class AudioCoreController extends ChangeNotifier
   Timer? _analysisTick;
   Timer? _renderTick;
   StreamSubscription<AudioStatus>? _playbackStateSubscription;
-  bool _suspendedForBackground = false;
 
   bool get isSupported =>
       Platform.isAndroid ||
@@ -170,9 +165,6 @@ class AudioCoreController extends ChangeNotifier
   Future<void> initialize() async {
     debugPrint('AudioCoreController: Starting initialization');
     if (_initialized) return;
-    if (suspendVisualizerInBackground) {
-      WidgetsBinding.instance.addObserver(this);
-    }
     if (!isSupported) {
       debugPrint('AudioCoreController: NOT SUPPORTED');
       player.setError(
@@ -300,9 +292,7 @@ class AudioCoreController extends ChangeNotifier
 
   @override
   void dispose() {
-    if (suspendVisualizerInBackground) {
-      WidgetsBinding.instance.removeObserver(this);
-    }
+    visualizer.removeListener(_handleVisualizerChanges);
     _analysisTick?.cancel();
     _renderTick?.cancel();
     _playbackStateSubscription?.cancel();
@@ -704,7 +694,7 @@ class AudioCoreController extends ChangeNotifier
   }
 
   void _startVisualizerTicks() {
-    if (_suspendedForBackground) return;
+    if (!visualizer.enabled) return;
     if (_analysisTick != null || _renderTick != null) return;
     _analysisTick = Timer.periodic(
       _analysisInterval,
@@ -720,24 +710,13 @@ class AudioCoreController extends ChangeNotifier
     _renderTick = null;
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (!suspendVisualizerInBackground) return;
-
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
-      if (!_suspendedForBackground) {
-        _suspendedForBackground = true;
-        _stopVisualizerTicks();
-        debugPrint('[AudioCoreController] Suspended visualizer ticks for background state: $state');
+  void _handleVisualizerChanges() {
+    if (visualizer.enabled) {
+      if (player.isPlaying) {
+        _startVisualizerTicks();
       }
-    } else if (state == AppLifecycleState.resumed) {
-      if (_suspendedForBackground) {
-        _suspendedForBackground = false;
-        debugPrint('[AudioCoreController] Resumed visualizer ticks from background');
-        if (player.isPlaying) {
-          _startVisualizerTicks();
-        }
-      }
+    } else {
+      _stopVisualizerTicks();
     }
   }
 
