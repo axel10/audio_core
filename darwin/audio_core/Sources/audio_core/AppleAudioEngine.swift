@@ -94,11 +94,17 @@ final class AppleAudioEngine: NSObject {
 
     var currentPositionMs: Int {
 #if canImport(SFBAudioEngine)
+      if isSeekPendingOnLoad {
+        return max(0, storedPositionMs)
+      }
       if let currentTime = player.currentTime {
         return max(0, Int((currentTime * 1000.0).rounded()))
       }
       return max(0, storedPositionMs)
 #else
+      if isSeekPendingOnLoad {
+        return max(0, storedPositionMs)
+      }
       if let player {
         return max(0, Int((player.currentTime * 1000.0).rounded()))
       }
@@ -519,7 +525,11 @@ final class AppleAudioEngine: NSObject {
 
   func getCurrentPositionMs() -> Int {
     return syncOnStateQueue {
-      publicSlot()?.currentPositionMs ?? 0
+      guard let slot = publicSlot() else { return 0 }
+      if isSeeking || slot.isSeekPendingOnLoad {
+        return max(0, slot.storedPositionMs)
+      }
+      return slot.currentPositionMs
     }
   }
 
@@ -528,10 +538,20 @@ final class AppleAudioEngine: NSObject {
 
     return syncOnStateQueue {
       let slot = publicSlot()
+      let position: Int
+      if let slot {
+        if isSeeking || slot.isSeekPendingOnLoad {
+          position = max(0, slot.storedPositionMs)
+        } else {
+          position = slot.currentPositionMs
+        }
+      } else {
+        position = 0
+      }
       var payload: [String: Any] = [
         "playerId": "main",
         "state": playbackState ?? currentPlaybackState(),
-        "position": slot?.currentPositionMs ?? 0,
+        "position": position,
         "duration": slot?.durationMs ?? 0,
         "isPlaying": isEnded ? false : (slot?.isPlaying ?? false),
         "volume": latestVolume,
