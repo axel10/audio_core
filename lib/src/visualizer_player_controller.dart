@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_taglib/flutter_taglib.dart' as taglib;
 import 'package:flutter/services.dart';
 
@@ -41,6 +42,7 @@ bool shouldAutoAdvanceFromStatus(AudioStatus status) {
 
 /// The top-level modular controller for audio playback and visualization.
 class AudioCoreController extends ChangeNotifier
+    with WidgetsBindingObserver
     implements AudioVisualizerParent {
   static const MethodChannel _androidMediaLibraryChannel = MethodChannel(
     'audio_core.media_library',
@@ -53,12 +55,14 @@ class AudioCoreController extends ChangeNotifier
     FadeSettings fadeSettings = const FadeSettings(),
     VisualizerOptimizationOptions visualOptions =
         const VisualizerOptimizationOptions(),
+    bool suspendVisualizerInBackground = true,
   }) {
     return _instance ??= AudioCoreController._internal(
       fftSize: fftSize,
       analysisFrequencyHz: analysisFrequencyHz,
       fadeSettings: fadeSettings,
       visualOptions: visualOptions,
+      suspendVisualizerInBackground: suspendVisualizerInBackground,
     );
   }
 
@@ -68,6 +72,7 @@ class AudioCoreController extends ChangeNotifier
     required FadeSettings fadeSettings,
     VisualizerOptimizationOptions visualOptions =
         const VisualizerOptimizationOptions(),
+    this.suspendVisualizerInBackground = true,
   }) {
     if (Platform.isAndroid) {
       _engine = AndroidAudioEngine();
@@ -104,6 +109,7 @@ class AudioCoreController extends ChangeNotifier
 
   final int fftSize;
   final double analysisFrequencyHz;
+  final bool suspendVisualizerInBackground;
 
   late final PlayerController player;
   late final PlaylistController playlist;
@@ -120,6 +126,7 @@ class AudioCoreController extends ChangeNotifier
   Timer? _analysisTick;
   Timer? _renderTick;
   StreamSubscription<AudioStatus>? _playbackStateSubscription;
+  bool _suspendedForBackground = false;
 
   bool get isSupported =>
       Platform.isAndroid ||
@@ -163,6 +170,9 @@ class AudioCoreController extends ChangeNotifier
   Future<void> initialize() async {
     debugPrint('AudioCoreController: Starting initialization');
     if (_initialized) return;
+    if (suspendVisualizerInBackground) {
+      WidgetsBinding.instance.addObserver(this);
+    }
     if (!isSupported) {
       debugPrint('AudioCoreController: NOT SUPPORTED');
       player.setError(
@@ -290,6 +300,9 @@ class AudioCoreController extends ChangeNotifier
 
   @override
   void dispose() {
+    if (suspendVisualizerInBackground) {
+      WidgetsBinding.instance.removeObserver(this);
+    }
     _analysisTick?.cancel();
     _renderTick?.cancel();
     _playbackStateSubscription?.cancel();
@@ -691,6 +704,7 @@ class AudioCoreController extends ChangeNotifier
   }
 
   void _startVisualizerTicks() {
+    if (_suspendedForBackground) return;
     if (_analysisTick != null || _renderTick != null) return;
     _analysisTick = Timer.periodic(
       _analysisInterval,
@@ -704,6 +718,27 @@ class AudioCoreController extends ChangeNotifier
     _analysisTick = null;
     _renderTick?.cancel();
     _renderTick = null;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!suspendVisualizerInBackground) return;
+
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      if (!_suspendedForBackground) {
+        _suspendedForBackground = true;
+        _stopVisualizerTicks();
+        debugPrint('[AudioCoreController] Suspended visualizer ticks for background state: $state');
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      if (_suspendedForBackground) {
+        _suspendedForBackground = false;
+        debugPrint('[AudioCoreController] Resumed visualizer ticks from background');
+        if (player.isPlaying) {
+          _startVisualizerTicks();
+        }
+      }
+    }
   }
 
   DateTime? _lastLocalAdvanceTime;
@@ -777,6 +812,10 @@ class AudioCoreController extends ChangeNotifier
   }
 
   Future<void> _refreshLatestFftCache() async {
+    if (!visualizer.enabled) {
+      _latestFftCache = const [];
+      return;
+    }
     try {
       _latestFftCache = await _engine.getLatestFft();
       // if (kDebugMode) {
