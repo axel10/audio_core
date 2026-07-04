@@ -300,7 +300,7 @@ class PlaylistController extends ChangeNotifier {
     FadeSettings? fadeSetting,
   }) async {
     final oldTrack = currentTrack;
-    final resolution = await _resolvePlayableAdjacentIndex(next: true);
+    final resolution = await _resolvePlayableAdjacentIndex(next: true, reason: reason);
     debugPrint(
       '[PlaylistController] playNext reason=$reason '
       'old=${oldTrack?.id} resolution=$resolution '
@@ -322,7 +322,7 @@ class PlaylistController extends ChangeNotifier {
     FadeSettings? fadeSetting,
   }) async {
     final oldTrack = currentTrack;
-    final resolution = await _resolvePlayableAdjacentIndex(next: false);
+    final resolution = await _resolvePlayableAdjacentIndex(next: false, reason: reason);
     debugPrint(
       '[PlaylistController] playPrevious reason=$reason '
       'old=${oldTrack?.id} resolution=$resolution '
@@ -517,15 +517,23 @@ class PlaylistController extends ChangeNotifier {
 
   // --- Internal ---
 
-  Future<int?> _resolvePlayableAdjacentIndex({required bool next}) async {
-    if (_activePlaylistTracks.isEmpty || _playlistMode == PlaylistMode.single) {
+  Future<int?> _resolvePlayableAdjacentIndex({
+    required bool next,
+    PlaybackReason reason = PlaybackReason.user,
+  }) async {
+    if (_activePlaylistTracks.isEmpty) {
       return null;
     }
 
-    if (_playlistMode == PlaylistMode.singleLoop) {
-      final index = _currentIndex ?? 0;
-      final playable = await _isPlayableIndex(index);
-      return playable ? index : null;
+    if (reason != PlaybackReason.user) {
+      if (_playlistMode == PlaylistMode.single) {
+        return null;
+      }
+      if (_playlistMode == PlaylistMode.singleLoop) {
+        final index = _currentIndex ?? 0;
+        final playable = await _isPlayableIndex(index);
+        return playable ? index : null;
+      }
     }
 
     if (_randomManager.policy != null) {
@@ -542,7 +550,8 @@ class PlaylistController extends ChangeNotifier {
             tracks: _activePlaylistTracks,
             currentTrack: currentTrack,
             loop:
-                _playlistMode == PlaylistMode.queueLoop,
+                _playlistMode == PlaylistMode.queueLoop ||
+                _playlistMode == PlaylistMode.singleLoop,
             peek: false,
           );
           if (resolution == null) {
@@ -600,7 +609,8 @@ class PlaylistController extends ChangeNotifier {
     if (length == 0) return null;
 
     final loop =
-        _playlistMode == PlaylistMode.queueLoop;
+        _playlistMode == PlaylistMode.queueLoop ||
+        _playlistMode == PlaylistMode.singleLoop;
     var steps = 0;
     var index = _currentIndex!;
 
@@ -650,10 +660,17 @@ class PlaylistController extends ChangeNotifier {
   }
 
   int? _resolveAdjacentIndex({required bool next, bool peek = false}) {
-    if (_activePlaylistTracks.isEmpty || _playlistMode == PlaylistMode.single) {
+    if (_activePlaylistTracks.isEmpty) {
       return null;
     }
-    if (_playlistMode == PlaylistMode.singleLoop) return _currentIndex ?? 0;
+    if (peek) {
+      if (_playlistMode == PlaylistMode.single) {
+        return null;
+      }
+      if (_playlistMode == PlaylistMode.singleLoop) {
+        return _currentIndex ?? 0;
+      }
+    }
 
     if (_randomManager.policy != null) {
       return _randomManager.resolveAdjacentIndex(
@@ -662,7 +679,8 @@ class PlaylistController extends ChangeNotifier {
         tracks: _activePlaylistTracks,
         currentTrack: currentTrack,
         loop:
-            _playlistMode == PlaylistMode.queueLoop,
+            _playlistMode == PlaylistMode.queueLoop ||
+            _playlistMode == PlaylistMode.singleLoop,
         peek: peek,
       );
     }
@@ -679,14 +697,16 @@ class PlaylistController extends ChangeNotifier {
 
     if (next) {
       if (cursor < _playOrder.length - 1) return _playOrder[cursor + 1];
-      if (_playlistMode == PlaylistMode.queueLoop) {
+      if (_playlistMode == PlaylistMode.queueLoop ||
+          _playlistMode == PlaylistMode.singleLoop) {
         return _playOrder[0];
       }
       return null;
     }
 
     if (cursor > 0) return _playOrder[cursor - 1];
-    if (_playlistMode == PlaylistMode.queueLoop) {
+    if (_playlistMode == PlaylistMode.queueLoop ||
+        _playlistMode == PlaylistMode.singleLoop) {
       return _playOrder.last;
     }
     return null;
@@ -732,8 +752,12 @@ class PlaylistController extends ChangeNotifier {
     if (!shouldLoad) {
       if (oldTrack == null && track != null) {
         shouldLoad = true;
-      } else if (oldTrack != null && track != null && oldTrack.id != track.id) {
-        shouldLoad = true;
+      } else if (oldTrack != null && track != null) {
+        if (oldTrack.id != track.id) {
+          shouldLoad = true;
+        } else if (reason == PlaybackReason.user) {
+          shouldLoad = true;
+        }
       }
     }
 
