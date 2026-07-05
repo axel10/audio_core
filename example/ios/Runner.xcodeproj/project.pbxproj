@@ -228,7 +228,7 @@
 			);
 			mainGroup = 97C146E51CF9000F007C117D;
 			packageReferences = (
-				9538445AA5FC7B4A1E326319 /* XCRemoteSwiftPackageReference "SFBAudioEngine" */,
+				772CF870D8C402073B94A7C7 /* XCLocalSwiftPackageReference "SFBAudioEngine" */,
 			);
 			productRefGroup = 97C146EF1CF9000F007C117D /* Products */;
 			projectDirPath = "";
@@ -738,16 +738,12 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		9538445AA5FC7B4A1E326319 /* XCRemoteSwiftPackageReference "SFBAudioEngine" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/axel10/SFBAudioEngine";
-			requirement = {
-				branch = main;
-				kind = branch;
-			};
+/* Begin XCLocalSwiftPackageReference section */
+		772CF870D8C402073B94A7C7 /* XCLocalSwiftPackageReference "SFBAudioEngine" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../SFBAudioEngine;
 		};
-/* End XCRemoteSwiftPackageReference section */
+/* End XCLocalSwiftPackageReference section */
 	};
 	rootObject = 97C146E61CF9000F007C117D /* Project object */;
 }
