@@ -7,8 +7,28 @@ import '../../frb_generated.dart';
 import 'equalizer.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `compute_rms`, `mix_to_mono_samples`, `parse_target_path`, `read_audio_pcm`, `reduce_waveform_chunks`, `round_waveform_precision`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `_snapshot_loaded_path`, `any_deck_playing`, `apply_master_volume`, `clear_pending_playback_state`, `clear`, `compute_rms`, `controller`, `create_player`, `describe_output_device`, `dispose_audio`, `drive_crossfade`, `drive_volume_fade`, `engine`, `ensure_audio_output`, `finish_file_write`, `into_source`, `invalidate_waveform_cache`, `is_playing`, `mark_track_ended`, `mix_to_mono_samples`, `new`, `new`, `open_current_default_output`, `open_deck_from_path`, `open_symphonia`, `open`, `open`, `pause_all`, `play_all`, `playback_position`, `playback_state_snapshot`, `poll_output_device`, `prepare_for_file_write`, `public_deck`, `public_path`, `public_position`, `record_fft_request`, `reduce_waveform_chunks`, `replace_current_from_path`, `round_waveform_precision`, `seek_to`, `set_master_volume`, `settle_to_public_deck`, `snapshot_playback_state`, `start_crossfade`, `start_default_output_monitor`, `start_volume_fade`, `toggle_all`, `total_duration`, `total_duration`, `warm_waveform_cache_for_public_path`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `DecoderBackend`, `EndNotifySource`, `FfmpegAudioSource`, `PendingEdit`, `PlaybackDeck`, `PlayerController`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `channels`, `channels`, `clone`, `clone`, `clone`, `current_span_len`, `current_span_len`, `eq`, `fmt`, `fmt`, `fmt`, `next`, `next`, `sample_rate`, `sample_rate`, `size_hint`, `total_duration`, `total_duration`, `try_seek`, `try_seek`
+
+Future<Float32List> getAudioPcm({String? path, required BigInt sampleStride}) =>
+    RustLib.instance.api.crateApiSimpleControllerGetAudioPcm(
+      path: path,
+      sampleStride: sampleStride,
+    );
+
+Future<Float64List> getAudioWaveform({
+  String? path,
+  required BigInt expectedChunks,
+  required BigInt sampleStride,
+}) => RustLib.instance.api.crateApiSimpleControllerGetAudioWaveform(
+  path: path,
+  expectedChunks: expectedChunks,
+  sampleStride: sampleStride,
+);
+
+Future<int> getAudioPcmChannelCount({String? path}) => RustLib.instance.api
+    .crateApiSimpleControllerGetAudioPcmChannelCount(path: path);
 
 Future<void> initApp() =>
     RustLib.instance.api.crateApiSimpleControllerInitApp();
@@ -45,17 +65,28 @@ Future<void> seekAudioMs({required PlatformInt64 positionMs}) => RustLib
 Future<void> setAudioVolume({required double volume}) =>
     RustLib.instance.api.crateApiSimpleControllerSetAudioVolume(volume: volume);
 
-Future<PlatformInt64> getAudioPositionMs() =>
-    RustLib.instance.api.crateApiSimpleControllerGetAudioPositionMs();
+Future<EqualizerConfig> getAudioEqualizerConfig() =>
+    RustLib.instance.api.crateApiSimpleControllerGetAudioEqualizerConfig();
+
+Future<void> setAudioEqualizerConfig({required EqualizerConfig config}) =>
+    RustLib.instance.api.crateApiSimpleControllerSetAudioEqualizerConfig(
+      config: config,
+    );
+
+Future<void> disposeAudio() =>
+    RustLib.instance.api.crateApiSimpleControllerDisposeAudio();
+
+Future<bool> isAudioPlaying() =>
+    RustLib.instance.api.crateApiSimpleControllerIsAudioPlaying();
 
 Future<PlatformInt64> getAudioDurationMs() =>
     RustLib.instance.api.crateApiSimpleControllerGetAudioDurationMs();
 
-Future<int> getAudioPcmChannelCount({String? path}) => RustLib.instance.api
-    .crateApiSimpleControllerGetAudioPcmChannelCount(path: path);
+Future<PlatformInt64> getAudioPositionMs() =>
+    RustLib.instance.api.crateApiSimpleControllerGetAudioPositionMs();
 
-Future<bool> isAudioPlaying() =>
-    RustLib.instance.api.crateApiSimpleControllerIsAudioPlaying();
+Future<Float32List> getLatestFft() =>
+    RustLib.instance.api.crateApiSimpleControllerGetLatestFft();
 
 Future<String?> getLoadedAudioPath() =>
     RustLib.instance.api.crateApiSimpleControllerGetLoadedAudioPath();
@@ -63,47 +94,14 @@ Future<String?> getLoadedAudioPath() =>
 Future<String> getAudioDecodeEngine() =>
     RustLib.instance.api.crateApiSimpleControllerGetAudioDecodeEngine();
 
-Future<Float32List> getLatestFft() =>
-    RustLib.instance.api.crateApiSimpleControllerGetLatestFft();
-
-Future<Float32List> getAudioPcm({String? path, required BigInt sampleStride}) =>
-    RustLib.instance.api.crateApiSimpleControllerGetAudioPcm(
-      path: path,
-      sampleStride: sampleStride,
-    );
-
-Future<Float64List> getAudioWaveform({
-  String? path,
-  required BigInt expectedChunks,
-  required BigInt sampleStride,
-}) => RustLib.instance.api.crateApiSimpleControllerGetAudioWaveform(
-  path: path,
-  expectedChunks: expectedChunks,
-  sampleStride: sampleStride,
-);
-
-Future<void> setAudioEqualizerConfig({required EqualizerConfig config}) =>
-    RustLib.instance.api.crateApiSimpleControllerSetAudioEqualizerConfig(
-      config: config,
-    );
-
-Future<EqualizerConfig> getAudioEqualizerConfig() =>
-    RustLib.instance.api.crateApiSimpleControllerGetAudioEqualizerConfig();
-
-Future<void> disposeAudio() =>
-    RustLib.instance.api.crateApiSimpleControllerDisposeAudio();
-
-Future<PlaybackState> snapshotPlaybackState() =>
-    RustLib.instance.api.crateApiSimpleControllerSnapshotPlaybackState();
+Future<void> handleDeviceChanged() =>
+    RustLib.instance.api.crateApiSimpleControllerHandleDeviceChanged();
 
 Future<void> prepareForFileWrite() =>
     RustLib.instance.api.crateApiSimpleControllerPrepareForFileWrite();
 
 Future<void> finishFileWrite() =>
     RustLib.instance.api.crateApiSimpleControllerFinishFileWrite();
-
-Future<void> handleDeviceChanged() =>
-    RustLib.instance.api.crateApiSimpleControllerHandleDeviceChanged();
 
 enum FadeMode { sequential, crossfade }
 

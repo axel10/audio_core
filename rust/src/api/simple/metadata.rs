@@ -142,24 +142,31 @@ pub fn generate_track_artwork(
         .write_to_vec(ImageFormat::JPEG)
         .map_err(|err| anyhow::anyhow!("failed to encode artwork thumbnail: {err}"))?;
 
+    let md5_digest = md5::compute(&picture_bytes);
+    let md5_str = format!("{:x}", md5_digest);
+
     let cache_root = PathBuf::from(cache_root_path);
     let artworks_dir = cache_root.join("artworks");
     let thumbnails_dir = cache_root.join("thumbnails");
     fs::create_dir_all(&artworks_dir)?;
     fs::create_dir_all(&thumbnails_dir)?;
 
-    let base_name = format!("{}_{}", current_time_millis(), file_token(&path));
-
     let artwork_path = if save_large_artwork {
-        let artwork_path = artworks_dir.join(format!("{base_name}.jpg"));
-        fs::write(&artwork_path, &picture_bytes)?;
+        let artwork_path = artworks_dir.join(format!("{md5_str}.webp"));
+        if !artwork_path.exists() {
+            let (large_image, _, _) = build_square_thumbnail(&picture_bytes, 1000)?;
+            let webp_bytes = encode_webp(&large_image, 85.0)?;
+            fs::write(&artwork_path, &webp_bytes)?;
+        }
         Some(path_to_string(&artwork_path))
     } else {
         None
     };
 
-    let thumbnail_path = thumbnails_dir.join(format!("{base_name}_thumb.jpg"));
-    fs::write(&thumbnail_path, &thumbnail_bytes)?;
+    let thumbnail_path = thumbnails_dir.join(format!("{md5_str}_thumb.jpg"));
+    if !thumbnail_path.exists() {
+        fs::write(&thumbnail_path, &thumbnail_bytes)?;
+    }
 
     Ok(TrackArtworkResult {
         artwork_found: true,
@@ -170,6 +177,67 @@ pub fn generate_track_artwork(
         theme_colors_blob,
         mesh_debug_blob,
     })
+}
+
+pub fn calculate_md5(bytes: Vec<u8>) -> String {
+    let digest = md5::compute(&bytes);
+    format!("{:x}", digest)
+}
+
+pub fn generate_large_artwork(
+    artwork_bytes: Vec<u8>,
+    cache_root_path: String,
+) -> anyhow::Result<String> {
+    let picture_bytes = artwork_bytes;
+    if picture_bytes.is_empty() {
+        anyhow::bail!("empty artwork bytes");
+    }
+    let md5_digest = md5::compute(&picture_bytes);
+    let md5_str = format!("{:x}", md5_digest);
+
+    let cache_root = PathBuf::from(cache_root_path);
+    let artworks_dir = cache_root.join("artworks");
+    fs::create_dir_all(&artworks_dir)?;
+
+    let artwork_path = artworks_dir.join(format!("{}.webp", md5_str));
+    if !artwork_path.exists() {
+        let (large_image, _, _) = build_square_thumbnail(&picture_bytes, 1000)?;
+        let webp_bytes = encode_webp(&large_image, 85.0)?;
+        fs::write(&artwork_path, &webp_bytes)?;
+    }
+
+    Ok(path_to_string(&artwork_path))
+}
+
+fn encode_webp(image: &Image, quality: f32) -> anyhow::Result<Vec<u8>> {
+    let has_alpha = image.colorspace().has_alpha();
+    let target_colorspace = if has_alpha {
+        zune_core::colorspace::ColorSpace::RGBA
+    } else {
+        zune_core::colorspace::ColorSpace::RGB
+    };
+
+    let mut rgb_image = image.clone();
+    if rgb_image.colorspace() != target_colorspace {
+        rgb_image
+            .convert_color(target_colorspace)
+            .map_err(|err| anyhow::anyhow!("failed to convert colorspace for webp: {err}"))?;
+    }
+
+    let (width, height) = rgb_image.dimensions();
+    let flattened_frames = rgb_image.flatten_to_u8();
+    let pixels = flattened_frames
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("failed to get flattened pixels for webp"))?;
+
+    let encoder = if has_alpha {
+        webp::Encoder::from_rgba(pixels, width as u32, height as u32)
+    } else {
+        webp::Encoder::from_rgb(pixels, width as u32, height as u32)
+    };
+
+    let webp_data = encoder.encode(quality);
+    Ok(webp_data.to_vec())
 }
 
 fn build_square_thumbnail(

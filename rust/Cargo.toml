@@ -22,6 +22,8 @@ fast_image_resize = "6.0.0"
 libblur = "0.23.3"
 ffmpeg_core = { path = "ffmpeg_core" }
 rusty-chromaprint = "0.3.0"
+md5 = "0.7.0"
+webp = "0.3.0"
 
 
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
