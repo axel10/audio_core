@@ -155,7 +155,7 @@ pub fn generate_track_artwork(
         let artwork_path = artworks_dir.join(format!("{md5_str}.webp"));
         if !artwork_path.exists() {
             let (large_image, _, _) = build_square_thumbnail(&picture_bytes, 1000)?;
-            let webp_bytes = encode_webp(&large_image, 85.0)?;
+            let webp_bytes = encode_webp(&large_image, 90.0)?;
             fs::write(&artwork_path, &webp_bytes)?;
         }
         Some(path_to_string(&artwork_path))
@@ -202,7 +202,7 @@ pub fn generate_large_artwork(
     let artwork_path = artworks_dir.join(format!("{}.webp", md5_str));
     if !artwork_path.exists() {
         let (large_image, _, _) = build_square_thumbnail(&picture_bytes, 1000)?;
-        let webp_bytes = encode_webp(&large_image, 85.0)?;
+        let webp_bytes = encode_webp(&large_image, 90.0)?;
         fs::write(&artwork_path, &webp_bytes)?;
     }
 
