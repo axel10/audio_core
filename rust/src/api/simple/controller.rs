@@ -432,19 +432,8 @@ impl PlayerController {
     }
 
     fn warm_waveform_cache_for_public_path(&mut self) {
-        let Some(path) = self.public_path().map(str::to_string) else {
-            return;
-        };
-
-        if self.cached_path.as_deref() == Some(path.as_str()) && self.cached_pcm.is_some() {
-            return;
-        }
-
+        // Immediately release the previous song's PCM cache and do not warm a new one in memory
         self.invalidate_waveform_cache();
-
-        thread::spawn(move || {
-            let _ = get_audio_pcm(Some(path), 0);
-        });
     }
 
     fn open_deck_from_path(
