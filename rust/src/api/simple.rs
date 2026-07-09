@@ -122,6 +122,24 @@ pub mod controller {
         let target_path = parse_target_path(path, "path is required for PCM extraction")?;
         read_audio_pcm(&target_path, sample_stride)
     }
+    fn get_audio_waveform_fallback_with_pcm(
+        pcm: Vec<f32>,
+        channels: usize,
+        expected_chunks: usize,
+    ) -> Result<Vec<f64>, String> {
+        if pcm.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mono = mix_to_mono_samples(&pcm, channels);
+        if mono.is_empty() {
+            return Ok(vec![0.0; expected_chunks]);
+        }
+        Ok(reduce_waveform_chunks(&mono, expected_chunks)
+            .into_iter()
+            .map(round_waveform_precision)
+            .collect())
+    }
+
     pub fn get_audio_waveform(
         path: Option<String>,
         expected_chunks: usize,
@@ -139,22 +157,168 @@ pub mod controller {
             None => return Err("path is required when no audio is loaded".to_string()),
         };
 
-        let pcm = read_audio_pcm(&target_path, sample_stride)?;
-        let channels = get_audio_pcm_channel_count(Some(target_path.clone()))? as usize;
-
-        if pcm.is_empty() {
-            return Ok(Vec::new());
+        let mut source = AudioSource::open(Path::new(&target_path))
+            .map_err(|e| format!("open audio source failed: {}", e))?;
+        let channels = source.channels() as usize;
+        let sample_rate = source.sample_rate();
+        if channels == 0 || sample_rate == 0 {
+            return Err("invalid audio source".to_string());
         }
 
-        let mono = mix_to_mono_samples(&pcm, channels);
-        if mono.is_empty() {
+        let duration_secs = source.total_duration().map(|d| d.as_secs_f64()).unwrap_or(0.0);
+        if duration_secs <= 0.0 {
+            // Fallback: decode everything from source
+            let mut pcm = Vec::new();
+            let stride = sample_stride.max(1);
+            if stride <= 1 {
+                for sample in source {
+                    pcm.push(sample);
+                }
+            } else {
+                let frames_per_window = 1024usize;
+                let mut window_index = 0usize;
+                let mut done = false;
+                while !done {
+                    let keep_window = window_index % stride == 0;
+                    window_index = window_index.saturating_add(1);
+                    for _ in 0..frames_per_window {
+                        for _ in 0..channels {
+                            match source.next() {
+                                Some(sample) if keep_window => pcm.push(sample),
+                                Some(_) => {}
+                                None => {
+                                    done = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if done {
+                            break;
+                        }
+                    }
+                }
+            }
+            return get_audio_waveform_fallback_with_pcm(pcm, channels, expected_chunks);
+        }
+
+        let estimated_total_frames = (duration_secs * sample_rate as f64).round() as usize;
+        let stride = sample_stride.max(1);
+
+        let estimated_total_mono_samples = if stride <= 1 {
+            estimated_total_frames
+        } else {
+            let total_blocks = estimated_total_frames / 1024;
+            let kept_blocks = (total_blocks + stride - 1) / stride;
+            kept_blocks * 1024
+        };
+
+        if estimated_total_mono_samples == 0 {
             return Ok(vec![0.0; expected_chunks]);
         }
 
-        Ok(reduce_waveform_chunks(&mono, expected_chunks)
-            .into_iter()
-            .map(round_waveform_precision)
-            .collect())
+        let mut window_count = expected_chunks.saturating_mul(WAVEFORM_RMS_WINDOWS_PER_CHUNK);
+        if estimated_total_mono_samples < window_count {
+            window_count = expected_chunks.max(estimated_total_mono_samples);
+        }
+
+        let mut window_sum_sq = vec![0.0; window_count];
+        let mut window_sample_counts = vec![0; window_count];
+
+        let mut mono_sample_idx = 0;
+        let mut frame_buf = vec![0.0f32; channels];
+
+        if stride <= 1 {
+            loop {
+                let mut got_frame = true;
+                for c in 0..channels {
+                    if let Some(s) = source.next() {
+                        frame_buf[c] = s;
+                    } else {
+                        got_frame = false;
+                        break;
+                    }
+                }
+                if !got_frame {
+                    break;
+                }
+
+                let mut sum = 0.0;
+                for &s in &frame_buf {
+                    sum += s as f64;
+                }
+                let mono = sum / channels as f64;
+
+                let w = (mono_sample_idx * window_count) / estimated_total_mono_samples;
+                let w = w.min(window_count - 1);
+
+                window_sum_sq[w] += mono * mono;
+                window_sample_counts[w] += 1;
+
+                mono_sample_idx += 1;
+            }
+        } else {
+            let mut block_idx = 0usize;
+            let mut done = false;
+            while !done {
+                let keep_block = block_idx % stride == 0;
+                block_idx += 1;
+
+                for _ in 0..1024 {
+                    let mut got_frame = true;
+                    for c in 0..channels {
+                        if let Some(s) = source.next() {
+                            frame_buf[c] = s;
+                        } else {
+                            got_frame = false;
+                            break;
+                        }
+                    }
+                    if !got_frame {
+                        done = true;
+                        break;
+                    }
+
+                    if keep_block {
+                        let mut sum = 0.0;
+                        for &s in &frame_buf {
+                            sum += s as f64;
+                        }
+                        let mono = sum / channels as f64;
+
+                        let w = (mono_sample_idx * window_count) / estimated_total_mono_samples;
+                        let w = w.min(window_count - 1);
+
+                        window_sum_sq[w] += mono * mono;
+                        window_sample_counts[w] += 1;
+
+                        mono_sample_idx += 1;
+                    }
+                }
+            }
+        }
+
+        let mut envelope = vec![0.0; window_count];
+        for w in 0..window_count {
+            let count = window_sample_counts[w];
+            if count > 0 {
+                envelope[w] = (window_sum_sq[w] / count as f64).sqrt();
+            }
+        }
+
+        let mut out = vec![0.0; expected_chunks];
+        for chunk in 0..expected_chunks {
+            let start = (chunk * window_count) / expected_chunks;
+            let end = ((chunk + 1) * window_count) / expected_chunks;
+            let mut max_value = 0.0;
+            for value in &envelope[start..end] {
+                if *value > max_value {
+                    max_value = *value;
+                }
+            }
+            out[chunk] = max_value.clamp(0.0, 1.0);
+        }
+
+        Ok(out.into_iter().map(round_waveform_precision).collect())
     }
     pub fn set_audio_equalizer_config(_config: EqualizerConfig) -> Result<(), String> {
         Ok(())
