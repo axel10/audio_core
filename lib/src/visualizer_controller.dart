@@ -64,7 +64,12 @@ class VisualizerController extends ChangeNotifier {
   void setEnabled(bool enabled) {
     if (_fftEnabled == enabled) return;
     _fftEnabled = enabled;
-    if (!_fftEnabled) resetState();
+    if (!_fftEnabled) {
+      resetState();
+      visualizerOutputManager.stopAll();
+    } else {
+      visualizerOutputManager.startAll();
+    }
     notifyListeners();
   }
 
