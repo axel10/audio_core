@@ -301,11 +301,11 @@ class PlaylistController extends ChangeNotifier {
   }) async {
     final oldTrack = currentTrack;
     final resolution = await _resolvePlayableAdjacentIndex(next: true, reason: reason);
-    debugPrint(
-      '[PlaylistController] playNext reason=$reason '
-      'old=${oldTrack?.id} resolution=$resolution '
-      'mode=$_playlistMode random=${_randomManager.policy != null}',
-    );
+    // debugPrint(
+    //   '[PlaylistController] playNext reason=$reason '
+    //   'old=${oldTrack?.id} resolution=$resolution '
+    //   'mode=$_playlistMode random=${_randomManager.policy != null}',
+    // );
     if (resolution == null) return false;
     _currentIndex = resolution;
     await _reconcile(
@@ -743,11 +743,13 @@ class PlaylistController extends ChangeNotifier {
     await _syncActivePlaylistData();
 
     final track = currentTrack;
-    debugPrint(
-      '[PlaylistController] reconcile forceLoad=$forceLoad autoPlay=$autoPlay '
-      'reason=$reason old=${oldTrack?.id} current=${track?.id} '
-      'currentIndex=$_currentIndex playOrder=$_playOrder',
-    );
+    // if (kDebugMode) {
+    //   debugPrint(
+    //     '[PlaylistController] reconcile forceLoad=$forceLoad autoPlay=$autoPlay '
+    //     'reason=$reason old=${oldTrack?.id} current=${track?.id} '
+    //     'currentIndex=$_currentIndex playOrder=$_playOrder',
+    //   );
+    // }
     bool shouldLoad = forceLoad;
     if (!shouldLoad) {
       if (oldTrack == null && track != null) {

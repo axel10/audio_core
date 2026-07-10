@@ -65,15 +65,15 @@ class PlayerController extends ChangeNotifier {
         reason != PlaybackReason.autoNext &&
         (reason == PlaybackReason.user || autoPlay);
 
-    debugPrint(
-      '[PlayerController] performTransition uri=$uri autoPlay=$autoPlay '
-      'reason=$reason current=$_selectedPath posMs=${position?.inMilliseconds} '
-      'state=$_playerState isPlaying=$_isPlaying switching=$switchingTracks '
-      'fadeOnSwitch=${effectiveFadeSettings.fadeOnSwitch} '
-      'mode=${effectiveFadeSettings.mode} durationMs=${effectiveFadeSettings.duration.inMilliseconds} '
-      'shouldFade=$shouldFade nativeCrossfadeCandidate='
-      '${shouldFade && isActivelyPlaying && effectiveFadeSettings.mode == FadeMode.crossfade && _parent.engine.supportsCrossfade}',
-    );
+    // debugPrint(
+    //   '[PlayerController] performTransition uri=$uri autoPlay=$autoPlay '
+    //   'reason=$reason current=$_selectedPath posMs=${position?.inMilliseconds} '
+    //   'state=$_playerState isPlaying=$_isPlaying switching=$switchingTracks '
+    //   'fadeOnSwitch=${effectiveFadeSettings.fadeOnSwitch} '
+    //   'mode=${effectiveFadeSettings.mode} durationMs=${effectiveFadeSettings.duration.inMilliseconds} '
+    //   'shouldFade=$shouldFade nativeCrossfadeCandidate='
+    //   '${shouldFade && isActivelyPlaying && effectiveFadeSettings.mode == FadeMode.crossfade && _parent.engine.supportsCrossfade}',
+    // );
 
     PlaybackTransition strategy = const ImmediateTransition();
 
@@ -81,16 +81,16 @@ class PlayerController extends ChangeNotifier {
       if (isActivelyPlaying &&
           effectiveFadeSettings.mode == FadeMode.crossfade &&
           _parent.engine.supportsCrossfade) {
-        debugPrint('[PlayerController] transition strategy=NativeCrossfade');
+        // debugPrint('[PlayerController] transition strategy=NativeCrossfade');
         strategy = NativeCrossfadeTransition(
           duration: effectiveFadeSettings.duration,
         );
       } else {
         // Fallback to sequential fade
-        debugPrint(
-          '[PlayerController] transition strategy=SequentialFade '
-          'isActivelyPlaying=$isActivelyPlaying supportsCrossfade=${_parent.engine.supportsCrossfade}',
-        );
+        // debugPrint(
+        //   '[PlayerController] transition strategy=SequentialFade '
+        //   'isActivelyPlaying=$isActivelyPlaying supportsCrossfade=${_parent.engine.supportsCrossfade}',
+        // );
         strategy = SequentialFadeTransition(
           duration: effectiveFadeSettings.duration,
           targetVolume: _volume,
@@ -124,9 +124,9 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      debugPrint(
-        '[PlayerController] load path=$path nativeVolume=${nativeVolume ?? _volume}',
-      );
+      // debugPrint(
+      //   '[PlayerController] load path=$path nativeVolume=${nativeVolume ?? _volume}',
+      // );
       await _parent.engine.load(path);
       if (nativeVolume != null || _volume != 1.0) {
         await applyNativeVolume(nativeVolume ?? _volume);
@@ -166,7 +166,7 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> togglePlayPause({FadeSettings? fadeSetting}) async {
     if (_isAudioSessionTransitioning) {
-      debugPrint('[PlayerController] togglePlayPause ignored: Audio session is transitioning');
+      // debugPrint('[PlayerController] togglePlayPause ignored: Audio session is transitioning');
       return;
     }
     if (_selectedPath == null) return;
@@ -183,7 +183,7 @@ class PlayerController extends ChangeNotifier {
     bool bypassGuard = false,
   }) async {
     if (!bypassGuard && _isAudioSessionTransitioning) {
-      debugPrint('[PlayerController] pause ignored: Audio session is transitioning');
+      // debugPrint('[PlayerController] pause ignored: Audio session is transitioning');
       return;
     }
     try {
@@ -208,7 +208,7 @@ class PlayerController extends ChangeNotifier {
     bool bypassGuard = false,
   }) async {
     if (!bypassGuard && _isAudioSessionTransitioning) {
-      debugPrint('[PlayerController] play ignored: Audio session is transitioning');
+      // debugPrint('[PlayerController] play ignored: Audio session is transitioning');
       return;
     }
     if (_selectedPath == null) return;
@@ -231,11 +231,11 @@ class PlayerController extends ChangeNotifier {
         wasReady: wasReady,
         fadeSetting: fadeSetting,
       );
-      debugPrint(
-        '[PlayerController] play withFade=$withFade wasPaused=$wasPaused '
-        'wasReady=$wasReady fadeDurationMs=${fadeDuration?.inMilliseconds ?? 0} '
-        'current=$_selectedPath',
-      );
+      // debugPrint(
+      //   '[PlayerController] play withFade=$withFade wasPaused=$wasPaused '
+      //   'wasReady=$wasReady fadeDurationMs=${fadeDuration?.inMilliseconds ?? 0} '
+      //   'current=$_selectedPath',
+      // );
       await _parent.engine.play(fadeDuration: fadeDuration);
       _lastCommandTime = DateTime.now();
       _lastPlayCommandTime = _lastCommandTime;
@@ -250,7 +250,7 @@ class PlayerController extends ChangeNotifier {
   Future<void> seek(Duration target) async {
     if (_selectedPath == null) return;
     try {
-      debugPrint('[PlayerController] seek targetMs=${target.inMilliseconds}');
+      // debugPrint('[PlayerController] seek targetMs=${target.inMilliseconds}');
       await _parent.engine.seek(target);
       _lastCommandTime = DateTime.now();
       _position = target;
@@ -336,15 +336,7 @@ class PlayerController extends ChangeNotifier {
     double nativeVolume, {
     String? error,
   }) {
-/*    debugPrint(
-      '[PlayerController] applySnapshot '
-      'path=${path ?? "nil"} state=${playbackState ?? "nil"} '
-      'posMs=${position.inMilliseconds} durMs=${duration.inMilliseconds} '
-      'playing=$isPlaying volume=$nativeVolume '
-      'current=$_selectedPath playerState=$_playerState '
-      'lastCmdMs=${_lastCommandTime.millisecondsSinceEpoch} '
-      'lastPlayMs=${_lastPlayCommandTime.millisecondsSinceEpoch}',
-    );*/
+
     if (error != null) {
       setError(error);
       return;
