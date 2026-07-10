@@ -140,7 +140,13 @@ class ConvertRequest {
     bool overwrite = false,
   }) {
     final baseName = p.basenameWithoutExtension(inputPath);
-    final outputPath = Platform.isAndroid
+    final isAppPrivateDirectory = Platform.isAndroid &&
+        (outputDirectory.contains('app.vynody.player') ||
+         outputDirectory.contains('com.example') ||
+         outputDirectory.contains('/data/user/') ||
+         outputDirectory.contains('/data/data/') ||
+         outputDirectory.contains('/Android/data/'));
+    final outputPath = (Platform.isAndroid && !isAppPrivateDirectory)
         ? p.join(
             Directory.systemTemp.path,
             'audio_converter',
