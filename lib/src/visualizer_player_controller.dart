@@ -47,7 +47,7 @@ class AudioCoreController extends ChangeNotifier
     'audio_core.media_library',
   );
   static AudioCoreController? _instance;
- 
+
   factory AudioCoreController({
     int fftSize = 1024,
     double analysisFrequencyHz = 30.0,
@@ -62,7 +62,7 @@ class AudioCoreController extends ChangeNotifier
       visualOptions: visualOptions,
     );
   }
- 
+
   AudioCoreController._internal({
     required this.fftSize,
     required this.analysisFrequencyHz,
@@ -77,12 +77,12 @@ class AudioCoreController extends ChangeNotifier
     } else {
       _engine = RustAudioEngine();
     }
- 
+
     player = PlayerController(parent: this);
     _initialFadeSettings = fadeSettings;
- 
+
     playlist = PlaylistController(parent: this);
- 
+
     visualizer = VisualizerController(
       fftSize: fftSize,
       visualOptions: visualOptions,
@@ -91,7 +91,7 @@ class AudioCoreController extends ChangeNotifier
       parent: this,
     );
     visualizer.addListener(_handleVisualizerChanges);
- 
+
     equalizer = EqualizerController(parent: this);
   }
 
@@ -119,6 +119,7 @@ class AudioCoreController extends ChangeNotifier
   bool _initialized = false;
   bool _isTransitioning = false;
   String? _lastEndedAutoAdvancePath;
+  String? _stopAfterCurrentTrackPath;
   Timer? _analysisTick;
   Timer? _renderTick;
   StreamSubscription<AudioStatus>? _playbackStateSubscription;
@@ -138,6 +139,16 @@ class AudioCoreController extends ChangeNotifier
 
   /// Returns the previous track in the current playlist sequence.
   AudioTrack? get previousTrack => playlist.previousTrack;
+
+  /// Arms a one-shot stop after the currently loaded track finishes.
+  void armStopAfterCurrentTrack() {
+    _stopAfterCurrentTrackPath = player.currentPath;
+  }
+
+  /// Cancels a pending one-shot stop after the current track.
+  void cancelStopAfterCurrentTrack() {
+    _stopAfterCurrentTrackPath = null;
+  }
 
   /// Returns a full snapshot of the current state.
   PlayerStateSnapshot get state => PlayerStateSnapshot(
@@ -243,6 +254,13 @@ class AudioCoreController extends ChangeNotifier
           return;
         }
 
+        if (_stopAfterCurrentTrackPath != null &&
+            status.path != null &&
+            status.path != _stopAfterCurrentTrackPath &&
+            status.playbackState != 'ENDED') {
+          _stopAfterCurrentTrackPath = null;
+        }
+
         var adjustedPosition = status.position;
         final updateTimeMs = status.updateTimeSinceEpochMs;
         if (updateTimeMs != null && status.isPlaying) {
@@ -268,6 +286,13 @@ class AudioCoreController extends ChangeNotifier
         // explicitly; Flutter no longer infers completion from position.
         if (shouldAutoAdvanceFromStatus(status)) {
           final endedPath = status.path;
+          final shouldStopAfterCurrentTrack =
+              endedPath != null && endedPath == _stopAfterCurrentTrackPath;
+          if (shouldStopAfterCurrentTrack) {
+            _stopAfterCurrentTrackPath = null;
+            _lastEndedAutoAdvancePath = endedPath;
+            return;
+          }
           if (endedPath == null || endedPath != _lastEndedAutoAdvancePath) {
             _lastEndedAutoAdvancePath = endedPath;
             unawaited(_handleAutoTransition());
@@ -340,6 +365,10 @@ class AudioCoreController extends ChangeNotifier
   }) async {
     final track = playlist.currentTrack;
     if (track == null) return;
+    if (_stopAfterCurrentTrackPath != null &&
+        track.uri != _stopAfterCurrentTrackPath) {
+      _stopAfterCurrentTrackPath = null;
+    }
 
     // debugPrint(
     //   '[AudioCoreController] loadTrack track=${track.id} uri=${track.uri} '
@@ -630,6 +659,7 @@ class AudioCoreController extends ChangeNotifier
 
   @override
   Future<void> clearPlayback() async {
+    cancelStopAfterCurrentTrack();
     await _engine.stop();
     player.stopPlayback();
     visualizer.resetState();
@@ -638,6 +668,7 @@ class AudioCoreController extends ChangeNotifier
 
   /// Resets the playback session to the initial empty state.
   Future<void> resetPlaybackState() async {
+    cancelStopAfterCurrentTrack();
     await _engine.stop();
     player.stopPlayback();
     visualizer.resetState();
@@ -1289,10 +1320,14 @@ class AudioCoreController extends ChangeNotifier
     for (var i = 0; i < normalizedRequests.length; i++) {
       final request = normalizedRequests[i];
       final origIndex = normalizedIndexes[i];
-      final file = request.path.startsWith('content://') ? null : File(request.path);
+      final file = request.path.startsWith('content://')
+          ? null
+          : File(request.path);
       if (file != null && await _isFileOccupied(request.path)) {
         taglib.TagLibFile.lastError = 'file_occupied';
-        debugPrint('[AudioCore][Metadata] File occupied by another app: ${request.path}');
+        debugPrint(
+          '[AudioCore][Metadata] File occupied by another app: ${request.path}',
+        );
         finalResults[origIndex] = false;
       } else {
         unoccupiedRequests.add(request);
@@ -1423,10 +1458,14 @@ class AudioCoreController extends ChangeNotifier
     for (var i = 0; i < requests.length; i++) {
       final request = requests[i];
       final targetPath = request.targetPath.trim();
-      final file = targetPath.startsWith('content://') ? null : File(targetPath);
+      final file = targetPath.startsWith('content://')
+          ? null
+          : File(targetPath);
       if (file != null && await _isFileOccupied(targetPath)) {
         taglib.TagLibFile.lastError = 'file_occupied';
-        debugPrint('[AudioCore][Metadata] Target file occupied by another app: $targetPath');
+        debugPrint(
+          '[AudioCore][Metadata] Target file occupied by another app: $targetPath',
+        );
         finalResults[i] = false;
       } else {
         unoccupiedRequests.add(request);
@@ -1450,7 +1489,9 @@ class AudioCoreController extends ChangeNotifier
         preparedForWrite = true;
       }
 
-      final operationResults = await _engine.copyTrackMetadataBatch(requests: unoccupiedRequests);
+      final operationResults = await _engine.copyTrackMetadataBatch(
+        requests: unoccupiedRequests,
+      );
       for (var i = 0; i < unoccupiedIndexes.length; i++) {
         finalResults[unoccupiedIndexes[i]] = operationResults[i];
       }
