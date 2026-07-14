@@ -72,6 +72,31 @@ pub mod controller {
         pub error: Option<String>,
     }
 
+    pub struct SpeedShared {
+        speed_factor: std::sync::atomic::AtomicU32,
+    }
+
+    impl SpeedShared {
+        pub fn new(speed: f32) -> Self {
+            Self {
+                speed_factor: std::sync::atomic::AtomicU32::new(
+                    speed.to_bits(),
+                ),
+            }
+        }
+
+        pub fn get_speed(&self) -> f32 {
+            f32::from_bits(self.speed_factor.load(std::sync::atomic::Ordering::Relaxed))
+        }
+
+        pub fn set_speed(&self, speed: f32) {
+            self.speed_factor.store(
+                speed.to_bits(),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
+    }
+
     pub fn init_app() {}
     pub fn load_audio_file(_path: String) -> Result<(), String> {
         Ok(())

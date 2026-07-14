@@ -520,7 +520,8 @@ final class AppleAudioEngine: NSObject {
   func setPlaybackSpeed(_ speed: Double) {
     syncOnStateQueue {
 #if canImport(SFBAudioEngine)
-      print("[AppleAudioEngine] setPlaybackSpeed \(speed) is not supported with SFBAudioEngine player.")
+      primarySlot.player.playbackSpeed = Float(speed)
+      secondarySlot.player.playbackSpeed = Float(speed)
 #else
       primarySlot.player?.enableRate = true
       primarySlot.player?.rate = Float(speed)

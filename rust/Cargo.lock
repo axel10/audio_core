@@ -1870,7 +1870,6 @@ dependencies = [
 [[package]]
 name = "rodio"
 version = "0.22.2"
-source = "git+https://github.com/RustAudio/rodio?branch=master#a359d2ab697909ceac1c5825c3b7a9043858ed77"
 dependencies = [
  "cpal",
  "dasp_sample",
@@ -1883,7 +1882,6 @@ dependencies = [
 [[package]]
 name = "rodio-wsola"
 version = "0.1.0"
-source = "git+https://github.com/axel10/rodio-wsola?branch=master#c89302b6675c8a15e9e938b3edeb5908a5222ebc"
 dependencies = [
  "rodio",
 ]
