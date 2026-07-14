@@ -27,12 +27,11 @@ webp = "0.3.0"
 
 
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
-rodio = { path="./rodio", default-features = true, features = ["symphonia-all"] }
-rodio-wsola = { path = "./rodio-wsola" }
+rodio = { git="https://github.com/RustAudio/rodio", branch="master", default-features = true, features = ["symphonia-all"] }
+rodio-wsola = { git="https://github.com/axel10/rodio-wsola", branch="master"  }
 realfft = "3.5.0"
 fundsp = "0.23.0"
 cpal = { version = "0.18.1", features = ["realtime"] }
-timestretch = { path = "timestretch-rs" }
 env_logger = "0.11"
 
 [target.'cfg(target_os = "android")'.dependencies]

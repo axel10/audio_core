@@ -160,15 +160,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
-name = "arc-swap"
-version = "1.9.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
-dependencies = [
- "rustversion",
-]
-
-[[package]]
 name = "arrayvec"
 version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -206,7 +197,6 @@ dependencies = [
  "rusty-chromaprint",
  "serde",
  "serde_json",
- "timestretch",
  "webp",
  "windows 0.52.0",
  "zune-core",
@@ -1880,6 +1870,7 @@ dependencies = [
 [[package]]
 name = "rodio"
 version = "0.22.2"
+source = "git+https://github.com/RustAudio/rodio?branch=master#a359d2ab697909ceac1c5825c3b7a9043858ed77"
 dependencies = [
  "cpal",
  "dasp_sample",
@@ -1892,6 +1883,7 @@ dependencies = [
 [[package]]
 name = "rodio-wsola"
 version = "0.1.0"
+source = "git+https://github.com/axel10/rodio-wsola?branch=master#c89302b6675c8a15e9e938b3edeb5908a5222ebc"
 dependencies = [
  "rodio",
 ]
@@ -2415,16 +2407,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
 dependencies = [
  "num_cpus",
-]
-
-[[package]]
-name = "timestretch"
-version = "0.7.0"
-dependencies = [
- "arc-swap",
- "rustfft",
- "serde",
- "serde_json",
 ]
 
 [[package]]

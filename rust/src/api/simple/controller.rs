@@ -1677,17 +1677,21 @@ impl SpeedShared {
     }
 }
 
-pub struct SpeedSource<I> {
-    input: I,
+pub enum SpeedState<I>
+where
+    I: Source<Item = f32>,
+{
+    Bypassed(I),
+    Stretched(rodio_wsola::Wsola<I>),
+}
+
+pub struct SpeedSource<I>
+where
+    I: Source<Item = f32>,
+{
+    state: Option<SpeedState<I>>,
     shared: Arc<SpeedShared>,
-    processor: Option<timestretch::StreamProcessor>,
-    input_buffer: Vec<f32>,
-    output_buffer: Vec<f32>,
-    output_cursor: usize,
-    sample_rate: u32,
-    channels: u16,
     last_speed: f32,
-    input_exhausted: bool,
     first_pull_logged: bool,
     last_input_sample_rate: u32,
 }
@@ -1698,34 +1702,13 @@ where
 {
     pub fn new(input: I, shared: Arc<SpeedShared>) -> Self {
         let sample_rate = input.sample_rate().get();
-        let channels = input.channels().get();
         Self {
-            input,
+            state: Some(SpeedState::Bypassed(input)),
             shared,
-            processor: None,
-            input_buffer: Vec::new(),
-            output_buffer: Vec::new(),
-            output_cursor: 0,
-            sample_rate,
-            channels,
             last_speed: 1.0,
-            input_exhausted: false,
             first_pull_logged: false,
             last_input_sample_rate: sample_rate,
         }
-    }
-
-    fn init_processor(&mut self, speed: f32) {
-        let sample_rate = self.input.sample_rate().get();
-        let channels = self.input.channels().get();
-        self.sample_rate = sample_rate;
-        self.channels = channels;
-
-        let params = timestretch::StretchParams::new(1.0 / speed as f64)
-            .with_sample_rate(sample_rate)
-            .with_channels(channels as u32);
-        self.processor = Some(timestretch::StreamProcessor::new(params));
-        self.last_speed = speed;
     }
 }
 
@@ -1739,17 +1722,23 @@ where
         let speed = normalize_playback_speed(self.shared.get_speed());
 
         if !self.first_pull_logged {
+            let (channels, sample_rate) = match self.state.as_ref().unwrap() {
+                SpeedState::Bypassed(i) => (i.channels().get(), i.sample_rate().get()),
+                SpeedState::Stretched(wsola) => (wsola.channels().get(), wsola.sample_rate().get()),
+            };
             eprintln!(
-                "[AudioTrace][Speed] first_pull speed={} input_channels={} input_sample_rate={} processor_before={}",
+                "[AudioTrace][Speed] first_pull speed={} input_channels={} input_sample_rate={}",
                 speed,
-                self.channels,
-                self.sample_rate,
-                self.processor.is_some()
+                channels,
+                sample_rate
             );
             self.first_pull_logged = true;
         }
 
-        let input_sample_rate = self.input.sample_rate().get();
+        let input_sample_rate = match self.state.as_ref().unwrap() {
+            SpeedState::Bypassed(i) => i.sample_rate().get(),
+            SpeedState::Stretched(wsola) => wsola.sample_rate().get(),
+        };
         if input_sample_rate != self.last_input_sample_rate {
             eprintln!(
                 "[AudioTrace][Speed] input_sample_rate_changed {} -> {}",
@@ -1760,82 +1749,46 @@ where
         }
 
         if (speed - 1.0).abs() < SPEED_UNITY_EPSILON {
-            // Do not drain audio rendered at the previous speed. It is already
-            // on a different timeline and would make unity playback briefly
-            // remain accelerated or slowed after the control change.
-            if self.processor.is_some()
-                || !self.input_buffer.is_empty()
-                || !self.output_buffer.is_empty()
-            {
-                info!("[SpeedSource] Bypassing timestretch processor (speed={})", speed);
-                self.processor = None;
-                self.input_buffer.clear();
-                self.output_buffer.clear();
-                self.output_cursor = 0;
+            // Transition to bypassed if we are currently stretched
+            if let Some(SpeedState::Stretched(_)) = &self.state {
+                info!("[SpeedSource] Bypassing wsola processor (speed={})", speed);
+                if let Some(SpeedState::Stretched(wsola)) = self.state.take() {
+                    self.state = Some(SpeedState::Bypassed(wsola.into_inner()));
+                }
             }
             self.last_speed = 1.0;
-            return self.input.next();
-        }
+            
+            match self.state.as_mut().unwrap() {
+                SpeedState::Bypassed(i) => i.next(),
+                _ => unreachable!(),
+            }
+        } else {
+            // We need a stretched state
+            let mut wsola_exists = false;
+            if let Some(SpeedState::Stretched(_)) = &self.state {
+                wsola_exists = true;
+            }
 
-        if self.processor.is_none() || (speed - self.last_speed).abs() > 0.005 {
-            if let Some(ref mut proc) = self.processor {
-                info!("[SpeedSource] Updating stretch ratio to {} (speed={})", 1.0 / speed as f64, speed);
-                if let Err(e) = proc.set_stretch_ratio(1.0 / speed as f64) {
-                    error!("timestretch set_stretch_ratio failed: {:?}", e);
+            if !wsola_exists {
+                info!("[SpeedSource] Initializing wsola processor for speed={}", speed);
+                if let Some(SpeedState::Bypassed(input)) = self.state.take() {
+                    let wsola = rodio_wsola::Wsola::new(input, speed);
+                    self.state = Some(SpeedState::Stretched(wsola));
                 }
                 self.last_speed = speed;
-            } else {
-                info!("[SpeedSource] Initializing processor for speed={}", speed);
-                self.init_processor(speed);
+            } else if (speed - self.last_speed).abs() > 0.005 {
+                info!("[SpeedSource] Updating wsola speed to {} (speed={})", speed, speed);
+                if let Some(SpeedState::Stretched(ref mut wsola)) = &mut self.state {
+                    wsola.set_speed(speed);
+                }
+                self.last_speed = speed;
+            }
+
+            match self.state.as_mut().unwrap() {
+                SpeedState::Stretched(wsola) => wsola.next(),
+                _ => unreachable!(),
             }
         }
-
-        let processor = self.processor.as_mut().unwrap();
-
-        while self.output_cursor >= self.output_buffer.len() {
-            if self.input_exhausted {
-                return None;
-            }
-
-            let block_size = 256 * self.channels as usize;
-            self.input_buffer.clear();
-            for _ in 0..block_size {
-                if let Some(sample) = self.input.next() {
-                    self.input_buffer.push(sample);
-                } else {
-                    break;
-                }
-            }
-
-            self.output_buffer.clear();
-            self.output_cursor = 0;
-
-            if !self.input_buffer.is_empty() {
-                match processor.process(&self.input_buffer) {
-                    Ok(processed) => self.output_buffer = processed,
-                    Err(e) => {
-                        eprintln!("[AudioTrace][Speed] process failed: {:?}", e);
-                        self.output_buffer.extend_from_slice(&self.input_buffer);
-                    }
-                }
-            }
-
-            if self.input_buffer.len() < block_size {
-                self.input_exhausted = true;
-                match processor.flush() {
-                    Ok(flush_buf) => self.output_buffer.extend(flush_buf),
-                    Err(e) => eprintln!("[AudioTrace][Speed] flush failed: {:?}", e),
-                }
-            }
-
-            if self.output_buffer.is_empty() && self.input_exhausted {
-                return None;
-            }
-        }
-
-        let sample = self.output_buffer[self.output_cursor];
-        self.output_cursor += 1;
-        Some(sample)
     }
 }
 
@@ -1848,33 +1801,38 @@ where
     }
 
     fn channels(&self) -> rodio::ChannelCount {
-        self.input.channels()
+        match self.state.as_ref().unwrap() {
+            SpeedState::Bypassed(i) => i.channels(),
+            SpeedState::Stretched(wsola) => wsola.channels(),
+        }
     }
 
     fn sample_rate(&self) -> rodio::SampleRate {
-        self.input.sample_rate()
+        match self.state.as_ref().unwrap() {
+            SpeedState::Bypassed(i) => i.sample_rate(),
+            SpeedState::Stretched(wsola) => wsola.sample_rate(),
+        }
     }
 
     fn total_duration(&self) -> Option<Duration> {
-        self.input.total_duration().map(|d| {
-            let speed = self.shared.get_speed();
-            if speed > 0.0 {
-                Duration::from_secs_f32(d.as_secs_f32() / speed)
-            } else {
-                d
-            }
-        })
+        match self.state.as_ref().unwrap() {
+            SpeedState::Bypassed(i) => i.total_duration(),
+            SpeedState::Stretched(wsola) => wsola.total_duration(),
+        }
     }
 
     fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
-        self.input_buffer.clear();
-        self.output_buffer.clear();
-        self.output_cursor = 0;
-        self.input_exhausted = false;
-        self.processor = None;
         self.first_pull_logged = false;
-        self.last_input_sample_rate = self.input.sample_rate().get();
-        self.input.try_seek(pos)
+        let old_state = self.state.take().unwrap();
+        let mut input = match old_state {
+            SpeedState::Bypassed(i) => i,
+            SpeedState::Stretched(wsola) => wsola.into_inner(),
+        };
+        let res = input.try_seek(pos);
+        self.last_input_sample_rate = input.sample_rate().get();
+        self.state = Some(SpeedState::Bypassed(input));
+        self.last_speed = 1.0;
+        res
     }
 }
 
