@@ -197,6 +197,19 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
+  Future<void> setPlaybackSpeed(double speed) async {
+    await _channel.invokeMethod('setPlaybackSpeed', {
+      'speed': speed,
+      'playerId': _activePlayerId,
+    });
+  }
+
+  @override
+  Future<double> getPlaybackSpeed() async {
+    return 1.0;
+  }
+
+  @override
   Future<String> getDecodeEngine() async => 'android-native';
 
   @override

@@ -28,6 +28,7 @@ class AudioCoreHandler extends BaseAudioHandler with QueueHandler {
       controller.player.currentPath ?? '',
       controller.playlist.currentIndex?.toString() ?? 'null',
       controller.player.duration.inSeconds.toString(),
+      controller.player.playbackSpeed.toString(),
     ].join('|');
 
     if (key == _lastPlaybackStateKey) {
@@ -80,7 +81,7 @@ class AudioCoreHandler extends BaseAudioHandler with QueueHandler {
         playing: controller.player.isPlaying,
         updatePosition: controller.player.position,
         bufferedPosition: controller.player.position,
-        speed: 1.0,
+        speed: controller.player.playbackSpeed,
         queueIndex: controller.playlist.currentIndex,
       ),
     );
@@ -178,5 +179,12 @@ class AudioCoreHandler extends BaseAudioHandler with QueueHandler {
       );
     }
     return Future.value();
+  }
+
+  @override
+  Future<void> setSpeed(double speed) async {
+    await controller.player.setPlaybackSpeed(speed);
+    _lastPlaybackStateKey = null;
+    _updatePlaybackState();
   }
 }

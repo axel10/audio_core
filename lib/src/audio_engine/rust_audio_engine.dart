@@ -111,6 +111,16 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
       });
 
   @override
+  Future<void> setPlaybackSpeed(double speed) =>
+      rust.setPlaybackSpeed(speed: speed);
+
+  @override
+  Future<double> getPlaybackSpeed() async {
+    final speed = await rust.getPlaybackSpeed();
+    return speed;
+  }
+
+  @override
   Future<String> getDecodeEngine() => Future.value(rust.getAudioDecodeEngine());
 
   @override

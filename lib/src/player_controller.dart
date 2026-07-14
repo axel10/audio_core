@@ -17,6 +17,7 @@ class PlayerController extends ChangeNotifier {
   Duration _position = Duration.zero;
   bool _isPlaying = false;
   double _volume = 1.0;
+  double _playbackSpeed = 1.0;
   String? _lastFingerprint;
 
   FadeSettings _fadeSettings = const FadeSettings();
@@ -32,6 +33,7 @@ class PlayerController extends ChangeNotifier {
   Duration get position => _position;
   bool get isPlaying => _isPlaying;
   double get volume => _volume;
+  double get playbackSpeed => _playbackSpeed;
   String? get lastFingerprint => _lastFingerprint;
   PlayerState get currentState => _playerState;
   FadeSettings get fadeSettings => _fadeSettings;
@@ -263,6 +265,12 @@ class PlayerController extends ChangeNotifier {
   Future<void> setVolume(double volume) async {
     _volume = volume.clamp(0.0, 1.0);
     await applyNativeVolume(_volume);
+    notifyListeners();
+  }
+
+  Future<void> setPlaybackSpeed(double speed) async {
+    _playbackSpeed = speed.clamp(0.5, 2.0);
+    await _parent.engine.setPlaybackSpeed(_playbackSpeed);
     notifyListeners();
   }
 

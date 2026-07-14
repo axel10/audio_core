@@ -187,6 +187,15 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         sendPlayerState(error: error.localizedDescription)
         result(FlutterError(code: "VOLUME_FAILED", message: error.localizedDescription, details: nil))
       }
+      
+    case "setPlaybackSpeed":
+      guard let args = call.arguments as? [String: Any],
+            let speed = args["speed"] as? Double else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "Speed is null", details: nil))
+        return
+      }
+      engine.setPlaybackSpeed(speed)
+      result(nil)
 
     case "setEqualizerConfig":
       guard let config = AppleEqualizerCodec.readConfig(call.arguments) else {

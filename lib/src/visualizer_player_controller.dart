@@ -165,6 +165,7 @@ class AudioCoreController extends ChangeNotifier
     nextTrack: playlist.nextTrack,
     previousTrack: playlist.previousTrack,
     error: player.error,
+    playbackSpeed: player.playbackSpeed,
     equalizerConfig: equalizer.config,
     isTransitioning: _isTransitioning,
   );

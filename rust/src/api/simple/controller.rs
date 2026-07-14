@@ -184,6 +184,7 @@ const DEFAULT_OUTPUT_POLL_INTERVAL: Duration = Duration::from_millis(1000);
 const CROSSFADE_TICK_INTERVAL: Duration = Duration::from_millis(16);
 const WAVEFORM_RMS_WINDOWS_PER_CHUNK: usize = 8;
 const WAVEFORM_PRECISION_SCALE: f64 = 10000.0;
+const PLAYBACK_SAMPLE_RATE: u32 = 44_100;
 
 static PLAYER_CONTROLLER: OnceLock<Mutex<PlayerController>> = OnceLock::new();
 static DEFAULT_OUTPUT_MONITOR: OnceLock<()> = OnceLock::new();
@@ -246,6 +247,7 @@ struct PlayerController {
     current_deck: Option<PlaybackDeck>,
     incoming_deck: Option<PlaybackDeck>,
     equalizer: Arc<EqualizerShared>,
+    playback_speed: Arc<SpeedShared>,
     volume: f32,
     transition_generation: u64,
     volume_fade_generation: u64,
@@ -340,6 +342,7 @@ impl PlayerController {
             current_deck: None,
             incoming_deck: None,
             equalizer: EqualizerShared::new(EqualizerConfig::default()),
+            playback_speed: Arc::new(SpeedShared::new(1.0)),
             volume: 1.0,
             transition_generation: 0,
             volume_fade_generation: 0,
@@ -382,11 +385,34 @@ impl PlayerController {
             .default_output_device()
             .ok_or_else(|| "no default audio output device available".to_string())?;
         let device_name = describe_output_device(&device);
-        let sink = DeviceSinkBuilder::from_device(device)
-            .map_err(|e| format!("open default audio device failed: {e}"))?
-            .with_buffer_size(rodio::cpal::BufferSize::Fixed(2048))
-            .open_stream()
-            .map_err(|e| format!("open default audio device failed: {e}"))?;
+        let preferred = DeviceSinkBuilder::from_device(device.clone())
+            .map_err(|e| format!("prepare preferred audio device failed: {e}"))?
+            .with_sample_rate(
+                std::num::NonZeroU32::new(PLAYBACK_SAMPLE_RATE)
+                    .expect("playback sample rate must be non-zero"),
+            )
+            .with_buffer_size(rodio::cpal::BufferSize::Fixed(2048));
+        let sink = match preferred.open_stream() {
+            Ok(sink) => sink,
+            Err(preferred_error) => {
+                eprintln!(
+                    "[AudioTrace][Output] preferred sample_rate={} rejected: {}; falling back to device default",
+                    PLAYBACK_SAMPLE_RATE, preferred_error
+                );
+                DeviceSinkBuilder::from_device(device)
+                    .map_err(|e| format!("open default audio device failed: {e}"))?
+                    .with_buffer_size(rodio::cpal::BufferSize::Fixed(2048))
+                    .open_stream()
+                    .map_err(|e| format!("open default audio device failed: {e}"))?
+            }
+        };
+        eprintln!(
+            "[AudioTrace][Output] device={} channels={} sample_rate={} buffer_size={:?}",
+            device_name,
+            sink.config().channel_count(),
+            sink.config().sample_rate(),
+            sink.config().buffer_size()
+        );
         Ok((sink, device_name))
     }
 
@@ -462,16 +488,26 @@ impl PlayerController {
         };
         player.set_volume((self.volume * gain).clamp(0.0, 1.0));
         let decode_engine = backend.engine().to_string();
-        let eq_source = EqSource::new(backend.into_source(), Arc::clone(&self.equalizer));
+        let decoded_source = backend.into_source();
+        eprintln!(
+            "[AudioTrace][Decode] path={} engine={} channels={} sample_rate={} duration_ms={}",
+            path,
+            decode_engine,
+            decoded_source.channels(),
+            decoded_source.sample_rate(),
+            total.as_millis()
+        );
+        let eq_source = EqSource::new(decoded_source, Arc::clone(&self.equalizer));
         let audio_source: Box<dyn Source<Item = f32> + Send> = if clamped_offset > Duration::ZERO {
             Box::new(eq_source.skip_duration(clamped_offset))
         } else {
             Box::new(eq_source)
         };
+        let speed_source = SpeedSource::new(audio_source, Arc::clone(&self.playback_speed));
         let end_path = path.to_string();
         let notifying_source = EndNotifySource::new(
             FftSource::new(
-                audio_source,
+                speed_source,
                 Arc::clone(&latest_fft),
                 Arc::clone(&self.last_fft_request_time),
             ),
@@ -480,6 +516,12 @@ impl PlayerController {
                     c.mark_track_ended(&end_path);
                 }
             },
+        );
+        eprintln!(
+            "[AudioTrace][Chain] before_player channels={} sample_rate={} speed={}",
+            notifying_source.channels(),
+            notifying_source.sample_rate(),
+            self.playback_speed.get_speed()
         );
         player.append(notifying_source);
         if auto_play {
@@ -1456,6 +1498,24 @@ pub fn set_audio_volume(volume: f32) -> Result<(), String> {
     Ok(())
 }
 
+pub fn set_playback_speed(speed: f32) -> Result<(), String> {
+    let c = controller()
+        .lock()
+        .map_err(|_| "player lock poisoned".to_string())?;
+
+    info!("[set_playback_speed] Called with speed={}", speed);
+    c.playback_speed.set_speed(speed);
+    Ok(())
+}
+
+pub fn get_playback_speed() -> Result<f32, String> {
+    let c = controller()
+        .lock()
+        .map_err(|_| "player lock poisoned".to_string())?;
+
+    Ok(c.playback_speed.get_speed())
+}
+
 pub fn get_audio_equalizer_config() -> EqualizerConfig {
     controller()
         .lock()
@@ -1554,9 +1614,254 @@ pub fn finish_file_write() -> Result<(), String> {
     c.finish_file_write()
 }
 
+
+pub struct SpeedShared {
+    speed_factor: std::sync::atomic::AtomicU32,
+}
+
+const SPEED_UNITY_EPSILON: f32 = 0.005;
+
+fn normalize_playback_speed(speed: f32) -> f32 {
+    if speed.is_finite() {
+        speed.clamp(0.25, 4.0)
+    } else {
+        1.0
+    }
+}
+
+impl SpeedShared {
+    pub fn new(speed: f32) -> Self {
+        Self {
+            speed_factor: std::sync::atomic::AtomicU32::new(
+                normalize_playback_speed(speed).to_bits(),
+            ),
+        }
+    }
+
+    pub fn get_speed(&self) -> f32 {
+        f32::from_bits(self.speed_factor.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
+    pub fn set_speed(&self, speed: f32) {
+        self.speed_factor.store(
+            normalize_playback_speed(speed).to_bits(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+}
+
+pub struct SpeedSource<I> {
+    input: I,
+    shared: Arc<SpeedShared>,
+    processor: Option<timestretch::StreamProcessor>,
+    input_buffer: Vec<f32>,
+    output_buffer: Vec<f32>,
+    output_cursor: usize,
+    sample_rate: u32,
+    channels: u16,
+    last_speed: f32,
+    input_exhausted: bool,
+    first_pull_logged: bool,
+    last_input_sample_rate: u32,
+}
+
+impl<I> SpeedSource<I>
+where
+    I: Source<Item = f32>,
+{
+    pub fn new(input: I, shared: Arc<SpeedShared>) -> Self {
+        let sample_rate = input.sample_rate().get();
+        let channels = input.channels().get();
+        Self {
+            input,
+            shared,
+            processor: None,
+            input_buffer: Vec::new(),
+            output_buffer: Vec::new(),
+            output_cursor: 0,
+            sample_rate,
+            channels,
+            last_speed: 1.0,
+            input_exhausted: false,
+            first_pull_logged: false,
+            last_input_sample_rate: sample_rate,
+        }
+    }
+
+    fn init_processor(&mut self, speed: f32) {
+        let sample_rate = self.input.sample_rate().get();
+        let channels = self.input.channels().get();
+        self.sample_rate = sample_rate;
+        self.channels = channels;
+
+        let params = timestretch::StretchParams::new(1.0 / speed as f64)
+            .with_sample_rate(sample_rate)
+            .with_channels(channels as u32);
+        self.processor = Some(timestretch::StreamProcessor::new(params));
+        self.last_speed = speed;
+    }
+}
+
+impl<I> Iterator for SpeedSource<I>
+where
+    I: Source<Item = f32>,
+{
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let speed = normalize_playback_speed(self.shared.get_speed());
+
+        if !self.first_pull_logged {
+            eprintln!(
+                "[AudioTrace][Speed] first_pull speed={} input_channels={} input_sample_rate={} processor_before={}",
+                speed,
+                self.channels,
+                self.sample_rate,
+                self.processor.is_some()
+            );
+            self.first_pull_logged = true;
+        }
+
+        let input_sample_rate = self.input.sample_rate().get();
+        if input_sample_rate != self.last_input_sample_rate {
+            eprintln!(
+                "[AudioTrace][Speed] input_sample_rate_changed {} -> {}",
+                self.last_input_sample_rate,
+                input_sample_rate
+            );
+            self.last_input_sample_rate = input_sample_rate;
+        }
+
+        if (speed - 1.0).abs() < SPEED_UNITY_EPSILON {
+            // Do not drain audio rendered at the previous speed. It is already
+            // on a different timeline and would make unity playback briefly
+            // remain accelerated or slowed after the control change.
+            if self.processor.is_some()
+                || !self.input_buffer.is_empty()
+                || !self.output_buffer.is_empty()
+            {
+                info!("[SpeedSource] Bypassing timestretch processor (speed={})", speed);
+                self.processor = None;
+                self.input_buffer.clear();
+                self.output_buffer.clear();
+                self.output_cursor = 0;
+            }
+            self.last_speed = 1.0;
+            return self.input.next();
+        }
+
+        if self.processor.is_none() || (speed - self.last_speed).abs() > 0.005 {
+            if let Some(ref mut proc) = self.processor {
+                info!("[SpeedSource] Updating stretch ratio to {} (speed={})", 1.0 / speed as f64, speed);
+                if let Err(e) = proc.set_stretch_ratio(1.0 / speed as f64) {
+                    error!("timestretch set_stretch_ratio failed: {:?}", e);
+                }
+                self.last_speed = speed;
+            } else {
+                info!("[SpeedSource] Initializing processor for speed={}", speed);
+                self.init_processor(speed);
+            }
+        }
+
+        let processor = self.processor.as_mut().unwrap();
+
+        while self.output_cursor >= self.output_buffer.len() {
+            if self.input_exhausted {
+                return None;
+            }
+
+            let block_size = 256 * self.channels as usize;
+            self.input_buffer.clear();
+            for _ in 0..block_size {
+                if let Some(sample) = self.input.next() {
+                    self.input_buffer.push(sample);
+                } else {
+                    break;
+                }
+            }
+
+            self.output_buffer.clear();
+            self.output_cursor = 0;
+
+            if !self.input_buffer.is_empty() {
+                if let Err(e) = processor.process_into(&self.input_buffer, &mut self.output_buffer) {
+                    error!("timestretch process_into failed: {:?}", e);
+                    self.output_buffer.extend_from_slice(&self.input_buffer);
+                }
+            }
+
+            if self.input_buffer.len() < block_size {
+                self.input_exhausted = true;
+                let mut flush_buf = Vec::new();
+                if let Err(e) = processor.flush_into(&mut flush_buf) {
+                    error!("timestretch flush_into failed: {:?}", e);
+                } else {
+                    self.output_buffer.extend(flush_buf);
+                }
+            }
+
+            if self.output_buffer.is_empty() && self.input_exhausted {
+                return None;
+            }
+        }
+
+        let sample = self.output_buffer[self.output_cursor];
+        self.output_cursor += 1;
+        Some(sample)
+    }
+}
+
+impl<I> Source for SpeedSource<I>
+where
+    I: Source<Item = f32>,
+{
+    fn current_span_len(&self) -> Option<usize> {
+        None
+    }
+
+    fn channels(&self) -> rodio::ChannelCount {
+        self.input.channels()
+    }
+
+    fn sample_rate(&self) -> rodio::SampleRate {
+        self.input.sample_rate()
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.input.total_duration().map(|d| {
+            let speed = self.shared.get_speed();
+            if speed > 0.0 {
+                Duration::from_secs_f32(d.as_secs_f32() / speed)
+            } else {
+                d
+            }
+        })
+    }
+
+    fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
+        self.input_buffer.clear();
+        self.output_buffer.clear();
+        self.output_cursor = 0;
+        self.input_exhausted = false;
+        self.processor = None;
+        self.first_pull_logged = false;
+        self.last_input_sample_rate = self.input.sample_rate().get();
+        self.input.try_seek(pos)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn playback_speed_normalizes_invalid_and_unity_values() {
+        assert_eq!(normalize_playback_speed(1.0), 1.0);
+        assert_eq!(normalize_playback_speed(f32::NAN), 1.0);
+        assert_eq!(normalize_playback_speed(f32::INFINITY), 1.0);
+        assert_eq!(normalize_playback_speed(0.1), 0.25);
+        assert_eq!(normalize_playback_speed(8.0), 4.0);
+    }
 
     #[test]
     fn test_streaming_waveform_parity() {

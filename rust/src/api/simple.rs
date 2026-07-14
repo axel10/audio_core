@@ -326,6 +326,12 @@ pub mod controller {
     pub fn get_audio_equalizer_config() -> EqualizerConfig {
         EqualizerConfig::default()
     }
+    pub fn set_playback_speed(_speed: f32) -> Result<(), String> {
+        Ok(())
+    }
+    pub fn get_playback_speed() -> Result<f32, String> {
+        Ok(1.0)
+    }
     pub fn dispose_audio() -> Result<(), String> {
         Ok(())
     }
@@ -483,7 +489,7 @@ pub use controller::{
     get_audio_equalizer_config, get_audio_pcm, get_audio_position_ms, get_audio_waveform,
     get_latest_fft, get_loaded_audio_path, init_app, is_audio_playing, load_audio_file,
     pause_audio, play_audio, seek_audio_ms, set_audio_equalizer_config, set_audio_volume,
-    toggle_audio, FadeMode, FadeSettings, PlaybackState,
+    set_playback_speed, get_playback_speed, toggle_audio, FadeMode, FadeSettings, PlaybackState,
 };
 pub use metadata::{
     generate_track_artwork, get_audio_details, get_track_metadata, remove_all_tags,

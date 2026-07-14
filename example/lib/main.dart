@@ -822,6 +822,50 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
             ),
           ],
         ),
+        Row(
+          children: [
+            const Icon(Icons.speed, size: 20),
+            Expanded(
+              child: Slider(
+                min: 0.5,
+                max: 2.0,
+                divisions: 30,
+                value: _controller.player.playbackSpeed,
+                label: '${_controller.player.playbackSpeed.toStringAsFixed(2)}x',
+                onChanged: (v) => _controller.player.setPlaybackSpeed(v),
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 45,
+              child: Text(
+                '${_controller.player.playbackSpeed.toStringAsFixed(2)}x',
+                textAlign: TextAlign.right,
+              ),
+            ),
+          ],
+        ),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              for (final speed in [0.5, 0.75, 1.0, 1.25, 1.5, 2.0])
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: ChoiceChip(
+                    label: Text('${speed}x'),
+                    selected: (_controller.player.playbackSpeed - speed).abs() < 0.01,
+                    onSelected: (selected) {
+                      if (selected) {
+                        _controller.player.setPlaybackSpeed(speed);
+                      }
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
         if (_controller.player.error != null) ...[
           const SizedBox(height: 8),
           Align(

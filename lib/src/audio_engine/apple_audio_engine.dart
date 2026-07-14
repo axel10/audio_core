@@ -193,6 +193,17 @@ class AppleAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
+  Future<void> setPlaybackSpeed(double speed) => _channel.invokeMethod(
+    'setPlaybackSpeed',
+    <String, Object?>{'playerId': 'main', 'speed': speed},
+  );
+
+  @override
+  Future<double> getPlaybackSpeed() async {
+    return 1.0;
+  }
+
+  @override
   Future<String> getDecodeEngine() async => 'apple-native+ffmpeg-fallback';
 
   @override

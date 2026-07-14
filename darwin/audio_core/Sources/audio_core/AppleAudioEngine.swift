@@ -517,6 +517,19 @@ final class AppleAudioEngine: NSObject {
     }
   }
 
+  func setPlaybackSpeed(_ speed: Double) {
+    syncOnStateQueue {
+#if canImport(SFBAudioEngine)
+      print("[AppleAudioEngine] setPlaybackSpeed \(speed) is not supported with SFBAudioEngine player.")
+#else
+      primarySlot.player?.enableRate = true
+      primarySlot.player?.rate = Float(speed)
+      secondarySlot.player?.enableRate = true
+      secondarySlot.player?.rate = Float(speed)
+#endif
+    }
+  }
+
   func getDurationMs() -> Int {
     return syncOnStateQueue {
       publicSlot()?.durationMs ?? 0

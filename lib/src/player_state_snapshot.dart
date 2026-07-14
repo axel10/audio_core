@@ -11,6 +11,7 @@ class PlayerStateSnapshot {
     required this.position,
     required this.duration,
     required this.volume,
+    this.playbackSpeed = 1.0,
     required this.currentState,
     required this.playlists,
     required this.randomPolicy,
@@ -28,6 +29,7 @@ class PlayerStateSnapshot {
   final Duration position;
   final Duration duration;
   final double volume;
+  final double playbackSpeed;
   final PlayerState currentState;
   final List<Playlist> playlists;
   final RandomPolicy? randomPolicy;
@@ -45,6 +47,7 @@ class PlayerStateSnapshot {
     Duration? position,
     Duration? duration,
     double? volume,
+    double? playbackSpeed,
     PlayerState? currentState,
     List<Playlist>? playlists,
     RandomPolicy? randomPolicy,
@@ -62,6 +65,7 @@ class PlayerStateSnapshot {
       position: position ?? this.position,
       duration: duration ?? this.duration,
       volume: volume ?? this.volume,
+      playbackSpeed: playbackSpeed ?? this.playbackSpeed,
       currentState: currentState ?? this.currentState,
       playlists: playlists ?? this.playlists,
       randomPolicy: randomPolicy ?? this.randomPolicy,
@@ -85,6 +89,7 @@ class PlayerStateSnapshot {
           position == other.position &&
           duration == other.duration &&
           volume == other.volume &&
+          playbackSpeed == other.playbackSpeed &&
           currentState == other.currentState &&
           listEquals(playlists, other.playlists) &&
           randomPolicy == other.randomPolicy &&
@@ -103,6 +108,7 @@ class PlayerStateSnapshot {
       position.hashCode ^
       duration.hashCode ^
       volume.hashCode ^
+      playbackSpeed.hashCode ^
       currentState.hashCode ^
       playlists.hashCode ^
       randomPolicy.hashCode ^
@@ -118,6 +124,6 @@ class PlayerStateSnapshot {
 
   @override
   String toString() {
-    return 'PlayerStateSnapshot(track: ${track?.title}, state: $currentState, pos: ${position.inSeconds}s/${duration.inSeconds}s)';
+    return 'PlayerStateSnapshot(track: ${track?.title}, state: $currentState, speed: ${playbackSpeed}x, pos: ${position.inSeconds}s/${duration.inSeconds}s)';
   }
 }

@@ -60,6 +60,8 @@ abstract class AudioEngine {
   Future<void> pause({Duration? fadeDuration});
   Future<void> seek(Duration position);
   Future<void> setVolume(double volume);
+  Future<void> setPlaybackSpeed(double speed);
+  Future<double> getPlaybackSpeed();
 
   Future<Duration> getDuration();
   Future<PositionSnapshot> getCurrentPosition();

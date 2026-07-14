@@ -694,6 +694,15 @@ class MyExoplayerPlugin :
                 }
                 result.success(null)
             }
+            "setPlaybackSpeed" -> {
+                val speed = call.argument<Double>("speed")?.toFloat() ?: 1.0f
+                NativeLog.d(
+                    "AudioCore",
+                    "setPlaybackSpeed playerId=$playerId speed=$speed",
+                )
+                ctx.player.playbackParameters = androidx.media3.common.PlaybackParameters(speed)
+                result.success(null)
+            }
             "getLatestFft" -> {
                 val snapshotCtx = if (playerId == MAIN_PLAYER_ID && activeCrossfadeSession != null) {
                     publicPlaybackContext() ?: ctx
