@@ -28,6 +28,7 @@ webp = "0.3.0"
 
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 rodio = { path="./rodio", default-features = true, features = ["symphonia-all"] }
+rodio-wsola = { path = "./rodio-wsola" }
 realfft = "3.5.0"
 fundsp = "0.23.0"
 cpal = { version = "0.18.1", features = ["realtime"] }
