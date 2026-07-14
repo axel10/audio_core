@@ -4,7 +4,10 @@ use super::fft::{clear_fft_buffer, FftSource, RAW_FFT_BINS};
 use ffmpeg_core::AudioSource as CoreAudioSource;
 use log::{error, info, warn};
 use rodio::cpal::traits::{DeviceTrait, HostTrait};
-use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
+use rodio::{
+    Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source,
+    source::UniformSourceIterator,
+};
 use std::fs::File;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
@@ -497,7 +500,26 @@ impl PlayerController {
             decoded_source.sample_rate(),
             total.as_millis()
         );
-        let eq_source = EqSource::new(decoded_source, Arc::clone(&self.equalizer));
+        let output_config = self
+            .sink
+            .as_ref()
+            .ok_or_else(|| "audio output is not initialized".to_string())?
+            .config();
+        let output_channels = output_config.channel_count();
+        let output_sample_rate = output_config.sample_rate();
+        eprintln!(
+            "[AudioTrace][Chain] normalize_source from_channels={} from_sample_rate={} to_channels={} to_sample_rate={}",
+            decoded_source.channels(),
+            decoded_source.sample_rate(),
+            output_channels,
+            output_sample_rate
+        );
+        let normalized_source = UniformSourceIterator::new(
+            decoded_source,
+            output_channels,
+            output_sample_rate,
+        );
+        let eq_source = EqSource::new(normalized_source, Arc::clone(&self.equalizer));
         let audio_source: Box<dyn Source<Item = f32> + Send> = if clamped_offset > Duration::ZERO {
             Box::new(eq_source.skip_duration(clamped_offset))
         } else {
@@ -1380,6 +1402,11 @@ fn drive_volume_fade(
 
 pub fn init_app() {
     flutter_rust_bridge::setup_default_user_utils();
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    let _ = env_logger::builder()
+        .filter_level(log::LevelFilter::Info)
+        .try_init();
+
     info!("[AudioDeviceMonitor] init_app called, starting monitor thread...");
     start_default_output_monitor();
 
@@ -1784,19 +1811,20 @@ where
             self.output_cursor = 0;
 
             if !self.input_buffer.is_empty() {
-                if let Err(e) = processor.process_into(&self.input_buffer, &mut self.output_buffer) {
-                    error!("timestretch process_into failed: {:?}", e);
-                    self.output_buffer.extend_from_slice(&self.input_buffer);
+                match processor.process(&self.input_buffer) {
+                    Ok(processed) => self.output_buffer = processed,
+                    Err(e) => {
+                        eprintln!("[AudioTrace][Speed] process failed: {:?}", e);
+                        self.output_buffer.extend_from_slice(&self.input_buffer);
+                    }
                 }
             }
 
             if self.input_buffer.len() < block_size {
                 self.input_exhausted = true;
-                let mut flush_buf = Vec::new();
-                if let Err(e) = processor.flush_into(&mut flush_buf) {
-                    error!("timestretch flush_into failed: {:?}", e);
-                } else {
-                    self.output_buffer.extend(flush_buf);
+                match processor.flush() {
+                    Ok(flush_buf) => self.output_buffer.extend(flush_buf),
+                    Err(e) => eprintln!("[AudioTrace][Speed] flush failed: {:?}", e),
                 }
             }
 

@@ -61,9 +61,7 @@ class AppLog {
       return;
     }
 
-    if (kDebugMode) {
-      stdout.writeln(message);
-    }
+    stdout.writeln(message);
 
     unawaited(
       ensureInitialized().then((_) => _appendLine('FLUTTER', message)),
@@ -101,9 +99,7 @@ class AppLog {
     required String level,
     required String message,
   }) {
-    if (kDebugMode) {
-      stdout.writeln(_formatLine('$level/$tag', message));
-    }
+    stdout.writeln(_formatLine('$level/$tag', message));
 
     unawaited(
       ensureInitialized().then((_) => _appendLine('$level/$tag', message)),
@@ -134,27 +130,7 @@ class AppLog {
   }
 
   static bool _shouldCapture(String message) {
-    for (final prefix in _allowedPrefixes) {
-      if (message.startsWith(prefix)) {
-        return true;
-      }
-    }
-
-    final lower = message.toLowerCase();
-    if (lower.contains(' error') ||
-        lower.contains(' warning') ||
-        lower.contains(' exception') ||
-        lower.contains(' failed') ||
-        lower.contains(' failure') ||
-        lower.startsWith('error:') ||
-        lower.startsWith('warning:') ||
-        lower.startsWith('exception:') ||
-        lower.startsWith('e/') ||
-        lower.startsWith('w/')) {
-      return true;
-    }
-
-    return false;
+    return true;
   }
 
   static String _formatFlutterErrorMessage(FlutterErrorDetails details) {

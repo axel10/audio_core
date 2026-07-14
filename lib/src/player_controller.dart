@@ -270,6 +270,9 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> setPlaybackSpeed(double speed) async {
     _playbackSpeed = speed.clamp(0.5, 2.0);
+    debugPrint(
+      '[AudioTrace][DartSpeed] PlayerController requested=$speed applied=$_playbackSpeed',
+    );
     await _parent.engine.setPlaybackSpeed(_playbackSpeed);
     notifyListeners();
   }
