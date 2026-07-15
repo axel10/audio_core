@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -9,7 +8,6 @@ import 'package:path/path.dart' as p;
 import 'package:flutter/foundation.dart';
 import 'visualizer_player_controller.dart';
 import 'rust/api/simple.dart' as rust_api;
-import 'rust/api/audio_converter/simple.dart' as rust_audio_api;
 
 enum AudioFormat { aac, alac, aiff, caf, flac, m4a, m4b, mp3, ogg, opus, wav }
 
@@ -381,6 +379,31 @@ class AudioConverter {
 
   bool get _isApplePlatform => Platform.isIOS || Platform.isMacOS;
 
+  static const _appleTranscodeWavPrefix = 'audio_core_transcode_apple_';
+
+  Future<void> _cleanupStaleAppleTranscodeWavs(String tempDir) async {
+    final directory = Directory(tempDir);
+    if (!await directory.exists()) {
+      return;
+    }
+
+    await for (final entity in directory.list()) {
+      if (entity is! File) {
+        continue;
+      }
+      final name = p.basename(entity.path);
+      if (!name.startsWith(_appleTranscodeWavPrefix) ||
+          !name.endsWith('.wav')) {
+        continue;
+      }
+      try {
+        await entity.delete();
+      } on FileSystemException {
+        // A stale file may already have been removed by another conversion.
+      }
+    }
+  }
+
   Future<ConverterCapabilities> getCapabilities() async {
     if (_isApplePlatform) {
       final rawApple = await _appleConverterChannel.invokeMapMethod<String, Object?>(
@@ -492,149 +515,101 @@ class AudioConverter {
           currentFilePath: request.inputPath,
           currentFileProgress: 0.0,
           currentPosition: Duration.zero,
-          message: 'Initializing named pipe...',
+          message: 'Preparing WAV intermediate...',
         ),
       );
 
       final tempDir = Directory.systemTemp.path;
-      final fifoName = 'audio_core_transcode_fifo_${DateTime.now().microsecondsSinceEpoch}.pcm';
-      final fifoPath = p.join(tempDir, fifoName);
-
+      String? wavPath;
       try {
-        rust_audio_api.createNamedPipe(path: fifoPath);
-      } catch (error) {
-        return ConvertResult(
-          success: false,
-          engine: 'AVFoundation',
-          outputFormat: request.outputFormat,
-          errorCode: 'fifo_creation_failed',
-          errorMessage: 'Failed to create named pipe at $fifoPath: $error',
+        await _cleanupStaleAppleTranscodeWavs(tempDir);
+        final currentWavPath = p.join(
+          tempDir,
+          '$_appleTranscodeWavPrefix${DateTime.now().microsecondsSinceEpoch}.wav',
         );
-      }
+        wavPath = currentWavPath;
 
-      final completer = Completer<ConvertResult>();
-
-      // Start Rust decoding stream in the background
-      final rustStream = rust_audio_api.decodeToPcmStream(
-        inputPath: request.inputPath,
-        outputPcmPath: fifoPath,
-        targetSampleRate: request.sampleRate,
-        targetChannels: request.channels != null ? request.channels!.toInt() : null,
-      );
-
-      bool formatReceived = false;
-      int actualChannels = request.channels ?? 2;
-      int actualSampleRate = request.sampleRate ?? 44100;
-
-      final rustSubscription = rustStream.listen(
-        (rawEvent) {
-          try {
-            final event = jsonDecode(rawEvent);
-            if (event is! Map) return;
-
-            if (event['kind'] == 'progress') {
-              final message = event['message']?.toString() ?? '';
-              if (message.startsWith('FORMAT:')) {
-                // Parse FORMAT:channels=X,sampleRate=Y
-                final parts = message.substring(7).split(',');
-                for (final part in parts) {
-                  final kv = part.split('=');
-                  if (kv.length == 2) {
-                    if (kv[0] == 'channels') {
-                      actualChannels = int.tryParse(kv[1]) ?? actualChannels;
-                    } else if (kv[0] == 'sampleRate') {
-                      actualSampleRate = int.tryParse(kv[1]) ?? actualSampleRate;
-                    }
-                  }
-                }
-                formatReceived = true;
-
-                final swiftRequest = ConvertRequest(
-                  inputPath: fifoPath,
-                  outputPath: request.outputPath,
-                  outputFormat: request.outputFormat,
-                  sampleRate: actualSampleRate,
-                  channels: actualChannels,
-                  bitRate: request.bitRate,
-                  bitRateMode: request.bitRateMode,
-                  aacEncoder: request.aacEncoder,
-                  allowFallbackToFfmpeg: request.allowFallbackToFfmpeg,
-                  extraOptions: request.extraOptions,
-                  customArgs: request.customArgs,
-                  useSystemEncoder: request.useSystemEncoder,
-                );
-
-                () async {
-                  try {
-                    final rawResult = await _appleConverterChannel.invokeMapMethod<String, Object?>(
-                      'convertFile',
-                      swiftRequest.toMap(),
-                    );
-                    if (rawResult == null) {
-                      throw StateError('Apple audio converter returned no result.');
-                    }
-                    final result = ConvertResult.fromMap(rawResult);
-                    if (!completer.isCompleted) {
-                      completer.complete(result);
-                    }
-                  } catch (error) {
-                    if (!completer.isCompleted) {
-                      completer.complete(ConvertResult(
-                        success: false,
-                        engine: 'AVFoundation',
-                        outputFormat: request.outputFormat,
-                        errorCode: 'native_bridge_failed',
-                        errorMessage: error.toString(),
-                      ));
-                    }
-                  }
-                }();
-              } else {
-                final currentPositionUs = event['currentPositionUs'] ?? event['current_position_us'];
-                final totalDurationUs = event['totalDurationUs'] ?? event['total_duration_us'];
-                onProgress?.call(
-                  ConversionProgress(
-                    completedFiles: 0,
-                    totalFiles: 1,
-                    currentFilePath: request.inputPath,
-                    currentFileProgress: ((event['currentFileProgress'] ?? event['current_file_progress']) as num?)?.toDouble(),
-                    currentPosition: currentPositionUs is num ? Duration(microseconds: currentPositionUs.toInt()) : null,
-                    totalDuration: totalDurationUs is num ? Duration(microseconds: totalDurationUs.toInt()) : null,
-                    message: message.isNotEmpty ? message : 'Decoding audio...',
-                  ),
-                );
-              }
-            }
-          } catch (e) {
-            // Ignore parse errors for individual events
+        final rustRequest = ConvertRequest(
+          inputPath: request.inputPath,
+          outputPath: currentWavPath,
+          outputFormat: AudioFormat.wav,
+          sampleRate: request.sampleRate,
+          channels: request.channels,
+          allowFallbackToFfmpeg: request.allowFallbackToFfmpeg,
+          extraOptions: request.extraOptions,
+          customArgs: request.customArgs,
+        );
+        final rustStream = rust_api.convertFileWithProgress(
+          requestJson: jsonEncode(rustRequest.toMap()),
+        );
+        ConvertResult? rustResult;
+        await for (final rawEvent in rustStream) {
+          final event = jsonDecode(rawEvent);
+          if (event is! Map) {
+            continue;
           }
-        },
-        onError: (error) {
-          if (!completer.isCompleted) {
-            completer.complete(ConvertResult(
-              success: false,
-              engine: 'AVFoundation',
-              outputFormat: request.outputFormat,
-              errorCode: 'rust_decode_failed',
-              errorMessage: 'Rust decoding failed: $error',
-            ));
+          if (event['kind'] == 'progress') {
+            final currentPositionUs =
+                event['currentPositionUs'] ?? event['current_position_us'];
+            final totalDurationUs =
+                event['totalDurationUs'] ?? event['total_duration_us'];
+            onProgress?.call(
+              ConversionProgress(
+                completedFiles: 0,
+                totalFiles: 1,
+                currentFilePath: request.inputPath,
+                currentFileProgress:
+                    ((event['currentFileProgress'] ??
+                                event['current_file_progress']) as num?)
+                        ?.toDouble(),
+                currentPosition: currentPositionUs is num
+                    ? Duration(microseconds: currentPositionUs.toInt())
+                    : null,
+                totalDuration: totalDurationUs is num
+                    ? Duration(microseconds: totalDurationUs.toInt())
+                    : null,
+                message: event['message'] as String? ?? 'Preparing WAV...',
+              ),
+            );
+          } else if (event['kind'] == 'result' && event['result'] is Map) {
+            rustResult = ConvertResult.fromMap(
+              (event['result'] as Map).cast<Object?, Object?>(),
+            );
           }
-        },
-        onDone: () {
-          if (!formatReceived && !completer.isCompleted) {
-            completer.complete(ConvertResult(
-              success: false,
-              engine: 'AVFoundation',
-              outputFormat: request.outputFormat,
-              errorCode: 'rust_decode_ended_early',
-              errorMessage: 'Rust decoding stream ended before format was received.',
-            ));
-          }
-        },
-      );
+        }
 
-      try {
-        final result = await completer.future;
+        if (rustResult == null || !rustResult.success) {
+          return rustResult ?? ConvertResult(
+            success: false,
+            engine: 'rust-ffmpeg',
+            outputFormat: request.outputFormat,
+            errorCode: 'rust_wav_transcode_failed',
+            errorMessage: 'Rust WAV conversion ended without a result.',
+          );
+        }
+
+        final swiftRequest = ConvertRequest(
+          inputPath: currentWavPath,
+          outputPath: request.outputPath,
+          outputFormat: request.outputFormat,
+          sampleRate: request.sampleRate,
+          channels: request.channels,
+          bitRate: request.bitRate,
+          bitRateMode: request.bitRateMode,
+          aacEncoder: request.aacEncoder,
+          allowFallbackToFfmpeg: request.allowFallbackToFfmpeg,
+          extraOptions: request.extraOptions,
+          customArgs: request.customArgs,
+          useSystemEncoder: request.useSystemEncoder,
+        );
+        final rawResult = await _appleConverterChannel.invokeMapMethod<String, Object?>(
+          'convertFile',
+          swiftRequest.toMap(),
+        );
+        if (rawResult == null) {
+          throw StateError('Apple audio converter returned no result.');
+        }
+        final result = ConvertResult.fromMap(rawResult);
         onProgress?.call(
           ConversionProgress(
             completedFiles: 1,
@@ -647,12 +622,21 @@ class AudioConverter {
           ),
         );
         return result;
+      } catch (error) {
+        return ConvertResult(
+          success: false,
+          engine: 'AVFoundation',
+          outputFormat: request.outputFormat,
+          errorCode: 'apple_transcode_failed',
+          errorMessage: error.toString(),
+        );
       } finally {
-        await rustSubscription.cancel();
         try {
-          final file = File(fifoPath);
-          if (await file.exists()) {
-            await file.delete();
+          if (wavPath != null) {
+            final file = File(wavPath!);
+            if (await file.exists()) {
+              await file.delete();
+            }
           }
         } catch (_) {}
       }

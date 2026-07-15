@@ -56,6 +56,26 @@ find_source_dir() {
   return 1
 }
 
+extract_builtin_audio_decoders() {
+  local allcodecs_file="$1/libavcodec/allcodecs.c"
+
+  if [[ ! -f "$allcodecs_file" ]]; then
+    echo "Error: allcodecs.c not found at $allcodecs_file" >&2
+    exit 1
+  fi
+
+  awk '
+    /\/\* audio codecs \*\// { in_audio = 1; next }
+    /\/\* subtitles \*\// { in_audio = 0 }
+    in_audio && /extern const FFCodec ff_.*_decoder;/ {
+      name = $4
+      sub(/^ff_/, "", name)
+      sub(/_decoder;$/, "", name)
+      print name
+    }
+  ' "$allcodecs_file"
+}
+
 ffmpeg_root="$(find_source_dir FFmpeg || find_source_dir ffmpeg || true)"
 lame_root="$(find_source_dir lame || true)"
 opus_root="$(find_source_dir opus || true)"
@@ -64,9 +84,20 @@ opus_root="$(find_source_dir opus || true)"
 [[ -z "$lame_root" ]] && { echo "Error: LAME source not found in $repo_root" >&2; exit 1; }
 [[ -z "$opus_root" ]] && { echo "Error: Opus source not found in $repo_root" >&2; exit 1; }
 
+builtin_audio_decoders=()
+while IFS= read -r decoder; do
+  [[ -n "$decoder" ]] && builtin_audio_decoders+=("$decoder")
+done < <(extract_builtin_audio_decoders "$ffmpeg_root")
+
+if [[ ${#builtin_audio_decoders[@]} -eq 0 ]]; then
+  echo "Error: failed to discover built-in audio decoders from $ffmpeg_root" >&2
+  exit 1
+fi
+
 log "Found FFmpeg source: $ffmpeg_root"
 log "Found LAME source: $lame_root"
 log "Found Opus source: $opus_root"
+log "Discovered ${#builtin_audio_decoders[@]} built-in audio decoders"
 
 # Platforms, SDKs and Architectures to build
 # Format: platform:sdk:arch:host:extra_cflags:install_subpath
@@ -237,32 +268,12 @@ for target in "${TARGETS[@]}"; do
       --enable-demuxer=wav
       --enable-demuxer=matroska
       
-      --enable-decoder=aac
-      --enable-decoder=aac_latm
-      --enable-decoder=alac
-      --enable-decoder=flac
-      --enable-decoder=mp3
-      --enable-decoder=mp3float
-      --enable-decoder=opus
-      --enable-decoder=vorbis
-      --enable-decoder=pcm_alaw
-      --enable-decoder=pcm_f32be
-      --enable-decoder=pcm_f32le
-      --enable-decoder=pcm_f64be
-      --enable-decoder=pcm_f64le
-      --enable-decoder=pcm_mulaw
-      --enable-decoder=pcm_s16be
-      --enable-decoder=pcm_s16le
-      --enable-decoder=pcm_s24be
-      --enable-decoder=pcm_s24le
-      --enable-decoder=pcm_s32be
-      --enable-decoder=pcm_s32le
-      --enable-decoder=pcm_u8
-      
       # Add Encoders, Muxers, and Libs
       --enable-libmp3lame
       --enable-libopus
-      --enable-encoder=aac
+      --enable-encoder=alac
+      --enable-encoder=pcm_s16be
+      --enable-encoder=pcm_s16le
       --enable-encoder=libmp3lame
       --enable-encoder=libopus
       --enable-encoder=flac
@@ -274,6 +285,10 @@ for target in "${TARGETS[@]}"; do
       --enable-muxer=opus
       --enable-muxer=wav
     )
+
+    for decoder in "${builtin_audio_decoders[@]}"; do
+      configure_args+=("--enable-decoder=$decoder")
+    done
     
     "$ffmpeg_root/configure" "${configure_args[@]}"
     

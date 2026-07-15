@@ -276,19 +276,12 @@ fn build_pcm_filter_graph(
             &args,
         )
         .map_err(|error| error.to_string())?;
-    let sink_args = format!(
-        "sample_fmts={}:sample_rates={}:channel_layouts=0x{:x}",
-        target_sample_format.name(),
-        target_sample_rate,
-        target_channel_layout.bits()
-    );
-
     graph
         .add(
             &filter::find("abuffersink")
                 .ok_or_else(|| "abuffersink filter not available".to_string())?,
             "out",
-            &sink_args,
+            "",
         )
         .map_err(|error| error.to_string())?;
 
