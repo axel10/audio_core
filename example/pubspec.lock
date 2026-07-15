@@ -57,13 +57,13 @@ packages:
     source: hosted
     version: "0.1.4"
   audio_session:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: audio_session
-      sha256: "7217b229db57cc4dc577a8abb56b7429a5a212b978517a5be578704bfe5e568b"
+      sha256: "2b7fff16a552486d078bfc09a8cde19f426dc6d6329262b684182597bec5b1ac"
       url: "https://pub.flutter-io.cn"
     source: hosted
-    version: "0.2.3"
+    version: "0.1.25"
   boolean_selector:
     dependency: transitive
     description:
@@ -256,7 +256,7 @@ packages:
       path: "../flutter_taglib"
       relative: true
     source: path
-    version: "1.3.3"
+    version: "1.3.2"
   flutter_test:
     dependency: "direct dev"
     description: flutter

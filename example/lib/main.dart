@@ -16,6 +16,7 @@ import 'audio_handler.dart';
 import 'android_media_library_picker.dart';
 import 'apple_directory_tab.dart';
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 
 late AudioCoreHandler audioHandler;
 
@@ -44,6 +45,11 @@ void main() {
     () async {
       // 确保 Flutter 绑定已初始化
       WidgetsFlutterBinding.ensureInitialized();
+      
+      // Configure AudioSession to support background playback
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration.music());
+
       await AppLog.ensureInitialized();
       AppLog.install();
       AppLog.installFlutterErrorHandlers();
