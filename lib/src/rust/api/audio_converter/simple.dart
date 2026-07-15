@@ -21,5 +21,20 @@ Stream<String> convertFileWithProgress({required String requestJson}) =>
       requestJson: requestJson,
     );
 
+Stream<String> decodeToPcmStream({
+  required String inputPath,
+  required String outputPcmPath,
+  int? targetSampleRate,
+  int? targetChannels,
+}) => RustLib.instance.api.crateApiAudioConverterSimpleDecodeToPcmStream(
+  inputPath: inputPath,
+  outputPcmPath: outputPcmPath,
+  targetSampleRate: targetSampleRate,
+  targetChannels: targetChannels,
+);
+
 String getCapabilities() =>
     RustLib.instance.api.crateApiAudioConverterSimpleGetCapabilities();
+
+void createNamedPipe({required String path}) => RustLib.instance.api
+    .crateApiAudioConverterSimpleCreateNamedPipe(path: path);

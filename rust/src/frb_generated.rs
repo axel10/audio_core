@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1942633487;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 790657013;
 
 // Section: executor
 
@@ -375,6 +375,36 @@ fn wire__crate__api__simple__convert_file_with_progress_impl(
         },
     )
 }
+fn wire__crate__api__audio_converter__simple__create_named_pipe_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "create_named_pipe",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_path = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::audio_converter::simple::create_named_pipe(api_path)?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
 fn wire__crate__api__simple__controller__crossfade_to_audio_file_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -467,6 +497,54 @@ let api_options = <ThemePaletteOptions>::sse_decode(&mut deserializer);deseriali
                          let output_ok = Result::<_,()>::Ok(crate::api::simple::palette::debug_build_theme_colors_from_pixels_with_options(&api_pixels, api_channels_per_pixel, api_options))?;   Ok(output_ok)
                     })())
                 } })
+}
+fn wire__crate__api__audio_converter__simple__decode_to_pcm_stream_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "decode_to_pcm_stream",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_input_path = <String>::sse_decode(&mut deserializer);
+            let api_output_pcm_path = <String>::sse_decode(&mut deserializer);
+            let api_target_sample_rate = <Option<u32>>::sse_decode(&mut deserializer);
+            let api_target_channels = <Option<u32>>::sse_decode(&mut deserializer);
+            let api_progress_sink = <StreamSink<
+                String,
+                flutter_rust_bridge::for_generated::SseCodec,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::audio_converter::simple::decode_to_pcm_stream(
+                            api_input_path,
+                            api_output_pcm_path,
+                            api_target_sample_rate,
+                            api_target_channels,
+                            api_progress_sink,
+                        );
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
 }
 fn wire__crate__api__simple__controller__dispose_audio_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
@@ -2266,6 +2344,17 @@ impl SseDecode for Option<i32> {
     }
 }
 
+impl SseDecode for Option<u32> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<u32>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<Vec<u8>> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2382,6 +2471,13 @@ impl SseDecode for crate::api::simple::metadata::TrackPicture {
     }
 }
 
+impl SseDecode for u32 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        deserializer.cursor.read_u32::<NativeEndian>().unwrap()
+    }
+}
+
 impl SseDecode for u8 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2418,47 +2514,48 @@ fn pde_ffi_dispatcher_primary_impl(
 6 => wire__crate__api__audio_converter__simple__convert_file_impl(port, ptr, rust_vec_len, data_len),
 7 => wire__crate__api__audio_converter__simple__convert_file_with_progress_impl(port, ptr, rust_vec_len, data_len),
 8 => wire__crate__api__simple__convert_file_with_progress_impl(port, ptr, rust_vec_len, data_len),
-9 => wire__crate__api__simple__controller__crossfade_to_audio_file_impl(port, ptr, rust_vec_len, data_len),
-10 => wire__crate__api__simple__palette__debug_build_theme_colors_from_pixels_impl(port, ptr, rust_vec_len, data_len),
-11 => wire__crate__api__simple__palette__debug_build_theme_colors_from_pixels_with_options_impl(port, ptr, rust_vec_len, data_len),
-12 => wire__crate__api__simple__controller__dispose_audio_impl(port, ptr, rust_vec_len, data_len),
-13 => wire__crate__api__simple__equalizer__equalizer_config_default_impl(port, ptr, rust_vec_len, data_len),
-14 => wire__crate__api__simple__controller__fade_settings_default_impl(port, ptr, rust_vec_len, data_len),
-15 => wire__crate__api__simple__controller__finish_file_write_impl(port, ptr, rust_vec_len, data_len),
-16 => wire__crate__api__simple__metadata__generate_large_artwork_impl(port, ptr, rust_vec_len, data_len),
-17 => wire__crate__api__simple__metadata__generate_track_artwork_impl(port, ptr, rust_vec_len, data_len),
-18 => wire__crate__api__simple__controller__get_audio_decode_engine_impl(port, ptr, rust_vec_len, data_len),
-19 => wire__crate__api__simple__metadata__get_audio_details_impl(port, ptr, rust_vec_len, data_len),
-20 => wire__crate__api__simple__controller__get_audio_duration_ms_impl(port, ptr, rust_vec_len, data_len),
-21 => wire__crate__api__simple__controller__get_audio_equalizer_config_impl(port, ptr, rust_vec_len, data_len),
-22 => wire__crate__api__simple__audio_fingerprint__get_audio_fingerprint_impl(port, ptr, rust_vec_len, data_len),
-23 => wire__crate__api__simple__controller__get_audio_pcm_impl(port, ptr, rust_vec_len, data_len),
-24 => wire__crate__api__simple__controller__get_audio_pcm_channel_count_impl(port, ptr, rust_vec_len, data_len),
-25 => wire__crate__api__simple__controller__get_audio_position_ms_impl(port, ptr, rust_vec_len, data_len),
-26 => wire__crate__api__simple__controller__get_audio_waveform_impl(port, ptr, rust_vec_len, data_len),
-29 => wire__crate__api__simple__controller__get_latest_fft_impl(port, ptr, rust_vec_len, data_len),
-30 => wire__crate__api__simple__controller__get_loaded_audio_path_impl(port, ptr, rust_vec_len, data_len),
-31 => wire__crate__api__simple__controller__get_playback_speed_impl(port, ptr, rust_vec_len, data_len),
-32 => wire__crate__api__simple__metadata__get_track_metadata_impl(port, ptr, rust_vec_len, data_len),
-35 => wire__crate__api__simple__controller__handle_device_changed_impl(port, ptr, rust_vec_len, data_len),
-36 => wire__crate__api__audio_converter__simple__init_app_impl(port, ptr, rust_vec_len, data_len),
-37 => wire__crate__api__simple__controller__init_app_impl(port, ptr, rust_vec_len, data_len),
-38 => wire__crate__api__simple__controller__is_audio_playing_impl(port, ptr, rust_vec_len, data_len),
-39 => wire__crate__api__simple__controller__load_audio_file_impl(port, ptr, rust_vec_len, data_len),
-40 => wire__crate__api__simple__controller__pause_audio_impl(port, ptr, rust_vec_len, data_len),
-41 => wire__crate__api__simple__controller__play_audio_impl(port, ptr, rust_vec_len, data_len),
-42 => wire__crate__api__simple__controller__playback_state_default_impl(port, ptr, rust_vec_len, data_len),
-43 => wire__crate__api__simple__controller__prepare_for_file_write_impl(port, ptr, rust_vec_len, data_len),
-44 => wire__crate__api__simple__metadata__remove_all_tags_impl(port, ptr, rust_vec_len, data_len),
-45 => wire__crate__api__simple__controller__seek_audio_ms_impl(port, ptr, rust_vec_len, data_len),
-46 => wire__crate__api__simple__controller__set_audio_equalizer_config_impl(port, ptr, rust_vec_len, data_len),
-47 => wire__crate__api__simple__controller__set_audio_volume_impl(port, ptr, rust_vec_len, data_len),
-48 => wire__crate__api__simple__controller__set_playback_speed_impl(port, ptr, rust_vec_len, data_len),
-50 => wire__crate__api__simple__controller__toggle_audio_impl(port, ptr, rust_vec_len, data_len),
-51 => wire__crate__api__simple__metadata__track_artwork_result_default_impl(port, ptr, rust_vec_len, data_len),
-52 => wire__crate__api__simple__metadata__track_metadata_update_default_impl(port, ptr, rust_vec_len, data_len),
-53 => wire__crate__api__simple__metadata__track_picture_default_impl(port, ptr, rust_vec_len, data_len),
-54 => wire__crate__api__simple__metadata__update_track_metadata_impl(port, ptr, rust_vec_len, data_len),
+10 => wire__crate__api__simple__controller__crossfade_to_audio_file_impl(port, ptr, rust_vec_len, data_len),
+11 => wire__crate__api__simple__palette__debug_build_theme_colors_from_pixels_impl(port, ptr, rust_vec_len, data_len),
+12 => wire__crate__api__simple__palette__debug_build_theme_colors_from_pixels_with_options_impl(port, ptr, rust_vec_len, data_len),
+13 => wire__crate__api__audio_converter__simple__decode_to_pcm_stream_impl(port, ptr, rust_vec_len, data_len),
+14 => wire__crate__api__simple__controller__dispose_audio_impl(port, ptr, rust_vec_len, data_len),
+15 => wire__crate__api__simple__equalizer__equalizer_config_default_impl(port, ptr, rust_vec_len, data_len),
+16 => wire__crate__api__simple__controller__fade_settings_default_impl(port, ptr, rust_vec_len, data_len),
+17 => wire__crate__api__simple__controller__finish_file_write_impl(port, ptr, rust_vec_len, data_len),
+18 => wire__crate__api__simple__metadata__generate_large_artwork_impl(port, ptr, rust_vec_len, data_len),
+19 => wire__crate__api__simple__metadata__generate_track_artwork_impl(port, ptr, rust_vec_len, data_len),
+20 => wire__crate__api__simple__controller__get_audio_decode_engine_impl(port, ptr, rust_vec_len, data_len),
+21 => wire__crate__api__simple__metadata__get_audio_details_impl(port, ptr, rust_vec_len, data_len),
+22 => wire__crate__api__simple__controller__get_audio_duration_ms_impl(port, ptr, rust_vec_len, data_len),
+23 => wire__crate__api__simple__controller__get_audio_equalizer_config_impl(port, ptr, rust_vec_len, data_len),
+24 => wire__crate__api__simple__audio_fingerprint__get_audio_fingerprint_impl(port, ptr, rust_vec_len, data_len),
+25 => wire__crate__api__simple__controller__get_audio_pcm_impl(port, ptr, rust_vec_len, data_len),
+26 => wire__crate__api__simple__controller__get_audio_pcm_channel_count_impl(port, ptr, rust_vec_len, data_len),
+27 => wire__crate__api__simple__controller__get_audio_position_ms_impl(port, ptr, rust_vec_len, data_len),
+28 => wire__crate__api__simple__controller__get_audio_waveform_impl(port, ptr, rust_vec_len, data_len),
+31 => wire__crate__api__simple__controller__get_latest_fft_impl(port, ptr, rust_vec_len, data_len),
+32 => wire__crate__api__simple__controller__get_loaded_audio_path_impl(port, ptr, rust_vec_len, data_len),
+33 => wire__crate__api__simple__controller__get_playback_speed_impl(port, ptr, rust_vec_len, data_len),
+34 => wire__crate__api__simple__metadata__get_track_metadata_impl(port, ptr, rust_vec_len, data_len),
+37 => wire__crate__api__simple__controller__handle_device_changed_impl(port, ptr, rust_vec_len, data_len),
+38 => wire__crate__api__audio_converter__simple__init_app_impl(port, ptr, rust_vec_len, data_len),
+39 => wire__crate__api__simple__controller__init_app_impl(port, ptr, rust_vec_len, data_len),
+40 => wire__crate__api__simple__controller__is_audio_playing_impl(port, ptr, rust_vec_len, data_len),
+41 => wire__crate__api__simple__controller__load_audio_file_impl(port, ptr, rust_vec_len, data_len),
+42 => wire__crate__api__simple__controller__pause_audio_impl(port, ptr, rust_vec_len, data_len),
+43 => wire__crate__api__simple__controller__play_audio_impl(port, ptr, rust_vec_len, data_len),
+44 => wire__crate__api__simple__controller__playback_state_default_impl(port, ptr, rust_vec_len, data_len),
+45 => wire__crate__api__simple__controller__prepare_for_file_write_impl(port, ptr, rust_vec_len, data_len),
+46 => wire__crate__api__simple__metadata__remove_all_tags_impl(port, ptr, rust_vec_len, data_len),
+47 => wire__crate__api__simple__controller__seek_audio_ms_impl(port, ptr, rust_vec_len, data_len),
+48 => wire__crate__api__simple__controller__set_audio_equalizer_config_impl(port, ptr, rust_vec_len, data_len),
+49 => wire__crate__api__simple__controller__set_audio_volume_impl(port, ptr, rust_vec_len, data_len),
+50 => wire__crate__api__simple__controller__set_playback_speed_impl(port, ptr, rust_vec_len, data_len),
+52 => wire__crate__api__simple__controller__toggle_audio_impl(port, ptr, rust_vec_len, data_len),
+53 => wire__crate__api__simple__metadata__track_artwork_result_default_impl(port, ptr, rust_vec_len, data_len),
+54 => wire__crate__api__simple__metadata__track_metadata_update_default_impl(port, ptr, rust_vec_len, data_len),
+55 => wire__crate__api__simple__metadata__track_picture_default_impl(port, ptr, rust_vec_len, data_len),
+56 => wire__crate__api__simple__metadata__update_track_metadata_impl(port, ptr, rust_vec_len, data_len),
                         _ => unreachable!(),
                     }
 }
@@ -2471,15 +2568,20 @@ fn pde_ffi_dispatcher_sync_impl(
 ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
-        27 => wire__crate__api__audio_converter__simple__get_capabilities_impl(
+        9 => wire__crate__api__audio_converter__simple__create_named_pipe_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        28 => wire__crate__api__simple__get_capabilities_impl(ptr, rust_vec_len, data_len),
-        33 => wire__crate__api__audio_converter__simple__greet_impl(ptr, rust_vec_len, data_len),
-        34 => wire__crate__api__simple__greet_impl(ptr, rust_vec_len, data_len),
-        49 => wire__crate__api__simple__subscribe_playback_state_impl(ptr, rust_vec_len, data_len),
+        29 => wire__crate__api__audio_converter__simple__get_capabilities_impl(
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        30 => wire__crate__api__simple__get_capabilities_impl(ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__audio_converter__simple__greet_impl(ptr, rust_vec_len, data_len),
+        36 => wire__crate__api__simple__greet_impl(ptr, rust_vec_len, data_len),
+        51 => wire__crate__api__simple__subscribe_playback_state_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -3013,6 +3115,16 @@ impl SseEncode for Option<i32> {
     }
 }
 
+impl SseEncode for Option<u32> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <u32>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<Vec<u8>> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -3080,6 +3192,13 @@ impl SseEncode for crate::api::simple::metadata::TrackPicture {
         <String>::sse_encode(self.mime_type, serializer);
         <String>::sse_encode(self.picture_type, serializer);
         <Option<String>>::sse_encode(self.description, serializer);
+    }
+}
+
+impl SseEncode for u32 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        serializer.cursor.write_u32::<NativeEndian>(self).unwrap();
     }
 }
 

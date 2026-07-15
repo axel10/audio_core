@@ -44,6 +44,87 @@ enum AppleAudioTranscoder {
     try createParentDirectoryIfNeeded(for: destinationURL)
     try? FileManager.default.removeItem(at: destinationURL)
 
+    if inputPath.hasSuffix(".pcm") {
+      let channels = intValue(request, key: "channels") ?? 2
+      let sampleRate = intValue(request, key: "sampleRate") ?? 44100
+      let targetBitrate = bitRate ?? 128000
+      
+      let outputSettings: [String: Any] = [
+        AVFormatIDKey: kAudioFormatMPEG4AAC,
+        AVSampleRateKey: sampleRate,
+        AVNumberOfChannelsKey: channels,
+        AVEncoderBitRateKey: targetBitrate
+      ]
+      
+      let audioFile = try AVAudioFile(forWriting: destinationURL, settings: outputSettings)
+      
+      guard let inputFormat = AVAudioFormat(
+        commonFormat: .pcmFormatInt16,
+        sampleRate: Double(sampleRate),
+        channels: AVAudioChannelCount(channels),
+        interleaved: true
+      ) else {
+        throw NSError(domain: "AppleAudioTranscoder", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create AVAudioFormat"])
+      }
+      
+      let fileHandle = try FileHandle(forReadingFrom: sourceURL)
+      defer {
+        try? fileHandle.close()
+      }
+      
+      let bufferSize = 4096 * channels
+      let byteBufferSize = bufferSize * 2
+      let pcmBuffer = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: AVAudioFrameCount(bufferSize))!
+      
+      while true {
+        let data: Data
+        if #available(iOS 13.4, macOS 10.15.4, *) {
+          if let d = try fileHandle.read(upToCount: byteBufferSize) {
+            data = d
+          } else {
+            break
+          }
+        } else {
+          let d = fileHandle.readData(ofLength: byteBufferSize)
+          if d.isEmpty {
+            break
+          }
+          data = d
+        }
+        
+        if data.isEmpty {
+          break
+        }
+        
+        let bytesRead = data.count
+        let framesRead = bytesRead / (2 * channels)
+        pcmBuffer.frameLength = AVAudioFrameCount(framesRead)
+        
+        if let int16ChannelData = pcmBuffer.int16ChannelData {
+          data.withUnsafeBytes { rawBufferPointer in
+            if let srcBase = rawBufferPointer.baseAddress {
+              memcpy(int16ChannelData[0], srcBase, bytesRead)
+            }
+          }
+        }
+        
+        try audioFile.write(from: pcmBuffer)
+      }
+      
+      return [
+        "success": true,
+        "command": "AVAudioFile+AVAudioConverter(\"\(inputPath)\" -> \"\(outputPath)\")",
+        "outputPath": outputPath,
+        "engine": engineName,
+        "outputFormat": outputFormat,
+        "errorCode": NSNull(),
+        "errorMessage": NSNull(),
+        "stdout": NSNull(),
+        "stderr": NSNull(),
+        "rawLog": NSNull(),
+      ]
+    }
+
     // AVAssetReader + AVAssetWriter transcoding loop
     let asset = AVAsset(url: sourceURL)
     

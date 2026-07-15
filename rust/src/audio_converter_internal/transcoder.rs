@@ -328,23 +328,21 @@ fn build_filter_graph(
             &args,
         )
         .map_err(|error| error.to_string())?;
+    let sink_args = format!(
+        "sample_fmts={}:sample_rates={}:channel_layouts=0x{:x}",
+        encoder.format().name(),
+        encoder.rate(),
+        encoder.channel_layout().bits()
+    );
+
     graph
         .add(
             &filter::find("abuffersink")
                 .ok_or_else(|| "abuffersink filter not available".to_string())?,
             "out",
-            "",
+            &sink_args,
         )
         .map_err(|error| error.to_string())?;
-
-    {
-        let mut output = graph
-            .get("out")
-            .ok_or_else(|| "missing filter sink".to_string())?;
-        output.set_sample_format(encoder.format());
-        output.set_channel_layout(encoder.channel_layout());
-        output.set_sample_rate(encoder.rate());
-    }
 
     graph
         .output("in", 0)

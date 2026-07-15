@@ -51,4 +51,43 @@ void main() {
     // Cleanup
     await targetDirectory.delete(recursive: true);
   });
+
+  test('Can convert file using system encoder on Apple platforms', () async {
+    if (!Platform.isIOS && !Platform.isMacOS) {
+      return;
+    }
+
+    final audioConverter = AudioConverter();
+
+    // 1. Extract asset to temporary file
+    const assetPath = 'assets/test_music/01 Summer drop.m4a';
+    final bytes = await rootBundle.load(assetPath);
+    final targetDirectory = await Directory.systemTemp.createTemp('audio_core_transcode_test_');
+    final inputFile = File('${targetDirectory.path}/input.m4a');
+    await inputFile.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
+
+    final outputFile = File('${targetDirectory.path}/output.m4a');
+
+    // 2. Perform transcoding to m4a (Apple AAC)
+    final request = ConvertRequest(
+      inputPath: inputFile.path,
+      outputPath: outputFile.path,
+      outputFormat: AudioFormat.m4a,
+    );
+
+    final result = await audioConverter.convertFile(
+      request,
+      onProgress: (progress) {
+        print('Transcode progress: ${progress.message} - ${progress.currentFileProgress}');
+      },
+    );
+
+    expect(result.success, isTrue);
+    expect(result.outputPath, equals(outputFile.path));
+    expect(outputFile.existsSync(), isTrue);
+    expect(outputFile.lengthSync(), greaterThan(0));
+
+    // Cleanup
+    await targetDirectory.delete(recursive: true);
+  });
 }

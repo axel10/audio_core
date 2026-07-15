@@ -211,6 +211,12 @@ for target in "${TARGETS[@]}"; do
       --enable-pic
       --enable-static
       --disable-shared
+      --enable-avfilter
+      --enable-filter=abuffer
+      --enable-filter=abuffersink
+      --enable-filter=aformat
+      --enable-filter=anull
+      --enable-filter=aresample
       
       --enable-protocol=file,pipe
       --enable-bsf=aac_adtstoasc
@@ -319,7 +325,7 @@ ios_device_dir="$repo_root/build/ffmpeg-apple-install-ios-arm64"
 
 # 5. Package as XCFramework
 log "Packaging XCFramework..."
-xcframework_path="$repo_root/SFBAudioEngine/macos/Frameworks/FFmpeg.xcframework"
+xcframework_path="$repo_root/darwin/FFmpeg.xcframework"
 rm -rf "$xcframework_path"
 
 xcodebuild -create-xcframework \

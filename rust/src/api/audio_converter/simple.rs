@@ -105,7 +105,86 @@ pub fn convert_file_with_progress(request_json: String, progress_sink: StreamSin
     emit_conversion_event(Some(&progress_sink), &ConversionEvent::result(result));
 }
 
+#[frb]
+pub fn decode_to_pcm_stream(
+    input_path: String,
+    output_pcm_path: String,
+    target_sample_rate: Option<u32>,
+    target_channels: Option<u32>,
+    progress_sink: StreamSink<String>,
+) {
+    let result = crate::audio_converter_internal::pcm_exporter::decode_to_pcm(
+        &input_path,
+        &output_pcm_path,
+        target_sample_rate,
+        target_channels,
+        Some(&progress_sink),
+    );
+
+    match result {
+        Ok(()) => {
+            emit_conversion_event(
+                Some(&progress_sink),
+                &ConversionEvent::progress(
+                    1,
+                    1,
+                    output_pcm_path.clone(),
+                    Some(1.0),
+                    None,
+                    None,
+                    Some("Completed".to_string()),
+                ),
+            );
+            emit_conversion_event(
+                Some(&progress_sink),
+                &ConversionEvent::result(super::models::AndroidConvertResult {
+                    success: true,
+                    command: None,
+                    output_path: Some(output_pcm_path),
+                    engine: Some("rust-ffmpeg".to_string()),
+                    output_format: Some("pcm".to_string()),
+                    error_code: None,
+                    error_message: None,
+                    stdout: None,
+                    stderr: None,
+                    raw_log: None,
+                }),
+            );
+        }
+        Err(e) => {
+            emit_conversion_event(
+                Some(&progress_sink),
+                &ConversionEvent::progress(
+                    1,
+                    1,
+                    output_pcm_path.clone(),
+                    Some(1.0),
+                    None,
+                    None,
+                    Some(format!("Failed: {}", e)),
+                ),
+            );
+            emit_conversion_event(
+                Some(&progress_sink),
+                &ConversionEvent::result(super::models::AndroidConvertResult {
+                    success: false,
+                    command: None,
+                    output_path: None,
+                    engine: Some("rust-ffmpeg".to_string()),
+                    output_format: Some("pcm".to_string()),
+                    error_code: Some("pcm_export_failed".to_string()),
+                    error_message: Some(e),
+                    stdout: None,
+                    stderr: None,
+                    raw_log: None,
+                }),
+            );
+        }
+    }
+}
+
 #[frb(sync)]
+
 pub fn get_capabilities() -> String {
     let capabilities = AndroidConverterCapabilities {
         engine: "rust-ffmpeg".to_string(),
@@ -137,3 +216,34 @@ fn invalid_request_result(error_message: String) -> AndroidConvertResult {
         raw_log: None,
     }
 }
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+extern "C" {
+    fn mkfifo(pathname: *const std::os::raw::c_char, mode: u16) -> std::os::raw::c_int;
+}
+
+#[frb(sync)]
+pub fn create_named_pipe(path: String) -> Result<(), String> {
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        use std::ffi::CString;
+        let c_path = CString::new(path).map_err(|e| e.to_string())?;
+        let res = unsafe { mkfifo(c_path.as_ptr(), 0o666) };
+        if res == 0 {
+            Ok(())
+        } else {
+            let err = std::io::Error::last_os_error();
+            if err.kind() == std::io::ErrorKind::AlreadyExists {
+                Ok(())
+            } else {
+                Err(err.to_string())
+            }
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+    {
+        let _ = path;
+        Err("Named pipes are only supported on macOS and iOS".to_string())
+    }
+}
+
