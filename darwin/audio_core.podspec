@@ -22,6 +22,8 @@ A new Flutter FFI plugin project.
   s.osx.deployment_target = '13.0'
   s.swift_version = '5.0'
 
+  ffmpeg_root = '$(PODS_TARGET_SRCROOT)/FFmpeg.xcframework'
+
   s.script_phase = {
     :name => 'Build Rust library',
     # First argument is relative path to the `rust` folder, second is name of rust library
@@ -53,11 +55,14 @@ A new Flutter FFI plugin project.
 
   s.ios.pod_target_xcconfig = {
     'HEADER_SEARCH_PATHS' => '$(inherited)',
-    'LIBRARY_SEARCH_PATHS' => '$(inherited)',
+    'LIBRARY_SEARCH_PATHS[sdk=iphoneos*]' => "$(inherited) #{ffmpeg_root}/ios-arm64",
+    'LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]' => "$(inherited) #{ffmpeg_root}/ios-arm64_x86_64-simulator",
+    'OTHER_LDFLAGS' => '$(inherited) -lffmpeg',
   }
 
   s.osx.pod_target_xcconfig = {
     'HEADER_SEARCH_PATHS' => '$(inherited)',
-    'LIBRARY_SEARCH_PATHS' => '$(inherited)',
+    'LIBRARY_SEARCH_PATHS' => "$(inherited) #{ffmpeg_root}/macos-arm64_x86_64",
+    'OTHER_LDFLAGS' => '$(inherited) -lffmpeg',
   }
 end

@@ -37,48 +37,6 @@ target 'Runner' do
 end
 
 post_install do |installer|
-  # 1. Clean up SFBAudioEngine package references from user project (Runner.xcodeproj)
-  user_project = installer.aggregate_targets.first.user_project
-  user_project.root_object.package_references.each do |ref|
-    if (ref.respond_to?(:repositoryURL) && ref.repositoryURL.include?('SFBAudioEngine')) ||
-       (ref.respond_to?(:relative_path) && ref.relative_path.include?('SFBAudioEngine'))
-      user_project.root_object.package_references.delete(ref)
-      ref.remove_from_project
-    end
-  end
-  # Remove package product dependency from targets in user project if any
-  user_project.targets.each do |target|
-    if target.respond_to?(:package_product_dependencies)
-      target.package_product_dependencies.each do |dep|
-        if dep.product_name == 'SFBAudioEngine'
-          target.package_product_dependencies.delete(dep)
-          dep.remove_from_project
-        end
-      end
-    end
-  end
-
-  # Clean up "Embed and Sign SPM Frameworks" build phase from Runner target if it exists
-  runner_target = user_project.targets.find { |t| t.name == 'Runner' }
-  if runner_target
-    existing_phase = runner_target.shell_script_build_phases.find { |p| p.name == 'Embed and Sign SPM Frameworks' }
-    if existing_phase
-      runner_target.build_phases.delete(existing_phase)
-      existing_phase.remove_from_project
-    end
-  end
-  user_project.save
-
-  # 2. Clean up SFBAudioEngine package references from Pods.xcodeproj
-  pods_project = installer.pods_project
-  pods_project.root_object.package_references.each do |ref|
-    if (ref.respond_to?(:repositoryURL) && ref.repositoryURL.include?('SFBAudioEngine')) ||
-       (ref.respond_to?(:relative_path) && ref.relative_path.include?('SFBAudioEngine'))
-      pods_project.root_object.package_references.delete(ref)
-      ref.remove_from_project
-    end
-  end
-
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
     target.build_configurations.each do |config|
@@ -87,33 +45,5 @@ post_install do |installer|
       config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
     end
 
-    if target.name == 'audio_core'
-      # Remove package product dependency on SFBAudioEngine if any
-      if target.respond_to?(:package_product_dependencies)
-        target.package_product_dependencies.each do |dep|
-          if dep.product_name == 'SFBAudioEngine'
-            target.package_product_dependencies.delete(dep)
-            dep.remove_from_project
-          end
-        end
-      end
-
-      # Add library search path and linker flag for local FFmpeg static library on iOS
-      sfb_ffmpeg_device_path = File.expand_path('../../../darwin/FFmpeg.xcframework/ios-arm64', __FILE__)
-      sfb_ffmpeg_sim_path = File.expand_path('../../../darwin/FFmpeg.xcframework/ios-arm64_x86_64-simulator', __FILE__)
-      target.build_configurations.each do |config|
-        config.build_settings['LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]'] = "$(inherited) \"#{sfb_ffmpeg_sim_path}\""
-        config.build_settings['LIBRARY_SEARCH_PATHS[sdk=iphoneos*]'] = "$(inherited) \"#{sfb_ffmpeg_device_path}\""
-
-        flags = config.build_settings['OTHER_LDFLAGS']
-        if flags.nil?
-          config.build_settings['OTHER_LDFLAGS'] = ['$(inherited)', '-lffmpeg']
-        elsif flags.is_a?(Array)
-          flags << '-lffmpeg' unless flags.include?('-lffmpeg')
-        else
-          config.build_settings['OTHER_LDFLAGS'] = "#{flags} -lffmpeg"
-        end
-      end
-    end
   end
 end
