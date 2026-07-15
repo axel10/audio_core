@@ -1,7 +1,6 @@
 pub mod api;
 mod frb_generated;
 
-#[cfg(not(any(target_os = "ios", target_os = "macos")))]
 pub mod audio_converter_internal;
 
 #[cfg(target_os = "android")]

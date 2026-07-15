@@ -7,19 +7,15 @@ use super::models::{
 };
 use crate::frb_generated::StreamSink;
 
-#[cfg(not(any(target_os = "ios", target_os = "macos")))]
 use crate::audio_converter_internal::formats::{
     capabilities_notes, supported_output_formats, unsupported_output_format_error,
 };
-#[cfg(not(any(target_os = "ios", target_os = "macos")))]
 use crate::audio_converter_internal::transcoder::transcode_direct;
 
-#[cfg(not(any(target_os = "ios", target_os = "macos")))]
 fn transcode(request: &AndroidConvertRequest) -> Result<AndroidConvertResult, ConversionFailure> {
     transcode_impl(request, None)
 }
 
-#[cfg(not(any(target_os = "ios", target_os = "macos")))]
 fn transcode_impl(
     request: &AndroidConvertRequest,
     progress_sink: Option<&StreamSink<String>>,
@@ -38,27 +34,47 @@ pub fn greet(name: String) -> String {
 
 #[frb]
 pub fn convert_file(request_json: String) -> String {
-    #[cfg(any(target_os = "ios", target_os = "macos"))]
-    {
-        let _ = request_json;
-        let result = AndroidConvertResult {
-            success: false,
-            command: None,
-            output_path: None,
-            engine: Some("unsupported".to_string()),
-            output_format: None,
-            error_code: Some("unsupported_platform".to_string()),
-            error_message: Some("File conversion via Rust FFmpeg is not supported on Apple platforms. Use native transcoder.".to_string()),
-            stdout: None,
-            stderr: None,
-            raw_log: None,
-        };
-        serde_json::to_string(&result).unwrap()
-    }
-    #[cfg(not(any(target_os = "ios", target_os = "macos")))]
-    {
-        let result = match serde_json::from_str::<AndroidConvertRequest>(&request_json) {
-            Ok(request) => match transcode(&request) {
+    let result = match serde_json::from_str::<AndroidConvertRequest>(&request_json) {
+        Ok(request) => match transcode(&request) {
+            Ok(result) => result,
+            Err(error) => failure_result(
+                &request,
+                "transcode_failed",
+                error.error_message,
+                error.raw_log,
+            ),
+        },
+        Err(error) => invalid_request_result(error.to_string()),
+    };
+
+    serde_json::to_string(&result).unwrap_or_else(|error| {
+        serde_json::json!({
+            "success": false,
+            "engine": "rust-ffmpeg",
+            "errorCode": "serialization_failed",
+            "errorMessage": error.to_string(),
+        })
+        .to_string()
+    })
+}
+
+#[frb]
+pub fn convert_file_with_progress(request_json: String, progress_sink: StreamSink<String>) {
+    let result = match serde_json::from_str::<AndroidConvertRequest>(&request_json) {
+        Ok(request) => {
+            emit_conversion_event(
+                Some(&progress_sink),
+                &ConversionEvent::progress(
+                    0,
+                    1,
+                    request.input_path.clone(),
+                    Some(0.0),
+                    Some(0),
+                    None,
+                    Some("Starting conversion".to_string()),
+                ),
+            );
+            match transcode_impl(&request, Some(&progress_sink)) {
                 Ok(result) => result,
                 Err(error) => failure_result(
                     &request,
@@ -66,115 +82,40 @@ pub fn convert_file(request_json: String) -> String {
                     error.error_message,
                     error.raw_log,
                 ),
-            },
-            Err(error) => invalid_request_result(error.to_string()),
-        };
-
-        serde_json::to_string(&result).unwrap_or_else(|error| {
-            serde_json::json!({
-                "success": false,
-                "engine": "rust-ffmpeg",
-                "errorCode": "serialization_failed",
-                "errorMessage": error.to_string(),
-            })
-            .to_string()
-        })
-    }
-}
-
-#[frb]
-pub fn convert_file_with_progress(request_json: String, progress_sink: StreamSink<String>) {
-    #[cfg(any(target_os = "ios", target_os = "macos"))]
-    {
-        let _ = request_json;
-        let result = AndroidConvertResult {
-            success: false,
-            command: None,
-            output_path: None,
-            engine: Some("unsupported".to_string()),
-            output_format: None,
-            error_code: Some("unsupported_platform".to_string()),
-            error_message: Some("File conversion via Rust FFmpeg is not supported on Apple platforms. Use native transcoder.".to_string()),
-            stdout: None,
-            stderr: None,
-            raw_log: None,
-        };
-        emit_conversion_event(Some(&progress_sink), &ConversionEvent::result(result));
-    }
-    #[cfg(not(any(target_os = "ios", target_os = "macos")))]
-    {
-        let result = match serde_json::from_str::<AndroidConvertRequest>(&request_json) {
-            Ok(request) => {
-                emit_conversion_event(
-                    Some(&progress_sink),
-                    &ConversionEvent::progress(
-                        0,
-                        1,
-                        request.input_path.clone(),
-                        Some(0.0),
-                        Some(0),
-                        None,
-                        Some("Starting conversion".to_string()),
-                    ),
-                );
-                match transcode_impl(&request, Some(&progress_sink)) {
-                    Ok(result) => result,
-                    Err(error) => failure_result(
-                        &request,
-                        "transcode_failed",
-                        error.error_message,
-                        error.raw_log,
-                    ),
-                }
             }
-            Err(error) => invalid_request_result(error.to_string()),
-        };
-
-        if result.success {
-            emit_conversion_event(
-                Some(&progress_sink),
-                &ConversionEvent::progress(
-                    1,
-                    1,
-                    result.output_path.clone().unwrap_or_default(),
-                    Some(1.0),
-                    None,
-                    None,
-                    Some("Completed".to_string()),
-                ),
-            );
         }
+        Err(error) => invalid_request_result(error.to_string()),
+    };
 
-        emit_conversion_event(Some(&progress_sink), &ConversionEvent::result(result));
+    if result.success {
+        emit_conversion_event(
+            Some(&progress_sink),
+            &ConversionEvent::progress(
+                1,
+                1,
+                result.output_path.clone().unwrap_or_default(),
+                Some(1.0),
+                None,
+                None,
+                Some("Completed".to_string()),
+            ),
+        );
     }
+
+    emit_conversion_event(Some(&progress_sink), &ConversionEvent::result(result));
 }
 
 #[frb(sync)]
 pub fn get_capabilities() -> String {
-    #[cfg(any(target_os = "ios", target_os = "macos"))]
-    {
-        let capabilities = AndroidConverterCapabilities {
-            engine: "unsupported".to_string(),
-            supported_output_formats: vec![],
-            supports_progress: false,
-            supports_cancellation: false,
-            requires_external_binary: false,
-            notes: Some("Rust FFmpeg is disabled on Apple platforms.".to_string()),
-        };
-        serde_json::to_string(&capabilities).unwrap()
-    }
-    #[cfg(not(any(target_os = "ios", target_os = "macos")))]
-    {
-        let capabilities = AndroidConverterCapabilities {
-            engine: "rust-ffmpeg".to_string(),
-            supported_output_formats: supported_output_formats(),
-            supports_progress: true,
-            supports_cancellation: false,
-            requires_external_binary: false,
-            notes: Some(capabilities_notes()),
-        };
-        serde_json::to_string(&capabilities).unwrap()
-    }
+    let capabilities = AndroidConverterCapabilities {
+        engine: "rust-ffmpeg".to_string(),
+        supported_output_formats: supported_output_formats(),
+        supports_progress: true,
+        supports_cancellation: false,
+        requires_external_binary: false,
+        notes: Some(capabilities_notes()),
+    };
+    serde_json::to_string(&capabilities).unwrap()
 }
 
 #[frb(init)]
@@ -182,7 +123,6 @@ pub fn init_app() {
     flutter_rust_bridge::setup_default_user_utils();
 }
 
-#[cfg(not(any(target_os = "ios", target_os = "macos")))]
 fn invalid_request_result(error_message: String) -> AndroidConvertResult {
     AndroidConvertResult {
         success: false,

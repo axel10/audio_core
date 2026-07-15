@@ -1,9 +1,9 @@
 pub mod audio_fingerprint;
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
 pub mod controller;
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
 pub mod equalizer;
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
 pub mod fft;
 
 pub mod metadata;
@@ -12,7 +12,7 @@ pub mod palette;
 use super::audio_converter;
 use std::path::Path;
 
-#[cfg(any(target_os = "ios", target_os = "macos", target_os = "android"))]
+#[cfg(target_os = "android")]
 pub mod equalizer {
     #[derive(Debug, Clone, Default)]
     pub struct EqualizerConfig {
@@ -26,7 +26,7 @@ pub mod equalizer {
     }
 }
 
-#[cfg(any(target_os = "ios", target_os = "macos", target_os = "android"))]
+#[cfg(target_os = "android")]
 pub mod controller {
     use super::equalizer::EqualizerConfig;
     use ffmpeg_core::AudioSource;
@@ -498,7 +498,7 @@ pub mod controller {
     }
 }
 
-#[cfg(any(target_os = "ios", target_os = "macos", target_os = "android"))]
+#[cfg(target_os = "android")]
 pub mod fft {
     pub const RAW_FFT_BINS: usize = 0;
 }

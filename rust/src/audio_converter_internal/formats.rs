@@ -201,7 +201,7 @@ pub(crate) fn supported_output_formats() -> Vec<String> {
 }
 
 pub(crate) fn capabilities_notes() -> String {
-    let notes = "Uses the bundled Rust/FFmpeg shared libraries through rust-ffmpeg.".to_string();
+    let mut notes = "Uses the bundled Rust/FFmpeg shared libraries through rust-ffmpeg.".to_string();
     #[cfg(any(target_os = "ios", target_os = "macos"))]
     {
         notes.push_str(" AAC container output is not supported on iOS or macOS; M4A is encoded through Apple's audio stack from a WAV intermediate.");

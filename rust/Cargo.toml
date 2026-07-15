@@ -26,7 +26,7 @@ md5 = "0.7.0"
 webp = "0.3.0"
 
 
-[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+[target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))'.dependencies]
 rodio = { path = "rodio", default-features = true, features = ["symphonia-all"] }
 rodio-wsola = { path = "rodio-wsola"  }
 realfft = "3.5.0"

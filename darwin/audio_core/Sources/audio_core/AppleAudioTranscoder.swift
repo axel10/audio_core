@@ -1,36 +1,22 @@
 import Foundation
-import AudioToolbox
-
-import SFBAudioEngine
+import AVFoundation
 
 enum AppleAudioTranscoder {
-  private static let engineName = "SFBAudioEngine"
+  private static let engineName = "AVFoundation"
   private static let supportedFormatValues: [String] = [
     "aac",
-    "alac",
-    "aiff",
-    "caf",
-    "flac",
     "m4a",
-    "m4b",
-    "mp3",
-    "ogg",
-    "opus",
-    "wav",
+    "m4b"
   ]
 
   static func capabilities() -> [String: Any] {
-    let supportedOutputFormats = supportedFormatValues.filter {
-      AudioEncoder.handlesPaths(withExtension: $0)
-    }
-
     return [
       "engine": engineName,
-      "supportedOutputFormats": supportedOutputFormats,
+      "supportedOutputFormats": supportedFormatValues,
       "supportsProgress": false,
       "supportsCancellation": false,
       "requiresExternalBinary": false,
-      "notes": "Uses SFBAudioEngine on Apple platforms. Progress reporting is coarse, and request-level bitrate/sample-rate tuning is not wired yet.",
+      "notes": "Uses native AVFoundation for AAC/M4A/M4B transcoding.",
     ]
   }
 
@@ -47,7 +33,6 @@ enum AppleAudioTranscoder {
     let outputPath = try stringValue(request, key: "outputPath")
     let outputFormat = normalizeFormat(try stringValue(request, key: "outputFormat"))
     let bitRate = intValue(request, key: "bitRate")
-    let bitRateMode = normalizeBitRateMode(optionalStringValue(request, key: "bitRateMode"))
 
     guard supportedFormatValues.contains(outputFormat) else {
       throw ConversionError.unsupportedOutputFormat(outputFormat)
@@ -59,25 +44,112 @@ enum AppleAudioTranscoder {
     try createParentDirectoryIfNeeded(for: destinationURL)
     try? FileManager.default.removeItem(at: destinationURL)
 
-    do {
-      if let encoder = try makeEncoder(
-        destinationURL: destinationURL,
-        outputFormat: outputFormat,
-        bitRate: bitRate,
-        bitRateMode: bitRateMode
-      ) {
-        try AudioConverter.convert(sourceURL, using: encoder)
+    // AVAssetReader + AVAssetWriter transcoding loop
+    let asset = AVAsset(url: sourceURL)
+    
+    // Use DispatchSemaphore to wait for loading tracks
+    let semaphore = DispatchSemaphore(value: 0)
+    var loadError: Error?
+    var audioTracks: [AVAssetTrack] = []
+    
+    asset.loadValuesAsynchronously(forKeys: ["tracks"]) {
+      var error: NSError?
+      let status = asset.statusOfValue(forKey: "tracks", error: &error)
+      if status == .loaded {
+        audioTracks = asset.tracks(withMediaType: .audio)
       } else {
-        try AudioConverter.convert(sourceURL, to: destinationURL)
+        loadError = error
       }
-    } catch {
+      semaphore.signal()
+    }
+    _ = semaphore.wait(timeout: .distantFuture)
+    
+    if let error = loadError {
+      throw error
+    }
+    
+    guard let track = audioTracks.first else {
+      throw ConversionError.noAudioTrack
+    }
+
+    let reader = try AVAssetReader(asset: asset)
+    let readerOutputSettings: [String: Any] = [
+      AVFormatIDKey: kAudioFormatLinearPCM,
+      AVLinearPCMBitDepthKey: 16,
+      AVLinearPCMIsFloatKey: false,
+      AVLinearPCMIsBigEndianKey: false
+    ]
+    let readerOutput = AVAssetReaderTrackOutput(track: track, outputSettings: readerOutputSettings)
+    reader.add(readerOutput)
+
+    let writer = try AVAssetWriter(outputURL: destinationURL, fileType: .m4a)
+    
+    var channels = 2
+    var sampleRate = 44100.0
+    
+    // Try to get channel and sample rate from track format description
+    if let formatDesc = track.formatDescriptions.first {
+      let audioDesc = formatDesc as! CMFormatDescription
+      if let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(audioDesc)?.pointee {
+        channels = Int(asbd.mChannelsPerFrame)
+        sampleRate = asbd.mSampleRate
+      }
+    }
+    
+    let targetBitrate = bitRate ?? 128000
+    let writerInputSettings: [String: Any] = [
+      AVFormatIDKey: kAudioFormatMPEG4AAC,
+      AVNumberOfChannelsKey: channels,
+      AVSampleRateKey: sampleRate,
+      AVEncoderBitRateKey: targetBitrate
+    ]
+    let writerInput = AVAssetWriterInput(mediaType: .audio, outputSettings: writerInputSettings)
+    writerInput.expectsMediaDataInRealTime = false
+    writer.add(writerInput)
+
+    guard reader.startReading() else {
+      throw reader.error ?? ConversionError.readerStartFailed
+    }
+    guard writer.startWriting() else {
+      throw writer.error ?? ConversionError.writerStartFailed
+    }
+    writer.startSession(atSourceTime: .zero)
+
+    let transcodeSemaphore = DispatchSemaphore(value: 0)
+    var transcodeError: Error?
+
+    writerInput.requestMediaDataWhenReady(on: DispatchQueue(label: "audio_core.transcoder.write")) {
+      while writerInput.isReadyForMoreMediaData {
+        if let sampleBuffer = readerOutput.copyNextSampleBuffer() {
+          if !writerInput.append(sampleBuffer) {
+            transcodeError = writer.error
+            reader.cancelReading()
+            transcodeSemaphore.signal()
+            return
+          }
+        } else {
+          writerInput.markAsFinished()
+          writer.finishWriting {
+            if writer.status != .completed {
+              transcodeError = writer.error
+            }
+            transcodeSemaphore.signal()
+          }
+          break
+        }
+      }
+    }
+    
+    _ = transcodeSemaphore.wait(timeout: .distantFuture)
+    
+    if let error = transcodeError {
       try? FileManager.default.removeItem(at: destinationURL)
       throw error
     }
 
     return [
       "success": true,
-      "command": "AudioConverter.convert(\"\(inputPath)\" -> \"\(outputPath)\")",
+      "command": "AVAssetReader+AVAssetWriter(\"\(inputPath)\" -> \"\(outputPath)\")",
       "outputPath": outputPath,
       "engine": engineName,
       "outputFormat": outputFormat,
@@ -97,24 +169,18 @@ enum AppleAudioTranscoder {
     if let conversionError = error as? ConversionError {
       errorCode = conversionError.code
       errorMessage = conversionError.localizedDescription
-    } else if let nsError = error as NSError?,
-              nsError.domain == AudioConverter.ErrorDomain ||
-                nsError.domain == AudioEncoder.ErrorDomain ||
-                nsError.domain == "org.sbooth.AudioEngine.AudioFile" ||
-                nsError.domain == OutputTarget.ErrorDomain {
-      errorCode = "conversion_failed"
-      errorMessage = nsError.localizedDescription
     } else {
-      errorCode = "conversion_failed"
-      errorMessage = error.localizedDescription
+      let nsError = error as NSError
+      errorCode = "system_error_\(nsError.code)"
+      errorMessage = nsError.localizedDescription
     }
 
     return [
       "success": false,
-      "command": NSNull(),
-      "outputPath": NSNull(),
+      "command": "AVAssetReader+AVAssetWriter",
+      "outputPath": request["outputPath"] ?? NSNull(),
       "engine": engineName,
-      "outputFormat": outputFormat.isEmpty ? NSNull() : outputFormat,
+      "outputFormat": outputFormat,
       "errorCode": errorCode,
       "errorMessage": errorMessage,
       "stdout": NSNull(),
@@ -123,189 +189,73 @@ enum AppleAudioTranscoder {
     ]
   }
 
+  private static func normalizeFormat(_ format: String) -> String {
+    let fmt = format.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if fmt == "m4a" || fmt == "m4b" || fmt == "aac" {
+      return "m4a"
+    }
+    return fmt
+  }
+
+  private static func stringValue(_ dict: [String: Any], key: String) throws -> String {
+    guard let val = dict[key] as? String else {
+      throw ConversionError.missingRequiredArgument(key)
+    }
+    return val
+  }
+
+  private static func optionalStringValue(_ dict: [String: Any], key: String) -> String? {
+    return dict[key] as? String
+  }
+
+  private static func intValue(_ dict: [String: Any], key: String) -> Int? {
+    if let val = dict[key] as? Int {
+      return val
+    }
+    if let val = dict[key] as? Double {
+      return Int(val)
+    }
+    if let val = dict[key] as? String, let parsed = Int(val) {
+      return parsed
+    }
+    return nil
+  }
+
   private static func createParentDirectoryIfNeeded(for url: URL) throws {
-    let parentDirectory = url.deletingLastPathComponent()
-    guard !parentDirectory.path.isEmpty else { return }
-    try FileManager.default.createDirectory(
-      at: parentDirectory,
-      withIntermediateDirectories: true,
-      attributes: nil
-    )
+    let parent = url.deletingLastPathComponent()
+    try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
   }
 
-  private static func normalizeFormat(_ value: String) -> String {
-    value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-  }
+  enum ConversionError: Error, LocalizedError {
+    case missingRequiredArgument(String)
+    case unsupportedOutputFormat(String)
+    case noAudioTrack
+    case readerStartFailed
+    case writerStartFailed
 
-  private static func normalizeBitRateMode(_ value: String?) -> String? {
-    guard let value else { return nil }
-    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    return trimmed.isEmpty ? nil : trimmed
-  }
-
-  private static func intValue(_ request: [String: Any], key: String) -> Int? {
-    guard let value = request[key] as? NSNumber else {
-      return nil
-    }
-    let intValue = value.intValue
-    return intValue > 0 ? intValue : nil
-  }
-
-  private static func stringValue(_ request: [String: Any], key: String) throws -> String {
-    guard let value = request[key] as? String else {
-      throw ConversionError.invalidRequest("Missing required field: \(key)")
-    }
-    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else {
-      throw ConversionError.invalidRequest("Missing required field: \(key)")
-    }
-    return trimmed
-  }
-
-  private static func optionalStringValue(_ request: [String: Any], key: String) -> String? {
-    guard let value = request[key] as? String else {
-      return nil
-    }
-    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? nil : trimmed
-  }
-
-  private static func makeEncoder(
-    destinationURL: URL,
-    outputFormat: String,
-    bitRate: Int?,
-    bitRateMode: String?
-  ) throws -> AudioEncoder? {
-    let encoder = try createEncoder(destinationURL: destinationURL, outputFormat: outputFormat)
-    var settings: [AudioEncodingSettingsKey: Any] = [:]
-
-    switch outputFormat {
-    case "m4a", "m4b":
-      settings[.coreAudioFileTypeID] = NSNumber(
-        value: outputFormat == "m4a" ? UInt32(kAudioFileM4AType) : UInt32(kAudioFileM4BType)
-      )
-      settings[.coreAudioFormatID] = NSNumber(value: UInt32(kAudioFormatMPEG4AAC))
-
-      if let bitRate {
-        settings[.coreAudioAudioConverterPropertySettings] = [
-          kAudioConverterEncodeBitRate: NSNumber(value: bitRate),
-          kAudioCodecPropertyBitRateControlMode: NSNumber(
-            value: bitRateMode == "vbr"
-              ? kAudioCodecBitRateControlMode_VariableConstrained
-              : kAudioCodecBitRateControlMode_Constant
-          ),
-        ]
-      } else if let bitRateMode {
-        settings[.coreAudioAudioConverterPropertySettings] = [
-          kAudioCodecPropertyBitRateControlMode: NSNumber(
-            value: bitRateMode == "vbr"
-              ? kAudioCodecBitRateControlMode_VariableConstrained
-              : kAudioCodecBitRateControlMode_Constant
-          ),
-        ]
+    var code: String {
+      switch self {
+      case .missingRequiredArgument: return "missing_argument"
+      case .unsupportedOutputFormat: return "unsupported_format"
+      case .noAudioTrack: return "no_audio_track"
+      case .readerStartFailed: return "reader_start_failed"
+      case .writerStartFailed: return "writer_start_failed"
       }
-    case "aac", "caf":
-      guard bitRate != nil || bitRateMode != nil else {
-        return nil
-      }
-
-      if let bitRate {
-        settings[.coreAudioAudioConverterPropertySettings] = [
-          kAudioConverterEncodeBitRate: NSNumber(value: bitRate),
-          kAudioCodecPropertyBitRateControlMode: NSNumber(
-            value: bitRateMode == "vbr"
-              ? kAudioCodecBitRateControlMode_VariableConstrained
-              : kAudioCodecBitRateControlMode_Constant
-          ),
-        ]
-      } else if let bitRateMode {
-        settings[.coreAudioAudioConverterPropertySettings] = [
-          kAudioCodecPropertyBitRateControlMode: NSNumber(
-            value: bitRateMode == "vbr"
-              ? kAudioCodecBitRateControlMode_VariableConstrained
-              : kAudioCodecBitRateControlMode_Constant
-          ),
-        ]
-      }
-    case "mp3":
-      if let bitRate {
-        let kilobitsPerSecond = normalizeBitRateForKbps(bitRate)
-        if bitRateMode == "vbr" {
-          settings[.mp3AverageBitrate] = kilobitsPerSecond
-        } else {
-          settings[.mp3ConstantBitrate] = kilobitsPerSecond
-        }
-      } else if bitRateMode == "vbr" {
-        settings[.mp3UseVariableBitrate] = true
-      }
-    case "opus":
-      settings[.opusPreserveSampleRate] = true
-      if let bitRate {
-        settings[.opusBitrate] = normalizeBitRateForKbps(bitRate)
-      }
-      if let bitRateMode {
-        settings[.opusBitrateMode] = switch bitRateMode {
-        case "vbr":
-          OpusBitrateMode.constrainedVBR
-        case "cbr":
-          OpusBitrateMode.hardCBR
-        default:
-          OpusBitrateMode.constrainedVBR
-        }
-      }
-    default:
-      return nil
     }
 
-    if !settings.isEmpty {
-      encoder.settings = settings
-    }
-    return encoder
-  }
-
-  private static func createEncoder(
-    destinationURL: URL,
-    outputFormat: String
-  ) throws -> AudioEncoder {
-    switch outputFormat {
-    case "m4a", "m4b", "aac", "caf":
-      return try AudioEncoder(url: destinationURL)
-    case "mp3":
-      return try AudioEncoder(url: destinationURL, encoderName: .MP3)
-    case "opus":
-      return try AudioEncoder(url: destinationURL, encoderName: .oggOpus)
-    default:
-      return try AudioEncoder(url: destinationURL)
-    }
-  }
-
-  private static func normalizeBitRateForKbps(_ bitRate: Int) -> Int {
-    if bitRate <= 1000 {
-      return max(1, bitRate)
-    }
-    return max(1, (bitRate + 500) / 1000)
-  }
-}
-
-private enum ConversionError: LocalizedError {
-  case invalidRequest(String)
-  case unsupportedOutputFormat(String)
-
-  var code: String {
-    switch self {
-    case .invalidRequest:
-      return "invalid_request"
-    case .unsupportedOutputFormat:
-      return "unsupported_output_format"
-    }
-  }
-
-  var errorDescription: String? {
-    switch self {
-    case .invalidRequest(let message):
-      return message
-    case .unsupportedOutputFormat(let format):
-      return "Output format '\(format)' is not supported by SFBAudioEngine on this platform."
+    var errorDescription: String? {
+      switch self {
+      case .missingRequiredArgument(let name):
+        return "Missing required conversion argument: '\(name)'."
+      case .unsupportedOutputFormat(let format):
+        return "Output format '\(format)' is not supported by AVFoundation transcoder."
+      case .noAudioTrack:
+        return "No audio tracks found in the input asset."
+      case .readerStartFailed:
+        return "Failed to start AVAssetReader."
+      case .writerStartFailed:
+        return "Failed to start AVAssetWriter."
+      }
     }
   }
 }

@@ -1,6 +1,6 @@
 use super::equalizer::{EqSource, EqualizerConfig, EqualizerShared};
 use super::fft::{clear_fft_buffer, FftSource, RAW_FFT_BINS};
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
 use ffmpeg_core::AudioSource as CoreAudioSource;
 use log::{error, info, warn};
 use rodio::cpal::traits::{DeviceTrait, HostTrait};
@@ -13,55 +13,55 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 use std::{cmp, f64};
-
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+ 
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
 struct FfmpegAudioSource {
     inner: CoreAudioSource,
 }
-
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+ 
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
 impl FfmpegAudioSource {
     fn open(path: impl AsRef<std::path::Path>) -> Result<Self, String> {
         CoreAudioSource::open(path)
             .map(|inner| Self { inner })
             .map_err(|error| error.to_string())
     }
-
+ 
     fn seek_to(&mut self, position: Duration) -> Result<(), String> {
         self.inner
             .seek_to(position)
             .map_err(|error| error.to_string())
     }
-
+ 
     fn total_duration(&self) -> Option<Duration> {
         self.inner.total_duration()
     }
 }
-
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+ 
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
 impl Iterator for FfmpegAudioSource {
     type Item = rodio::Sample;
-
+ 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next()
     }
-
+ 
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.inner.size_hint()
     }
 }
-
+ 
 enum DecoderBackend {
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
     Ffmpeg(FfmpegAudioSource),
     Symphonia {
         source: Box<dyn Source<Item = f32> + Send>,
         engine: &'static str,
     },
 }
-
+ 
 impl DecoderBackend {
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
     fn open(path: &str, file: File) -> Result<Self, String> {
         info!("[DecoderBackend] Attempting to open audio path: {}", path);
         match FfmpegAudioSource::open(path) {
@@ -90,48 +90,48 @@ impl DecoderBackend {
             }
         }
     }
-
-    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+ 
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios")))]
     fn open(_path: &str, file: File) -> Result<Self, String> {
         Self::open_symphonia(file)
     }
-
+ 
     fn open_symphonia(file: File) -> Result<Self, String> {
         let decoder = Decoder::try_from(file).map_err(|e| format!("decode failed: {e}"))?;
         let source: Box<dyn Source<Item = f32> + Send> = Box::new(decoder);
-
+ 
         Ok(Self::Symphonia {
             source,
             engine: "symphonia",
         })
     }
-
+ 
     fn total_duration(&self) -> Option<Duration> {
         match self {
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
             Self::Ffmpeg(source) => source.total_duration(),
             Self::Symphonia { source, .. } => source.total_duration(),
         }
     }
-
+ 
     fn engine(&self) -> &'static str {
         match self {
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
             Self::Ffmpeg(_) => "ffmpeg",
             Self::Symphonia { engine, .. } => engine,
         }
     }
-
+ 
     fn into_source(self) -> Box<dyn Source<Item = f32> + Send> {
         match self {
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
             Self::Ffmpeg(source) => Box::new(source),
             Self::Symphonia { source, .. } => source,
         }
     }
 }
-
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+ 
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
 impl Source for FfmpegAudioSource {
     fn current_span_len(&self) -> Option<usize> {
         self.inner.current_span_len()
@@ -1402,7 +1402,7 @@ fn drive_volume_fade(
 
 pub fn init_app() {
     flutter_rust_bridge::setup_default_user_utils();
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
     let _ = env_logger::builder()
         .filter_level(log::LevelFilter::Info)
         .try_init();

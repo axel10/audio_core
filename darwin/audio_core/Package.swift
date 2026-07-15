@@ -2,9 +2,6 @@
 import PackageDescription
 import Foundation
 
-let packageDir = URL(fileURLWithPath: #file).resolvingSymlinksInPath().deletingLastPathComponent()
-let sfbPath = packageDir.appendingPathComponent("../../SFBAudioEngine").path
-
 let package = Package(
     name: "audio_core",
     platforms: [
@@ -14,15 +11,11 @@ let package = Package(
     products: [
         .library(name: "audio-core", type: .dynamic, targets: ["audio_core"])
     ],
-    dependencies: [
-        .package(path: sfbPath)
-    ],
+    dependencies: [],
     targets: [
         .target(
             name: "audio_core",
-            dependencies: [
-                .product(name: "SFBAudioEngine", package: "SFBAudioEngine")
-            ]
+            dependencies: []
         )
     ]
 )

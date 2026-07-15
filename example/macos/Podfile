@@ -36,40 +36,37 @@ target 'Runner' do
 end
 
 post_install do |installer|
-  # 1. Update user project (Runner.xcodeproj) to register the local package
+  # 1. Clean up SFBAudioEngine package references from user project (Runner.xcodeproj)
   user_project = installer.aggregate_targets.first.user_project
-  package_ref_user = user_project.root_object.package_references.find { |ref|
-    (ref.respond_to?(:repositoryURL) && ref.repositoryURL.include?('SFBAudioEngine')) ||
-    (ref.respond_to?(:relative_path) && ref.relative_path.include?('SFBAudioEngine'))
-  }
-  if !package_ref_user.nil? && package_ref_user.isa != 'XCLocalSwiftPackageReference'
-    user_project.root_object.package_references.delete(package_ref_user)
-    package_ref_user.remove_from_project
-    package_ref_user = nil
+  user_project.root_object.package_references.each do |ref|
+    if (ref.respond_to?(:repositoryURL) && ref.repositoryURL.include?('SFBAudioEngine')) ||
+       (ref.respond_to?(:relative_path) && ref.relative_path.include?('SFBAudioEngine'))
+      user_project.root_object.package_references.delete(ref)
+      ref.remove_from_project
+    end
   end
-  if package_ref_user.nil?
-    package_ref_user = user_project.new(Xcodeproj::Project::Object::XCLocalSwiftPackageReference)
-    user_project.root_object.package_references << package_ref_user
+  # Remove package product dependency from targets in user project if any
+  user_project.targets.each do |target|
+    if target.respond_to?(:package_product_dependencies)
+      target.package_product_dependencies.each do |dep|
+        if dep.product_name == 'SFBAudioEngine'
+          target.package_product_dependencies.delete(dep)
+          dep.remove_from_project
+        end
+      end
+    end
   end
-  package_ref_user.relative_path = '../../SFBAudioEngine'
   user_project.save
 
-  # 2. Update Pods.xcodeproj to register the local package
+  # 2. Clean up SFBAudioEngine package references from Pods.xcodeproj
   pods_project = installer.pods_project
-  package_ref_pods = pods_project.root_object.package_references.find { |ref|
-    (ref.respond_to?(:repositoryURL) && ref.repositoryURL.include?('SFBAudioEngine')) ||
-    (ref.respond_to?(:relative_path) && ref.relative_path.include?('SFBAudioEngine'))
-  }
-  if !package_ref_pods.nil? && package_ref_pods.isa != 'XCLocalSwiftPackageReference'
-    pods_project.root_object.package_references.delete(package_ref_pods)
-    package_ref_pods.remove_from_project
-    package_ref_pods = nil
+  pods_project.root_object.package_references.each do |ref|
+    if (ref.respond_to?(:repositoryURL) && ref.repositoryURL.include?('SFBAudioEngine')) ||
+       (ref.respond_to?(:relative_path) && ref.relative_path.include?('SFBAudioEngine'))
+      pods_project.root_object.package_references.delete(ref)
+      ref.remove_from_project
+    end
   end
-  if package_ref_pods.nil?
-    package_ref_pods = pods_project.new(Xcodeproj::Project::Object::XCLocalSwiftPackageReference)
-    pods_project.root_object.package_references << package_ref_pods
-  end
-  package_ref_pods.relative_path = '../../../SFBAudioEngine'
 
   installer.pods_project.targets.each do |target|
     flutter_additional_macos_build_settings(target)
@@ -83,16 +80,18 @@ post_install do |installer|
     end
 
     if target.name == 'audio_core'
-      product_dep = target.package_product_dependencies.find { |dep| dep.product_name == 'SFBAudioEngine' }
-      if product_dep.nil?
-        product_dep = pods_project.new(Xcodeproj::Project::Object::XCSwiftPackageProductDependency)
-        product_dep.product_name = 'SFBAudioEngine'
-        target.package_product_dependencies << product_dep
+      # Remove package product dependency on SFBAudioEngine if any
+      if target.respond_to?(:package_product_dependencies)
+        target.package_product_dependencies.each do |dep|
+          if dep.product_name == 'SFBAudioEngine'
+            target.package_product_dependencies.delete(dep)
+            dep.remove_from_project
+          end
+        end
       end
-      product_dep.package = package_ref_pods
 
-      # Add library search path and linker flag for local FFmpeg static library
-      sfb_ffmpeg_path = File.expand_path('../../../SFBAudioEngine/macos/Frameworks/FFmpeg.xcframework/macos-arm64_x86_64', __FILE__)
+      # Add library search path and linker flag for local FFmpeg static library from darwin/FFmpeg.xcframework
+      sfb_ffmpeg_path = File.expand_path('../../../darwin/FFmpeg.xcframework/macos-arm64_x86_64', __FILE__)
       target.build_configurations.each do |config|
         paths = config.build_settings['LIBRARY_SEARCH_PATHS']
         if paths.nil?

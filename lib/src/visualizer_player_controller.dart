@@ -18,7 +18,6 @@ import 'fft_processor.dart';
 import 'player_state_snapshot.dart';
 import 'equalizer_controller.dart';
 import 'audio_engine/audio_engine_interface.dart';
-import 'audio_engine/apple_audio_engine.dart';
 import 'audio_engine/android_audio_engine.dart';
 import 'audio_engine/rust_audio_engine.dart';
 import 'android_media_library.dart';
@@ -72,8 +71,6 @@ class AudioCoreController extends ChangeNotifier
   }) {
     if (Platform.isAndroid) {
       _engine = AndroidAudioEngine();
-    } else if (Platform.isIOS || Platform.isMacOS) {
-      _engine = AppleAudioEngine();
     } else {
       _engine = RustAudioEngine();
     }

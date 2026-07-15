@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/services.dart';
 import '../fft_processor.dart';
 import '../rust/api/simple_api.dart' as rust;
 import '../rust/api/simple/equalizer.dart';
@@ -11,6 +13,9 @@ import 'flutter_taglib_metadata_bridge.dart';
 import 'track_artwork_support.dart';
 
 class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
+  static const MethodChannel _appleChannel = MethodChannel('audio_core.player');
+
+  bool get _isApple => Platform.isIOS || Platform.isMacOS;
   final _statusController = StreamController<AudioStatus>.broadcast();
   StreamSubscription? _subscription;
   double _currentVolume = 1.0;
@@ -202,28 +207,85 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
-  Future<void> prepareForFileWrite() => rust.prepareForFileWrite();
+  Future<void> prepareForFileWrite() async {
+    await rust.prepareForFileWrite();
+    if (_isApple) {
+      final currentPath = rust.getLoadedAudioPath();
+      await _amberInvokeMethod('prepareForFileWrite', <String, Object?>{
+        if (currentPath != null) 'path': currentPath,
+      });
+    }
+  }
 
   @override
-  Future<void> finishFileWrite() => rust.finishFileWrite();
+  Future<void> finishFileWrite() async {
+    await rust.finishFileWrite();
+    if (_isApple) {
+      final currentPath = rust.getLoadedAudioPath();
+      await _amberInvokeMethod('finishFileWrite', <String, Object?>{
+        if (currentPath != null) 'path': currentPath,
+      });
+    }
+  }
+
+  // Helper to handle ignore/suppress method channel invocation if needed
+  Future<T?> _amberInvokeMethod<T>(String method, [dynamic arguments]) async {
+    try {
+      return await _appleChannel.invokeMethod<T>(method, arguments);
+    } catch (_) {
+      return null;
+    }
+  }
 
   @override
-  Future<bool> registerPersistentAccess(String path) async => false;
+  Future<bool> registerPersistentAccess(String path) async {
+    if (_isApple) {
+      final success = await _amberInvokeMethod<bool>('registerPersistentAccess', {'path': path});
+      return success ?? false;
+    }
+    return false;
+  }
 
   @override
-  Future<void> forgetPersistentAccess(String path) async {}
+  Future<void> forgetPersistentAccess(String path) async {
+    if (_isApple) {
+      await _amberInvokeMethod<void>('forgetPersistentAccess', {'path': path});
+    }
+  }
 
   @override
-  Future<bool> hasPersistentAccess(String path) async => false;
+  Future<bool> hasPersistentAccess(String path) async {
+    if (_isApple) {
+      final success = await _amberInvokeMethod<bool>('hasPersistentAccess', {'path': path});
+      return success ?? false;
+    }
+    return false;
+  }
 
   @override
-  Future<List<String>> listPersistentAccessPaths() async => const <String>[];
+  Future<List<String>> listPersistentAccessPaths() async {
+    if (_isApple) {
+      final paths = await _appleChannel.invokeListMethod<String>('listPersistentAccessPaths');
+      return paths ?? const <String>[];
+    }
+    return const <String>[];
+  }
 
   @override
-  Future<bool> beginScopedAccess(String path) async => true;
+  Future<bool> beginScopedAccess(String path) async {
+    if (_isApple) {
+      final success = await _amberInvokeMethod<bool>('beginScopedAccess', {'path': path});
+      return success ?? false;
+    }
+    return true;
+  }
 
   @override
-  Future<void> endScopedAccess(String path) async {}
+  Future<void> endScopedAccess(String path) async {
+    if (_isApple) {
+      await _amberInvokeMethod<void>('endScopedAccess', {'path': path});
+    }
+  }
 
   @override
   Future<bool> updateTrackMetadata({

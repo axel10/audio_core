@@ -377,17 +377,36 @@ class AudioConverter {
     'my_exoplayer',
   );
 
-  bool get _usesAppleTranscoder => Platform.isIOS || Platform.isMacOS;
+  bool get _isApplePlatform => Platform.isIOS || Platform.isMacOS;
 
   Future<ConverterCapabilities> getCapabilities() async {
-    if (_usesAppleTranscoder) {
-      final raw = await _appleConverterChannel.invokeMapMethod<String, Object?>(
+    if (_isApplePlatform) {
+      final rawApple = await _appleConverterChannel.invokeMapMethod<String, Object?>(
         'getCapabilities',
       );
-      if (raw == null) {
-        throw StateError('Apple audio converter returned no capabilities.');
+      final rawRust = rust_api.getCapabilities();
+      
+      final appleCap = rawApple != null ? ConverterCapabilities.fromMap(rawApple) : null;
+      final rustCap = ConverterCapabilities.fromMap(
+        jsonDecode(rawRust) as Map<Object?, Object?>,
+      );
+      
+      if (appleCap != null) {
+        final mergedFormats = {
+          ...appleCap.supportedOutputFormats,
+          ...rustCap.supportedOutputFormats,
+        }.toList();
+        
+        return ConverterCapabilities(
+          engine: 'hybrid',
+          supportedOutputFormats: mergedFormats,
+          supportsProgress: rustCap.supportsProgress,
+          supportsCancellation: rustCap.supportsCancellation,
+          requiresExternalBinary: false,
+          notes: 'AAC/M4A/M4B via AVFoundation, others via Rust FFmpeg.',
+        );
       }
-      return ConverterCapabilities.fromMap(raw);
+      return rustCap;
     }
 
     final raw = rust_api.getCapabilities();
@@ -450,7 +469,7 @@ class AudioConverter {
         );
         return ConvertResult(
           success: false,
-          engine: 'Media3Transformer',
+          engine: 'my_exoplayer',
           outputFormat: request.outputFormat,
           errorCode: 'native_bridge_failed',
           errorMessage: message,
@@ -458,7 +477,12 @@ class AudioConverter {
       }
     }
 
-    if (_usesAppleTranscoder) {
+    final isAppleAAC = _isApplePlatform &&
+        (request.outputFormat == AudioFormat.aac ||
+         request.outputFormat == AudioFormat.m4a ||
+         request.outputFormat == AudioFormat.m4b);
+
+    if (isAppleAAC) {
       onProgress?.call(
         ConversionProgress(
           completedFiles: 0,
@@ -503,7 +527,7 @@ class AudioConverter {
         );
         return ConvertResult(
           success: false,
-          engine: 'SFBAudioEngine',
+          engine: 'AVFoundation',
           outputFormat: request.outputFormat,
           errorCode: 'native_bridge_failed',
           errorMessage: message,

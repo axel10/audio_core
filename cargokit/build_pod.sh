@@ -37,62 +37,11 @@ export CARGOKIT_TOOL_TEMP_DIR=$TARGET_TEMP_DIR/build_tool
 # Directory inside root project. Not necessarily the top level directory of root project.
 export CARGOKIT_ROOT_PROJECT_DIR=$SRCROOT
 
-# Locate SFBAudioEngine directory robustly (supports local checkouts, SPM in DerivedData, and SPM global cache)
-SFBAUDIOENGINE_DIR=""
-if [ -d "$BASEDIR/../SFBAudioEngine" ] && [ -f "$BASEDIR/../SFBAudioEngine/Package.swift" ]; then
-  SFBAUDIOENGINE_DIR="$BASEDIR/../SFBAudioEngine"
-fi
+# Locate local FFmpeg.xcframework under darwin/ directory
+FFMPEG_XCFRAMEWORK_DIR="$BASEDIR/../darwin/FFmpeg.xcframework"
 
-if [ -z "$SFBAUDIOENGINE_DIR" ]; then
-  # Try to locate the Flutter project root (which contains the build/ directory)
-  PROJECT_ROOT=""
-  if [ -n "$PODS_ROOT" ]; then
-    PROJECT_ROOT=$(cd "$PODS_ROOT/../.." && pwd -P)
-  elif [ -n "$SRCROOT" ]; then
-    PROJECT_ROOT=$(cd "$SRCROOT/../.." && pwd -P)
-  fi
-
-  if [ -n "$PROJECT_ROOT" ]; then
-    # Look for checkouts directory specified via clonedSourcePackagesDirPath under build/
-    for platform in ios macos; do
-      if [ -d "$PROJECT_ROOT/build/$platform/SourcePackages/checkouts/SFBAudioEngine" ] && \
-         [ -f "$PROJECT_ROOT/build/$platform/SourcePackages/checkouts/SFBAudioEngine/Package.swift" ]; then
-        SFBAUDIOENGINE_DIR="$PROJECT_ROOT/build/$platform/SourcePackages/checkouts/SFBAudioEngine"
-        break
-      elif [ -d "$PROJECT_ROOT/build/$platform/SourcePackages/checkouts/sfbaudioengine" ] && \
-           [ -f "$PROJECT_ROOT/build/$platform/SourcePackages/checkouts/sfbaudioengine/Package.swift" ]; then
-        SFBAUDIOENGINE_DIR="$PROJECT_ROOT/build/$platform/SourcePackages/checkouts/sfbaudioengine"
-        break
-      fi
-    done
-  fi
-fi
-
-if [ -z "$SFBAUDIOENGINE_DIR" ] && [ -n "$OBJROOT" ]; then
-  CURRENT_DIR="$OBJROOT"
-  while [ "$CURRENT_DIR" != "/" ] && [ "$CURRENT_DIR" != "." ]; do
-    if [ -d "$CURRENT_DIR/SourcePackages/checkouts/SFBAudioEngine" ] && [ -f "$CURRENT_DIR/SourcePackages/checkouts/SFBAudioEngine/Package.swift" ]; then
-      SFBAUDIOENGINE_DIR="$CURRENT_DIR/SourcePackages/checkouts/SFBAudioEngine"
-      break
-    elif [ -d "$CURRENT_DIR/SourcePackages/checkouts/sfbaudioengine" ] && [ -f "$CURRENT_DIR/SourcePackages/checkouts/sfbaudioengine/Package.swift" ]; then
-      SFBAUDIOENGINE_DIR="$CURRENT_DIR/SourcePackages/checkouts/sfbaudioengine"
-      break
-    fi
-    CURRENT_DIR=$(dirname "$CURRENT_DIR")
-  done
-fi
-
-if [ -z "$SFBAUDIOENGINE_DIR" ]; then
-  GLOBAL_SPM_DIR="$HOME/Library/Caches/org.swift.swiftpm/checkouts"
-  if [ -d "$GLOBAL_SPM_DIR/SFBAudioEngine" ] && [ -f "$GLOBAL_SPM_DIR/SFBAudioEngine/Package.swift" ]; then
-    SFBAUDIOENGINE_DIR="$GLOBAL_SPM_DIR/SFBAudioEngine"
-  elif [ -d "$GLOBAL_SPM_DIR/sfbaudioengine" ] && [ -f "$GLOBAL_SPM_DIR/sfbaudioengine/Package.swift" ]; then
-    SFBAUDIOENGINE_DIR="$GLOBAL_SPM_DIR/sfbaudioengine"
-  fi
-fi
-
-if [ -z "$SFBAUDIOENGINE_DIR" ] || [ ! -d "$SFBAUDIOENGINE_DIR" ]; then
-  echo "Error: SFBAudioEngine dependency directory not found!" >&2
+if [ ! -d "$FFMPEG_XCFRAMEWORK_DIR" ]; then
+  echo "Error: FFmpeg.xcframework not found at $FFMPEG_XCFRAMEWORK_DIR!" >&2
   exit 1
 fi
 
@@ -102,15 +51,15 @@ LINK_NAME=""
 
 case "$PLATFORM_NAME" in
   iphoneos)
-    SRC_DIR="$SFBAUDIOENGINE_DIR/macos/Frameworks/FFmpeg.xcframework/ios-arm64"
+    SRC_DIR="$FFMPEG_XCFRAMEWORK_DIR/ios-arm64"
     LINK_NAME="ios-arm64"
     ;;
   iphonesimulator)
-    SRC_DIR="$SFBAUDIOENGINE_DIR/macos/Frameworks/FFmpeg.xcframework/ios-arm64-simulator"
+    SRC_DIR="$FFMPEG_XCFRAMEWORK_DIR/ios-arm64_x86_64-simulator"
     LINK_NAME="ios-sim-arm64"
     ;;
   macosx)
-    SRC_DIR="$SFBAUDIOENGINE_DIR/macos/Frameworks/FFmpeg.xcframework/macos-arm64_x86_64"
+    SRC_DIR="$FFMPEG_XCFRAMEWORK_DIR/macos-arm64_x86_64"
     LINK_NAME="macos-universal"
     ;;
 esac
@@ -124,6 +73,7 @@ if [ -n "$SRC_DIR" ] && [ -d "$SRC_DIR" ]; then
   
   # Symlink libffmpeg.a as individual static libraries to satisfy ffmpeg-sys-next
   ln -sf "$SRC_DIR/libffmpeg.a" "$TARGET_LINK_DIR/lib/libavcodec.a"
+  ln -sf "$SRC_DIR/libffmpeg.a" "$TARGET_LINK_DIR/lib/libavfilter.a"
   ln -sf "$SRC_DIR/libffmpeg.a" "$TARGET_LINK_DIR/lib/libavformat.a"
   ln -sf "$SRC_DIR/libffmpeg.a" "$TARGET_LINK_DIR/lib/libavutil.a"
   ln -sf "$SRC_DIR/libffmpeg.a" "$TARGET_LINK_DIR/lib/libswresample.a"
