@@ -41,6 +41,16 @@ export CARGOKIT_ROOT_PROJECT_DIR=$SRCROOT
 FFMPEG_XCFRAMEWORK_DIR="$BASEDIR/../darwin/FFmpeg.xcframework"
 
 if [ ! -d "$FFMPEG_XCFRAMEWORK_DIR" ]; then
+  echo "FFmpeg.xcframework not found. Attempting to download..."
+  if [ -f "$BASEDIR/../download-ffmpeg-apple.sh" ]; then
+    bash "$BASEDIR/../download-ffmpeg-apple.sh"
+  else
+    echo "Error: download-ffmpeg-apple.sh not found at $BASEDIR/../download-ffmpeg-apple.sh" >&2
+    exit 1
+  fi
+fi
+
+if [ ! -d "$FFMPEG_XCFRAMEWORK_DIR" ]; then
   echo "Error: FFmpeg.xcframework not found at $FFMPEG_XCFRAMEWORK_DIR!" >&2
   exit 1
 fi
