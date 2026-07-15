@@ -828,8 +828,8 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
             Expanded(
               child: Slider(
                 min: 0.5,
-                max: 2.0,
-                divisions: 30,
+                max: 5.0,
+                divisions: 90,
                 value: _controller.player.playbackSpeed,
                 label: '${_controller.player.playbackSpeed.toStringAsFixed(2)}x',
                 onChanged: (v) => _controller.player.setPlaybackSpeed(v),
@@ -850,7 +850,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              for (final speed in [0.5, 0.75, 1.0, 1.25, 1.5, 2.0])
+              for (final speed in [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 5.0])
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
                   child: ChoiceChip(
