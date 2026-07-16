@@ -1553,6 +1553,8 @@ pub fn toggle_audio() -> Result<bool, String> {
 }
 
 pub fn seek_audio_ms(position_ms: i64) -> Result<(), String> {
+    crate::stress_test::notify_seek();
+
     let mut c = controller()
         .lock()
         .map_err(|_| "player lock poisoned".to_string())?;

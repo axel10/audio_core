@@ -18,7 +18,16 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(500);
 const MAX_DURATION_ERROR_MS: u128 = 100;
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static LAST_SEEK_TIMESTAMP_MS: AtomicU64 = AtomicU64::new(0);
 static STARTED: OnceLock<()> = OnceLock::new();
+
+pub fn notify_seek() {
+    if let Ok(duration) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        LAST_SEEK_TIMESTAMP_MS.store(duration.as_millis() as u64, Ordering::SeqCst);
+    }
+}
 
 pub fn start() {
     if STARTED.set(()).is_err() {
@@ -80,6 +89,9 @@ fn run() {
     let mut previous_state: Option<PlaybackState> = None;
     let mut resources = ResourceUsage::new();
 
+    let mut last_position: i64 = 0;
+    let mut last_position_change = Instant::now();
+
     loop {
         thread::sleep(POLL_INTERVAL);
         let now = Instant::now();
@@ -87,7 +99,7 @@ fn run() {
         previous = now;
         let state = controller::snapshot_playback_state();
 
-        // Detect user seek / manual interaction by tracking unexpected position jumps
+        // Detect user seek vs unexpected position jumps
         if let Some(ref prev) = previous_state {
             if prev.path == state.path {
                 let speed = if prev.is_playing {
@@ -97,8 +109,29 @@ fn run() {
                 };
                 let expected_delta = (elapsed_ms as f64 * speed as f64) as i64;
                 let actual_delta = state.position_ms - prev.position_ms;
-                if (actual_delta - expected_delta).abs() > 1500 {
-                    user_interrupted = true;
+                let error = actual_delta - expected_delta;
+                if error.abs() > 1500 {
+                    let is_seeking_recently = if let Ok(duration) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+                        let now_ms = duration.as_millis() as u64;
+                        let last_seek_ms = LAST_SEEK_TIMESTAMP_MS.load(Ordering::SeqCst);
+                        now_ms.saturating_sub(last_seek_ms) < 2000
+                    } else {
+                        false
+                    };
+
+                    if is_seeking_recently {
+                        user_interrupted = true;
+                    } else {
+                        log_unexpected_jump(
+                            &root,
+                            &state,
+                            prev.position_ms,
+                            state.position_ms,
+                            expected_delta,
+                            &mut incident_saved,
+                        );
+                        user_interrupted = true;
+                    }
                 }
             }
         }
@@ -131,12 +164,41 @@ fn run() {
             incident_saved = false;
             duration_checked = false;
             user_interrupted = false;
+            last_position = state.position_ms;
+            last_position_change = now;
         }
 
         if state.is_playing && state.path.is_some() {
             let speed = controller::get_playback_speed().unwrap_or(1.0);
             let media_elapsed = (elapsed_ms as f64 * speed as f64) as u128;
             active_ms = active_ms.saturating_add(media_elapsed);
+
+            // Stall detection: position must change while playing local files
+            if state.position_ms != last_position {
+                last_position = state.position_ms;
+                last_position_change = now;
+            } else {
+                let stall_duration = now.duration_since(last_position_change);
+                if stall_duration > Duration::from_secs(3) {
+                    let is_near_end = declared_ms > 0 && (state.position_ms - declared_ms as i64).abs() < 1000;
+                    let is_seeking_recently = if let Ok(duration) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+                        let now_ms = duration.as_millis() as u64;
+                        let last_seek_ms = LAST_SEEK_TIMESTAMP_MS.load(Ordering::SeqCst);
+                        now_ms.saturating_sub(last_seek_ms) < 2000
+                    } else {
+                        false
+                    };
+
+                    if !is_near_end && !is_seeking_recently {
+                        log_playback_stall(&root, &state, stall_duration, &mut incident_saved);
+                        last_position_change = now;
+                    }
+                }
+            }
+        } else {
+            // Not playing, reset change time to prevent false positives when paused/loading
+            last_position = state.position_ms;
+            last_position_change = now;
         }
 
         let sample_elapsed = now.duration_since(last_sample);
@@ -279,6 +341,145 @@ fn check_duration(
         declared_ms,
         actual_ms,
         error_ms,
+        incident_dir
+    );
+}
+
+fn log_unexpected_jump(
+    root: &PathBuf,
+    state: &PlaybackState,
+    prev_position_ms: i64,
+    new_position_ms: i64,
+    expected_delta_ms: i64,
+    incident_saved: &mut bool,
+) {
+    *incident_saved = true;
+    let incident_dir = root.join(format!(
+        "incident-{}",
+        Utc::now().format("%Y%m%d-%H%M%S%.3f")
+    ));
+    let _ = create_dir_all(&incident_dir);
+    let actual_delta_ms = new_position_ms - prev_position_ms;
+    let deviation_ms = actual_delta_ms - expected_delta_ms;
+
+    let snapshot = json!({
+        "captured_at": Utc::now().to_rfc3339(),
+        "reason": "playback_position_jump",
+        "path": state.path,
+        "prev_position_ms": prev_position_ms,
+        "new_position_ms": new_position_ms,
+        "expected_delta_ms": expected_delta_ms,
+        "actual_delta_ms": actual_delta_ms,
+        "deviation_ms": deviation_ms,
+        "playback_state": state,
+        "audio_core": controller::stress_diagnostic_details(),
+        "process": {
+            "pid": std::process::id(),
+            "executable": std::env::current_exe().ok(),
+            "current_dir": std::env::current_dir().ok(),
+            "args": std::env::args().collect::<Vec<_>>(),
+            "target_os": std::env::consts::OS,
+            "target_arch": std::env::consts::ARCH,
+        },
+        "environment": {
+            "stress_output_dir": std::env::var_os("VYNODY_AUDIO_STRESS_DIR"),
+            "rust_log": std::env::var_os("RUST_LOG"),
+        },
+    });
+
+    if let Ok(mut file) = File::create(incident_dir.join("playback_snapshot.json")) {
+        let _ = serde_json::to_writer_pretty(&mut file, &snapshot);
+        let _ = file.write_all(b"\n");
+    }
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(root.join("incidents.log"))
+    {
+        let _ = writeln!(
+            file,
+            "{} path={} type=jump prev_pos={} new_pos={} expected_delta={} actual_delta={} deviation={} snapshot={:?}",
+            Utc::now().to_rfc3339(),
+            state.path.as_deref().unwrap_or(""),
+            prev_position_ms,
+            new_position_ms,
+            expected_delta_ms,
+            actual_delta_ms,
+            deviation_ms,
+            incident_dir
+        );
+    }
+    eprintln!(
+        "[AudioStress][FAIL] path={} type=jump prev_pos={} new_pos={} expected_delta={} actual_delta={} deviation={} snapshot={:?}",
+        state.path.as_deref().unwrap_or(""),
+        prev_position_ms,
+        new_position_ms,
+        expected_delta_ms,
+        actual_delta_ms,
+        deviation_ms,
+        incident_dir
+    );
+}
+
+fn log_playback_stall(
+    root: &PathBuf,
+    state: &PlaybackState,
+    stall_duration: Duration,
+    incident_saved: &mut bool,
+) {
+    *incident_saved = true;
+    let incident_dir = root.join(format!(
+        "incident-{}",
+        Utc::now().format("%Y%m%d-%H%M%S%.3f")
+    ));
+    let _ = create_dir_all(&incident_dir);
+
+    let snapshot = json!({
+        "captured_at": Utc::now().to_rfc3339(),
+        "reason": "playback_stalled",
+        "path": state.path,
+        "position_ms": state.position_ms,
+        "stall_duration_ms": stall_duration.as_millis(),
+        "playback_state": state,
+        "audio_core": controller::stress_diagnostic_details(),
+        "process": {
+            "pid": std::process::id(),
+            "executable": std::env::current_exe().ok(),
+            "current_dir": std::env::current_dir().ok(),
+            "args": std::env::args().collect::<Vec<_>>(),
+            "target_os": std::env::consts::OS,
+            "target_arch": std::env::consts::ARCH,
+        },
+        "environment": {
+            "stress_output_dir": std::env::var_os("VYNODY_AUDIO_STRESS_DIR"),
+            "rust_log": std::env::var_os("RUST_LOG"),
+        },
+    });
+
+    if let Ok(mut file) = File::create(incident_dir.join("playback_snapshot.json")) {
+        let _ = serde_json::to_writer_pretty(&mut file, &snapshot);
+        let _ = file.write_all(b"\n");
+    }
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(root.join("incidents.log"))
+    {
+        let _ = writeln!(
+            file,
+            "{} path={} type=stall pos={} stall_duration_ms={} snapshot={:?}",
+            Utc::now().to_rfc3339(),
+            state.path.as_deref().unwrap_or(""),
+            state.position_ms,
+            stall_duration.as_millis(),
+            incident_dir
+        );
+    }
+    eprintln!(
+        "[AudioStress][FAIL] path={} type=stall pos={} stall_duration_ms={} snapshot={:?}",
+        state.path.as_deref().unwrap_or(""),
+        state.position_ms,
+        stall_duration.as_millis(),
         incident_dir
     );
 }
