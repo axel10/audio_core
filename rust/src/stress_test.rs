@@ -6,26 +6,45 @@
 
 use crate::api::simple::{controller, PlaybackState};
 use chrono::Utc;
+use serde::Serialize;
 use serde_json::json;
+use std::collections::VecDeque;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(500);
 const MAX_DURATION_ERROR_MS: u128 = 100;
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+const RING_BUFFER_DURATION: Duration = Duration::from_secs(10);
+const POST_INCIDENT_DURATION: Duration = Duration::from_secs(10);
+const JUMP_ERROR_MS: i64 = 1500;
 
-use std::sync::atomic::{AtomicU64, Ordering};
-
-static LAST_SEEK_TIMESTAMP_MS: AtomicU64 = AtomicU64::new(0);
+static LAST_SEEK: OnceLock<Mutex<SeekMarker>> = OnceLock::new();
 static STARTED: OnceLock<()> = OnceLock::new();
 
-pub fn notify_seek() {
+#[derive(Clone, Copy)]
+struct SeekMarker {
+    timestamp_ms: u64,
+    target_ms: i64,
+}
+
+pub fn notify_seek(target_ms: i64) {
     if let Ok(duration) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-        LAST_SEEK_TIMESTAMP_MS.store(duration.as_millis() as u64, Ordering::SeqCst);
+        let marker = LAST_SEEK.get_or_init(|| {
+            Mutex::new(SeekMarker {
+                timestamp_ms: 0,
+                target_ms: 0,
+            })
+        });
+        if let Ok(mut seek) = marker.lock() {
+            seek.timestamp_ms = duration.as_millis() as u64;
+            seek.target_ms = target_ms.max(0);
+        }
     }
 }
 
@@ -77,17 +96,21 @@ fn run() {
         );
     }
     eprintln!("[AudioStress] enabled; output={:?}", root);
+    write_summary(&root, &IncidentCounts::default());
 
     let mut previous = Instant::now();
     let mut last_sample = Instant::now();
     let mut path: Option<String> = None;
     let mut declared_ms: u128 = 0;
     let mut active_ms: u128 = 0;
-    let mut incident_saved = false;
     let mut duration_checked = false;
-    let mut user_interrupted = false;
     let mut previous_state: Option<PlaybackState> = None;
     let mut resources = ResourceUsage::new();
+    let mut samples_ring = VecDeque::new();
+    let mut incidents = IncidentCounts::default();
+    let mut active_incident: Option<IncidentCapture> = None;
+    let started_at = Instant::now();
+    let mut saw_playback = false;
 
     let mut last_position: i64 = 0;
     let mut last_position_change = Instant::now();
@@ -98,6 +121,36 @@ fn run() {
         let elapsed_ms = now.duration_since(previous).as_millis();
         previous = now;
         let state = controller::snapshot_playback_state();
+        let sample = MonitorSample::from_state(&state, now);
+        samples_ring.push_back(sample.clone());
+        while samples_ring
+            .front()
+            .map(|entry: &MonitorSample| now.duration_since(entry.monotonic) > RING_BUFFER_DURATION)
+            .unwrap_or(false)
+        {
+            samples_ring.pop_front();
+        }
+        if let Some(incident) = active_incident.as_mut() {
+            incident.samples.push(sample.clone());
+            if now.duration_since(incident.started_at) >= POST_INCIDENT_DURATION {
+                incident.finish(&root);
+                active_incident = None;
+            }
+        }
+        if state.is_playing && state.path.is_some() {
+            saw_playback = true;
+        } else if !saw_playback && now.duration_since(started_at) >= STARTUP_TIMEOUT {
+            incidents.startup_timeouts += 1;
+            let incident = IncidentCapture::start(
+                &root,
+                "playback_start_timeout",
+                &state,
+                samples_ring.iter().cloned().collect(),
+            );
+            active_incident.get_or_insert(incident);
+            saw_playback = true;
+            write_summary(&root, &incidents);
+        }
 
         // Detect user seek vs unexpected position jumps
         if let Some(ref prev) = previous_state {
@@ -110,39 +163,31 @@ fn run() {
                 let expected_delta = (elapsed_ms as f64 * speed as f64) as i64;
                 let actual_delta = state.position_ms - prev.position_ms;
                 let error = actual_delta - expected_delta;
-                if error.abs() > 1500 {
-                    let is_seeking_recently = if let Ok(duration) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-                        let now_ms = duration.as_millis() as u64;
-                        let last_seek_ms = LAST_SEEK_TIMESTAMP_MS.load(Ordering::SeqCst);
-                        now_ms.saturating_sub(last_seek_ms) < 2000
-                    } else {
-                        false
-                    };
+                if is_significant_position_error(error) {
+                    let is_seeking_recently = seek_matches_current_position(&state);
 
                     if is_seeking_recently {
-                        user_interrupted = true;
+                        // The seek marker is consumed only after the observed
+                        // position is close to its requested target.
                     } else {
-                        log_unexpected_jump(
-                            &root,
-                            &state,
-                            prev.position_ms,
-                            state.position_ms,
-                            expected_delta,
-                            &mut incident_saved,
-                        );
-                        user_interrupted = true;
+                        incidents.jumps += 1;
+                        if active_incident.is_none() {
+                            let incident = IncidentCapture::start(
+                                &root,
+                                "playback_position_jump",
+                                &state,
+                                samples_ring.iter().cloned().collect(),
+                            );
+                            active_incident = Some(incident);
+                        }
+                        write_summary(&root, &incidents);
                     }
                 }
             }
         }
 
         if path.as_deref() != state.path.as_deref() {
-            if path.is_some()
-                && declared_ms > 0
-                && active_ms > 0
-                && !duration_checked
-                && !user_interrupted
-            {
+            if path.is_some() && declared_ms > 0 && active_ms > 0 && !duration_checked {
                 let reached_end = previous_state
                     .as_ref()
                     .map(|p| (p.position_ms - declared_ms as i64).abs() < 2000)
@@ -154,16 +199,15 @@ fn run() {
                         path.as_deref(),
                         declared_ms,
                         active_ms,
-                        &mut incident_saved,
+                        &mut incidents,
                     );
+                    write_summary(&root, &incidents);
                 }
             }
             path = state.path.clone();
             declared_ms = state.duration_ms.max(0) as u128;
             active_ms = 0;
-            incident_saved = false;
             duration_checked = false;
-            user_interrupted = false;
             last_position = state.position_ms;
             last_position_change = now;
         }
@@ -180,17 +224,22 @@ fn run() {
             } else {
                 let stall_duration = now.duration_since(last_position_change);
                 if stall_duration > Duration::from_secs(3) {
-                    let is_near_end = declared_ms > 0 && (state.position_ms - declared_ms as i64).abs() < 1000;
-                    let is_seeking_recently = if let Ok(duration) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-                        let now_ms = duration.as_millis() as u64;
-                        let last_seek_ms = LAST_SEEK_TIMESTAMP_MS.load(Ordering::SeqCst);
-                        now_ms.saturating_sub(last_seek_ms) < 2000
-                    } else {
-                        false
-                    };
+                    let is_near_end =
+                        declared_ms > 0 && (state.position_ms - declared_ms as i64).abs() < 1000;
+                    let is_seeking_recently = seek_matches_current_position(&state);
 
                     if !is_near_end && !is_seeking_recently {
-                        log_playback_stall(&root, &state, stall_duration, &mut incident_saved);
+                        incidents.stalls += 1;
+                        if active_incident.is_none() {
+                            let incident = IncidentCapture::start(
+                                &root,
+                                "playback_stalled",
+                                &state,
+                                samples_ring.iter().cloned().collect(),
+                            );
+                            active_incident = Some(incident);
+                        }
+                        write_summary(&root, &incidents);
                         last_position_change = now;
                     }
                 }
@@ -223,10 +272,7 @@ fn run() {
 
         // ENDED is set by the decoder's end callback. This catches a source
         // ending early even when the next queue item is installed quickly.
-        if state.playback_state.as_deref() == Some("ENDED")
-            && !duration_checked
-            && !user_interrupted
-        {
+        if state.playback_state.as_deref() == Some("ENDED") && !duration_checked {
             duration_checked = true;
             check_duration(
                 &root,
@@ -234,11 +280,165 @@ fn run() {
                 path.as_deref(),
                 declared_ms,
                 active_ms,
-                &mut incident_saved,
+                &mut incidents,
             );
+            write_summary(&root, &incidents);
         }
 
         previous_state = Some(state);
+    }
+}
+
+#[derive(Clone)]
+struct MonitorSample {
+    timestamp: String,
+    monotonic: Instant,
+    path: Option<String>,
+    position_ms: i64,
+    duration_ms: i64,
+    is_playing: bool,
+    playback_state: Option<String>,
+}
+
+impl MonitorSample {
+    fn from_state(state: &PlaybackState, monotonic: Instant) -> Self {
+        Self {
+            timestamp: Utc::now().to_rfc3339(),
+            monotonic,
+            path: state.path.clone(),
+            position_ms: state.position_ms,
+            duration_ms: state.duration_ms,
+            is_playing: state.is_playing,
+            playback_state: state.playback_state.clone(),
+        }
+    }
+
+    fn json(&self) -> serde_json::Value {
+        json!({
+            "timestamp": self.timestamp,
+            "path": self.path,
+            "position_ms": self.position_ms,
+            "duration_ms": self.duration_ms,
+            "is_playing": self.is_playing,
+            "playback_state": self.playback_state,
+        })
+    }
+}
+
+#[derive(Default, Serialize)]
+struct IncidentCounts {
+    jumps: u64,
+    stalls: u64,
+    duration_mismatches: u64,
+    startup_timeouts: u64,
+}
+
+struct IncidentCapture {
+    directory: PathBuf,
+    reason: &'static str,
+    started_at: Instant,
+    samples: Vec<MonitorSample>,
+}
+
+impl IncidentCapture {
+    fn start(
+        root: &PathBuf,
+        reason: &'static str,
+        state: &PlaybackState,
+        samples: Vec<MonitorSample>,
+    ) -> Self {
+        let directory = root.join(format!(
+            "incident-{}",
+            Utc::now().format("%Y%m%d-%H%M%S%.3f")
+        ));
+        let _ = create_dir_all(&directory);
+        let initial = json!({
+            "captured_at": Utc::now().to_rfc3339(),
+            "reason": reason,
+            "state_at_detection": state,
+            "audio_core": controller::stress_diagnostic_details(),
+        });
+        if let Ok(mut file) = File::create(directory.join("incident.json")) {
+            let _ = serde_json::to_writer_pretty(&mut file, &initial);
+            let _ = file.write_all(b"\n");
+        }
+        eprintln!(
+            "[AudioStress][INCIDENT] reason={} path={} directory={:?}",
+            reason,
+            state.path.as_deref().unwrap_or(""),
+            directory
+        );
+        Self {
+            directory,
+            reason,
+            started_at: Instant::now(),
+            samples,
+        }
+    }
+
+    fn finish(&self, root: &PathBuf) {
+        let timeline = json!({
+            "reason": self.reason,
+            "post_detection_duration_ms": self.started_at.elapsed().as_millis(),
+            "samples": self.samples.iter().map(MonitorSample::json).collect::<Vec<_>>(),
+        });
+        if let Ok(mut file) = File::create(self.directory.join("timeline.json")) {
+            let _ = serde_json::to_writer_pretty(&mut file, &timeline);
+            let _ = file.write_all(b"\n");
+        }
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(root.join("incidents.log"))
+        {
+            let _ = writeln!(
+                file,
+                "{} reason={} timeline={:?}",
+                Utc::now().to_rfc3339(),
+                self.reason,
+                self.directory.join("timeline.json")
+            );
+        }
+    }
+}
+
+fn seek_matches_current_position(state: &PlaybackState) -> bool {
+    let Some(marker) = LAST_SEEK.get() else {
+        return false;
+    };
+    let Ok(mut marker) = marker.lock() else {
+        return false;
+    };
+    let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) else {
+        return false;
+    };
+    let age_ms = now
+        .as_millis()
+        .saturating_sub(u128::from(marker.timestamp_ms));
+    if age_ms > 2000 {
+        return false;
+    }
+    let close_to_target = (state.position_ms - marker.target_ms).abs() <= 2000;
+    if close_to_target || age_ms < 500 {
+        marker.timestamp_ms = 0;
+        return true;
+    }
+    false
+}
+
+fn is_significant_position_error(error_ms: i64) -> bool {
+    error_ms.abs() > JUMP_ERROR_MS
+}
+
+fn write_summary(root: &PathBuf, counts: &IncidentCounts) {
+    let summary = json!({
+        "updated_at": Utc::now().to_rfc3339(),
+        "incidents": counts,
+        "output": root,
+    });
+    if let Ok(mut file) = File::create(root.join("stress_summary.json")) {
+        let _ = serde_json::to_writer_pretty(&mut file, &summary);
+        let _ = file.write_all(b"\n");
     }
 }
 
@@ -277,7 +477,7 @@ fn check_duration(
     path: Option<&str>,
     declared_ms: u128,
     actual_ms: u128,
-    incident_saved: &mut bool,
+    incidents: &mut IncidentCounts,
 ) {
     if declared_ms == 0 || actual_ms == 0 {
         return;
@@ -287,7 +487,7 @@ fn check_duration(
         return;
     }
 
-    *incident_saved = true;
+    incidents.duration_mismatches += 1;
     let incident_dir = root.join(format!(
         "incident-{}",
         Utc::now().format("%Y%m%d-%H%M%S%.3f")
@@ -345,6 +545,7 @@ fn check_duration(
     );
 }
 
+#[allow(dead_code)]
 fn log_unexpected_jump(
     root: &PathBuf,
     state: &PlaybackState,
@@ -421,6 +622,7 @@ fn log_unexpected_jump(
     );
 }
 
+#[allow(dead_code)]
 fn log_playback_stall(
     root: &PathBuf,
     state: &PlaybackState,
@@ -659,5 +861,13 @@ mod tests {
     fn duration_error_uses_strict_100ms_limit() {
         assert_eq!(300_000_u128.abs_diff(299_900), 100);
         assert!(300_000_u128.abs_diff(299_899) > 100);
+    }
+
+    #[test]
+    fn position_jump_requires_more_than_1500ms_error() {
+        assert!(!super::is_significant_position_error(1500));
+        assert!(!super::is_significant_position_error(-1500));
+        assert!(super::is_significant_position_error(1501));
+        assert!(super::is_significant_position_error(-1501));
     }
 }

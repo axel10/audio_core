@@ -1553,7 +1553,7 @@ pub fn toggle_audio() -> Result<bool, String> {
 }
 
 pub fn seek_audio_ms(position_ms: i64) -> Result<(), String> {
-    crate::stress_test::notify_seek();
+    crate::stress_test::notify_seek(position_ms);
 
     let mut c = controller()
         .lock()
