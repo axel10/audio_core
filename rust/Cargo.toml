@@ -33,6 +33,7 @@ realfft = "3.5.0"
 fundsp = "0.23.0"
 cpal = { version = "0.18.1", features = ["realtime"] }
 env_logger = "0.11"
+libc = "0.2"
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21.1"
@@ -44,6 +45,8 @@ windows = { version = "0.52", features = [
     "Win32_Media_Audio",
     "Win32_Devices_FunctionDiscovery",
     "Win32_System_Com",
+    "Win32_System_Threading",
+    "Win32_System_ProcessStatus",
 ] }
 
 

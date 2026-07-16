@@ -196,7 +196,7 @@ fn controller() -> &'static Mutex<PlayerController> {
     PLAYER_CONTROLLER.get_or_init(|| Mutex::new(PlayerController::new()))
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PlaybackState {
     pub playback_state: Option<String>,
     pub position_ms: i64,
@@ -878,6 +878,22 @@ pub(crate) fn snapshot_playback_state() -> PlaybackState {
         })
 }
 
+pub(crate) fn stress_diagnostic_details() -> serde_json::Value {
+    controller()
+        .lock()
+        .map(|c| {
+            serde_json::json!({
+                "decode_engine": c.last_decode_engine,
+                "output_device": c.active_output_device_name,
+                "playback_speed": c.playback_speed.get_speed(),
+                "volume": c.volume,
+                "has_output_sink": c.sink.is_some(),
+                "transition_generation": c.transition_generation,
+            })
+        })
+        .unwrap_or_else(|_| serde_json::json!({"controller_lock": "poisoned"}))
+}
+
 pub(super) fn _snapshot_loaded_path() -> Option<String> {
     controller()
         .lock()
@@ -1410,6 +1426,11 @@ pub fn init_app() {
     info!("[AudioDeviceMonitor] init_app called, starting monitor thread...");
     start_default_output_monitor();
 
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
+    if std::env::args().any(|arg| arg == "--audio-stress-test" || arg == "--stress-test") {
+        crate::stress_test::start();
+    }
+
     if let Ok(mut c) = controller().lock() {
         let _ = c.ensure_audio_output();
         info!(
@@ -1886,4 +1907,3 @@ mod tests {
         assert!(avg_diff < 0.01, "Waveforms differ significantly: avg_diff = {}", avg_diff);
     }
 }
-

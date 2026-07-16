@@ -187,6 +187,7 @@ dependencies = [
  "fundsp",
  "jni 0.21.1",
  "libblur",
+ "libc",
  "log",
  "md5",
  "ndk-context",
