@@ -414,6 +414,7 @@ impl Iterator for AudioSource {
                 Ok(false) => return None,
                 Err(error) => {
                     eprintln!("[ffmpeg_core][AudioSource] refill error: {}", error);
+                    self.finished = true;
                     return None;
                 }
             }
