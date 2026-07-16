@@ -472,6 +472,19 @@ impl PlayerController {
         auto_play: bool,
         gain: f32,
     ) -> Result<PlaybackDeck, String> {
+        let file = File::open(path).map_err(|e| format!("open file failed: {e}"))?;
+        let backend = DecoderBackend::open(path, file)?;
+        self.open_deck_from_backend(path, backend, start_offset, auto_play, gain)
+    }
+
+    fn open_deck_from_backend(
+        &mut self,
+        path: &str,
+        backend: DecoderBackend,
+        start_offset: Duration,
+        auto_play: bool,
+        gain: f32,
+    ) -> Result<PlaybackDeck, String> {
         self.ensure_audio_output()?;
 
         // 先把播放器挂载到系统混音器上 (制造时间差，让后台音频流消耗 Empty 缓冲区，彻底消除底层 Bug 隐患)
@@ -479,10 +492,6 @@ impl PlayerController {
         let latest_fft = Arc::new(Mutex::new(vec![0.0; RAW_FFT_BINS]));
         clear_fft_buffer(&latest_fft);
 
-        // 耗时操作：打开文件、构建系统层级组件 (大约耗时几十毫秒以上)
-        let file = File::open(path).map_err(|e| format!("open file failed: {e}"))?;
-
-        let backend = DecoderBackend::open(path, file)?;
         let total = backend.total_duration().unwrap_or(Duration::ZERO);
         let clamped_offset = if total.is_zero() {
             start_offset
@@ -563,16 +572,29 @@ impl PlayerController {
         })
     }
 
+    #[allow(dead_code)]
     fn replace_current_from_path(
         &mut self,
         path: &str,
         start_offset: Duration,
         auto_play: bool,
     ) -> Result<(), String> {
+        let file = File::open(path).map_err(|e| format!("open file failed: {e}"))?;
+        let backend = DecoderBackend::open(path, file)?;
+        self.replace_current_from_backend(path, backend, start_offset, auto_play)
+    }
+
+    fn replace_current_from_backend(
+        &mut self,
+        path: &str,
+        backend: DecoderBackend,
+        start_offset: Duration,
+        auto_play: bool,
+    ) -> Result<(), String> {
         self.pause_fade_in_progress = false;
         self.clear_pending_playback_state();
         let previous_public_path = self.public_path().map(str::to_string);
-        let deck = self.open_deck_from_path(path, start_offset, auto_play, 1.0)?;
+        let deck = self.open_deck_from_backend(path, backend, start_offset, auto_play, 1.0)?;
         self.last_decode_engine = Some(deck.decode_engine.clone());
 
         self.transition_generation = self.transition_generation.wrapping_add(1);
@@ -698,12 +720,24 @@ impl PlayerController {
         });
     }
 
+    #[allow(dead_code)]
     fn start_crossfade(&mut self, path: &str, duration: Duration) -> Result<(), String> {
+        let file = File::open(path).map_err(|e| format!("open file failed: {e}"))?;
+        let backend = DecoderBackend::open(path, file)?;
+        self.start_crossfade_with_backend(path, backend, duration)
+    }
+
+    fn start_crossfade_with_backend(
+        &mut self,
+        path: &str,
+        backend: DecoderBackend,
+        duration: Duration,
+    ) -> Result<(), String> {
         if self.current_deck.is_none() || !self.any_deck_playing() || duration.is_zero() {
-            return self.replace_current_from_path(path, Duration::ZERO, true);
+            return self.replace_current_from_backend(path, backend, Duration::ZERO, true);
         }
 
-        let mut incoming = self.open_deck_from_path(path, Duration::ZERO, true, 0.0)?;
+        let mut incoming = self.open_deck_from_backend(path, backend, Duration::ZERO, true, 0.0)?;
         incoming.gain = 0.0;
         incoming.apply_master_volume(self.volume);
 
@@ -1444,19 +1478,27 @@ pub fn init_app() {
 }
 
 pub fn load_audio_file(path: String) -> Result<(), String> {
+    // 耗时操作放在锁外：打开文件、构建系统层级组件 (大约耗时几十毫秒以上)
+    let file = File::open(&path).map_err(|e| format!("open file failed: {e}"))?;
+    let backend = DecoderBackend::open(&path, file)?;
+
     let mut c = controller()
         .lock()
         .map_err(|_| "player lock poisoned".to_string())?;
-    c.replace_current_from_path(&path, Duration::ZERO, false)
+    c.replace_current_from_backend(&path, backend, Duration::ZERO, false)
 }
 
 pub fn crossfade_to_audio_file(path: String, duration_ms: i64) -> Result<(), String> {
+    // 耗时操作放在锁外：打开文件、构建系统层级组件 (大约耗时几十毫秒以上)
+    let file = File::open(&path).map_err(|e| format!("open file failed: {e}"))?;
+    let backend = DecoderBackend::open(&path, file)?;
+
     let mut c = controller()
         .lock()
         .map_err(|_| "player lock poisoned".to_string())?;
     c.clear_pending_playback_state();
     let duration = Duration::from_millis(duration_ms.max(0) as u64);
-    c.start_crossfade(&path, duration)
+    c.start_crossfade_with_backend(&path, backend, duration)
 }
 
 pub fn play_audio(fade_duration_ms: i64) -> Result<(), String> {

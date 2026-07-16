@@ -15,7 +15,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
-const SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
+const SAMPLE_INTERVAL: Duration = Duration::from_millis(500);
 const MAX_DURATION_ERROR_MS: u128 = 100;
 
 static STARTED: OnceLock<()> = OnceLock::new();
