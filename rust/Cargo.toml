@@ -42,6 +42,7 @@ ndk-context = "0.1.1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.52", features = [
+    "Win32_Foundation",
     "Win32_Media_Audio",
     "Win32_Devices_FunctionDiscovery",
     "Win32_System_Com",
