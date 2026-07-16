@@ -57,6 +57,8 @@ fn run() {
     let mut declared_ms: u128 = 0;
     let mut active_ms: u128 = 0;
     let mut incident_saved = false;
+    let mut duration_checked = false;
+    let mut user_interrupted = false;
     let mut previous_state: Option<PlaybackState> = None;
     let mut resources = ResourceUsage::new();
 
@@ -67,25 +69,50 @@ fn run() {
         previous = now;
         let state = controller::snapshot_playback_state();
 
+        // Detect user seek / manual interaction by tracking unexpected position jumps
+        if let Some(ref prev) = previous_state {
+            if prev.path == state.path {
+                let speed = if prev.is_playing {
+                    controller::get_playback_speed().unwrap_or(1.0)
+                } else {
+                    0.0
+                };
+                let expected_delta = (elapsed_ms as f64 * speed as f64) as i64;
+                let actual_delta = state.position_ms - prev.position_ms;
+                if (actual_delta - expected_delta).abs() > 1500 {
+                    user_interrupted = true;
+                }
+            }
+        }
+
         if path.as_deref() != state.path.as_deref() {
-            if path.is_some() && declared_ms > 0 && active_ms > 0 && !incident_saved {
-                check_duration(
-                    &root,
-                    previous_state.as_ref().unwrap_or(&state),
-                    path.as_deref(),
-                    declared_ms,
-                    active_ms,
-                    &mut incident_saved,
-                );
+            if path.is_some() && declared_ms > 0 && active_ms > 0 && !duration_checked && !user_interrupted {
+                let reached_end = previous_state.as_ref()
+                    .map(|p| (p.position_ms - declared_ms as i64).abs() < 2000)
+                    .unwrap_or(false);
+                if reached_end {
+                    check_duration(
+                        &root,
+                        previous_state.as_ref().unwrap_or(&state),
+                        path.as_deref(),
+                        declared_ms,
+                        active_ms,
+                        &mut incident_saved,
+                    );
+                }
             }
             path = state.path.clone();
             declared_ms = state.duration_ms.max(0) as u128;
             active_ms = 0;
             incident_saved = false;
+            duration_checked = false;
+            user_interrupted = false;
         }
 
         if state.is_playing && state.path.is_some() {
-            active_ms = active_ms.saturating_add(elapsed_ms);
+            let speed = controller::get_playback_speed().unwrap_or(1.0);
+            let media_elapsed = (elapsed_ms as f64 * speed as f64) as u128;
+            active_ms = active_ms.saturating_add(media_elapsed);
         }
 
         let usage = resources.sample(elapsed_ms);
@@ -106,7 +133,8 @@ fn run() {
 
         // ENDED is set by the decoder's end callback. This catches a source
         // ending early even when the next queue item is installed quickly.
-        if state.playback_state.as_deref() == Some("ENDED") && !incident_saved {
+        if state.playback_state.as_deref() == Some("ENDED") && !duration_checked && !user_interrupted {
+            duration_checked = true;
             check_duration(
                 &root,
                 &state,
@@ -244,21 +272,76 @@ fn process_cpu_us() -> u64 {
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn resident_bytes() -> i64 {
+    #[repr(C)]
+    #[derive(Default, Clone, Copy)]
+    struct time_value_t {
+        seconds: i32,
+        microseconds: i32,
+    }
+
+    #[repr(C)]
+    #[derive(Default, Clone, Copy)]
+    struct mach_task_basic_info {
+        virtual_size: u64,
+        resident_size: u64,
+        resident_size_max: u64,
+        user_time: time_value_t,
+        system_time: time_value_t,
+        policy: i32,
+        suspend_count: i32,
+    }
+
+    extern "C" {
+        fn mach_task_self() -> libc::mach_port_t;
+    }
+
+    unsafe {
+        let mut info = mach_task_basic_info::default();
+        let mut count = (std::mem::size_of::<mach_task_basic_info>()
+            / std::mem::size_of::<libc::integer_t>()) as libc::mach_msg_type_number_t;
+        let kr = libc::task_info(
+            mach_task_self(),
+            20, // MACH_TASK_BASIC_INFO
+            &mut info as *mut mach_task_basic_info as *mut libc::integer_t,
+            &mut count,
+        );
+        if kr == 0 {
+            info.resident_size as i64
+        } else {
+            -1
+        }
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn resident_bytes() -> i64 {
+    if let Ok(content) = std::fs::read_to_string("/proc/self/statm") {
+        let parts: Vec<&str> = content.split_whitespace().collect();
+        if parts.len() >= 2 {
+            if let Ok(pages) = parts[1].parse::<i64>() {
+                let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+                if page_size > 0 {
+                    return pages.saturating_mul(page_size as i64);
+                }
+            }
+        }
+    }
+    -1
+}
+
+#[cfg(all(
+    unix,
+    not(any(target_os = "macos", target_os = "ios", target_os = "linux", target_os = "android"))
+))]
 fn resident_bytes() -> i64 {
     unsafe {
         let mut usage = std::mem::zeroed::<libc::rusage>();
         if libc::getrusage(libc::RUSAGE_SELF, &mut usage) != 0 {
             return -1;
         }
-        #[cfg(target_os = "macos")]
-        {
-            usage.ru_maxrss as i64
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            (usage.ru_maxrss as i64).saturating_mul(1024)
-        }
+        (usage.ru_maxrss as i64).saturating_mul(1024)
     }
 }
 
