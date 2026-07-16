@@ -31,18 +31,34 @@ pub fn start() {
 }
 
 fn run() {
-    let root = std::env::var_os("VYNODY_AUDIO_STRESS_DIR")
+    let requested_root = std::env::var_os("VYNODY_AUDIO_STRESS_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::temp_dir().join("vynody-audio-stress"));
-    if let Err(error) = create_dir_all(&root) {
-        eprintln!("[AudioStress] cannot create {:?}: {}", root, error);
-        return;
-    }
+    let fallback_root = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|home| home.join("Library/Containers/app.vynody.player/Data/Library/Application Support/app.vynody.player/logs/audio-stress"));
+    let root = match prepare_output_root(&requested_root, fallback_root.as_deref()) {
+        Ok(root) => root,
+        Err(error) => {
+            eprintln!(
+                "[AudioStress] cannot create output directory {:?}: {}",
+                requested_root, error
+            );
+            return;
+        }
+    };
 
     let mut samples = OpenOptions::new()
         .create(true)
         .append(true)
         .open(root.join("resource_samples.csv"))
+        .map_err(|error| {
+            eprintln!(
+                "[AudioStress] cannot open resource_samples.csv in {:?}: {}",
+                root, error
+            );
+            error
+        })
         .ok();
     if let Some(file) = samples.as_mut() {
         let _ = writeln!(
@@ -86,8 +102,14 @@ fn run() {
         }
 
         if path.as_deref() != state.path.as_deref() {
-            if path.is_some() && declared_ms > 0 && active_ms > 0 && !duration_checked && !user_interrupted {
-                let reached_end = previous_state.as_ref()
+            if path.is_some()
+                && declared_ms > 0
+                && active_ms > 0
+                && !duration_checked
+                && !user_interrupted
+            {
+                let reached_end = previous_state
+                    .as_ref()
                     .map(|p| (p.position_ms - declared_ms as i64).abs() < 2000)
                     .unwrap_or(false);
                 if reached_end {
@@ -133,7 +155,10 @@ fn run() {
 
         // ENDED is set by the decoder's end callback. This catches a source
         // ending early even when the next queue item is installed quickly.
-        if state.playback_state.as_deref() == Some("ENDED") && !duration_checked && !user_interrupted {
+        if state.playback_state.as_deref() == Some("ENDED")
+            && !duration_checked
+            && !user_interrupted
+        {
             duration_checked = true;
             check_duration(
                 &root,
@@ -147,6 +172,35 @@ fn run() {
 
         previous_state = Some(state);
     }
+}
+
+fn prepare_output_root(
+    requested: &PathBuf,
+    fallback: Option<&std::path::Path>,
+) -> Result<PathBuf, String> {
+    if create_dir_all(requested).is_ok() {
+        let write_test = requested.join(".write-test");
+        if OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&write_test)
+            .is_ok()
+        {
+            let _ = std::fs::remove_file(write_test);
+            return Ok(requested.clone());
+        }
+    }
+
+    if let Some(fallback) = fallback {
+        create_dir_all(fallback).map_err(|error| error.to_string())?;
+        eprintln!(
+            "[AudioStress] requested output {:?} is not writable (macOS sandbox?), falling back to {:?}",
+            requested, fallback
+        );
+        return Ok(fallback.to_path_buf());
+    }
+
+    Err("requested output is not writable and no fallback is available".to_string())
 }
 
 fn check_duration(
@@ -300,7 +354,8 @@ fn resident_bytes() -> i64 {
     unsafe {
         let mut info = mach_task_basic_info::default();
         let mut count = (std::mem::size_of::<mach_task_basic_info>()
-            / std::mem::size_of::<libc::integer_t>()) as libc::mach_msg_type_number_t;
+            / std::mem::size_of::<libc::integer_t>())
+            as libc::mach_msg_type_number_t;
         let kr = libc::task_info(
             mach_task_self(),
             20, // MACH_TASK_BASIC_INFO
@@ -333,7 +388,12 @@ fn resident_bytes() -> i64 {
 
 #[cfg(all(
     unix,
-    not(any(target_os = "macos", target_os = "ios", target_os = "linux", target_os = "android"))
+    not(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "linux",
+        target_os = "android"
+    ))
 ))]
 fn resident_bytes() -> i64 {
     unsafe {
@@ -378,7 +438,7 @@ fn resident_bytes() -> i64 {
     unsafe {
         let mut counters = PROCESS_MEMORY_COUNTERS::default();
         let size = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
-        if GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, size).as_bool() {
+        if GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, size).is_ok() {
             counters.WorkingSetSize as i64
         } else {
             -1

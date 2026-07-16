@@ -129,7 +129,8 @@ class AudioCoreController extends ChangeNotifier
       Platform.isWindows;
   bool get isInitialized => _initialized;
   EqualizerConfig get equalizerConfig => equalizer.config;
-  bool get _usesRustPlaybackBackend => Platform.isLinux || Platform.isWindows;
+  bool get _usesRustPlaybackBackend =>
+      Platform.isLinux || Platform.isWindows || Platform.isMacOS || Platform.isIOS;
 
   /// Returns the next track in the current playlist sequence.
   AudioTrack? get nextTrack => playlist.nextTrack;

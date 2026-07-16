@@ -1427,7 +1427,10 @@ pub fn init_app() {
     start_default_output_monitor();
 
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
-    if std::env::args().any(|arg| arg == "--audio-stress-test" || arg == "--stress-test") {
+    let stress_arg = std::env::args()
+        .any(|arg| arg == "--audio-stress-test" || arg == "--stress-test");
+    let stress_env = std::env::var_os("VYNODY_AUDIO_STRESS_DIR").is_some();
+    if stress_arg || stress_env {
         crate::stress_test::start();
     }
 
