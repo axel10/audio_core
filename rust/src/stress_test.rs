@@ -15,6 +15,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
+const SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_DURATION_ERROR_MS: u128 = 100;
 
 static STARTED: OnceLock<()> = OnceLock::new();
@@ -69,6 +70,7 @@ fn run() {
     eprintln!("[AudioStress] enabled; output={:?}", root);
 
     let mut previous = Instant::now();
+    let mut last_sample = Instant::now();
     let mut path: Option<String> = None;
     let mut declared_ms: u128 = 0;
     let mut active_ms: u128 = 0;
@@ -137,20 +139,24 @@ fn run() {
             active_ms = active_ms.saturating_add(media_elapsed);
         }
 
-        let usage = resources.sample(elapsed_ms);
-        if let Some(file) = samples.as_mut() {
-            let _ = writeln!(
-                file,
-                "{},{},{},{},{},{:.2},{:?}",
-                Utc::now().timestamp_millis(),
-                csv(state.path.as_deref().unwrap_or("")),
-                state.position_ms,
-                state.duration_ms,
-                state.is_playing,
-                usage.cpu_percent,
-                usage.rss_bytes,
-            );
-            let _ = file.flush();
+        let sample_elapsed = now.duration_since(last_sample);
+        if sample_elapsed >= SAMPLE_INTERVAL {
+            let usage = resources.sample(sample_elapsed.as_millis());
+            if let Some(file) = samples.as_mut() {
+                let _ = writeln!(
+                    file,
+                    "{},{},{},{},{},{:.2},{:?}",
+                    Utc::now().timestamp_millis(),
+                    csv(state.path.as_deref().unwrap_or("")),
+                    state.position_ms,
+                    state.duration_ms,
+                    state.is_playing,
+                    usage.cpu_percent,
+                    usage.rss_bytes,
+                );
+                let _ = file.flush();
+            }
+            last_sample = now;
         }
 
         // ENDED is set by the decoder's end callback. This catches a source
