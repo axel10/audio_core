@@ -188,6 +188,7 @@ dependencies = [
  "jni 0.21.1",
  "libblur",
  "libc",
+ "libm",
  "log",
  "md5",
  "ndk-context",

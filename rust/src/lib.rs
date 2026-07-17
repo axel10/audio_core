@@ -1,6 +1,12 @@
 pub mod api;
 mod frb_generated;
 
+#[cfg(target_os = "linux")]
+#[no_mangle]
+pub extern "C" fn log10f(x: f32) -> f32 {
+    libm::log10f(x)
+}
+
 pub mod audio_converter_internal;
 
 #[cfg(any(
