@@ -1885,6 +1885,7 @@ dependencies = [
 [[package]]
 name = "rodio-wsola"
 version = "0.1.0"
+source = "git+https://github.com/axel10/rodio-wsola#6509d7aeee65b00285d3e687a6e5eed807115644"
 dependencies = [
  "rodio",
 ]
