@@ -28,7 +28,7 @@ webp = "0.3.0"
 
 
 [target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))'.dependencies]
-rodio = { git="https://github.com/axel10/rodio", default-features = true, features = ["symphonia-all"] }
+rodio = { version = "0.22", default-features = true, features = ["symphonia-all"] }
 rodio-wsola = { path="./rodio-wsola" }
 realfft = "3.5.0"
 fundsp = "0.23.0"
@@ -61,3 +61,6 @@ lto = true
 codegen-units = 1
 panic = 'abort'
 strip = true
+
+[patch.crates-io]
+rodio = { git = "https://github.com/axel10/rodio" }
