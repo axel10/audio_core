@@ -129,6 +129,16 @@ impl DecoderBackend {
             Self::Symphonia { source, .. } => source,
         }
     }
+
+    fn seek_to(&mut self, position: Duration) -> Result<(), String> {
+        match self {
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
+            Self::Ffmpeg(source) => source.seek_to(position),
+            Self::Symphonia { .. } => {
+                Err("Symphonia backend does not support fast seeking".to_string())
+            }
+        }
+    }
 }
  
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
@@ -480,7 +490,7 @@ impl PlayerController {
     fn open_deck_from_backend(
         &mut self,
         path: &str,
-        backend: DecoderBackend,
+        mut backend: DecoderBackend,
         start_offset: Duration,
         auto_play: bool,
         gain: f32,
@@ -498,6 +508,17 @@ impl PlayerController {
         } else {
             start_offset.min(total)
         };
+
+        let mut seek_success = false;
+        if clamped_offset > Duration::ZERO {
+            if let Ok(()) = backend.seek_to(clamped_offset) {
+                seek_success = true;
+                info!("[DecoderBackend] Fast seeked backend to {:?}", clamped_offset);
+            } else {
+                warn!("[DecoderBackend] Fast seek failed or not supported, falling back to skip_duration");
+            }
+        }
+
         player.set_volume((self.volume * gain).clamp(0.0, 1.0));
         let decode_engine = backend.engine().to_string();
         let decoded_source = backend.into_source();
@@ -529,7 +550,7 @@ impl PlayerController {
             output_sample_rate,
         );
         let eq_source = EqSource::new(normalized_source, Arc::clone(&self.equalizer));
-        let audio_source: Box<dyn Source<Item = f32> + Send> = if clamped_offset > Duration::ZERO {
+        let audio_source: Box<dyn Source<Item = f32> + Send> = if clamped_offset > Duration::ZERO && !seek_success {
             Box::new(eq_source.skip_duration(clamped_offset))
         } else {
             Box::new(eq_source)
