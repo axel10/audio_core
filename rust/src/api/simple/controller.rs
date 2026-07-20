@@ -607,6 +607,7 @@ impl PlayerController {
         if previous_public_path.as_deref() != Some(path) {
             self.warm_waveform_cache_for_public_path();
         }
+        super::notify_playback_state_changed();
         Ok(())
     }
 
@@ -628,6 +629,7 @@ impl PlayerController {
         if previous_public_path.as_deref() != self.public_path() {
             self.warm_waveform_cache_for_public_path();
         }
+        super::notify_playback_state_changed();
     }
 
     fn playback_state_snapshot(&self) -> PlaybackState {
@@ -757,6 +759,7 @@ impl PlayerController {
             drive_crossfade(generation, duration);
         });
 
+        super::notify_playback_state_changed();
         Ok(())
     }
 
@@ -1572,15 +1575,40 @@ pub fn seek_audio_ms(position_ms: i64) -> Result<(), String> {
         target = target.min(current.loaded_duration);
     }
 
-    let seek_result = current.player.try_seek(target);
+    let empty = current.player.empty();
+    let was_playing = current.is_playing();
+    eprintln!(
+        "[RustSeekLog] seek_audio_ms position_ms={} target_ms={} empty={} was_playing={}",
+        position_ms, target_ms, empty, was_playing
+    );
+
+    if target < current.source_start_offset {
+        let path = current.loaded_path.clone();
+        eprintln!(
+            "[RustSeekLog] target is before source_start_offset, falling back to replace_current_from_path path={} was_playing={}",
+            path, was_playing
+        );
+        return c.replace_current_from_path(&path, target, was_playing);
+    }
+
+    let relative_target = target - current.source_start_offset;
+    let seek_result = current.player.try_seek(relative_target);
+    eprintln!(
+        "[RustSeekLog] try_seek result is_ok={}",
+        seek_result.is_ok()
+    );
+
     if seek_result.is_ok() {
-        current.source_start_offset = Duration::ZERO;
         clear_fft_buffer(&current.latest_fft);
+        super::notify_playback_state_changed();
         return Ok(());
     }
 
     let path = current.loaded_path.clone();
-    let was_playing = current.is_playing();
+    eprintln!(
+        "[RustSeekLog] falling back to replace_current_from_path path={} was_playing={}",
+        path, was_playing
+    );
     c.replace_current_from_path(&path, target, was_playing)
 }
 

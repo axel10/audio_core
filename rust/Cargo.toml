@@ -61,6 +61,5 @@ lto = true
 codegen-units = 1
 panic = 'abort'
 strip = true
-
 [patch.crates-io]
-rodio = { git = "https://github.com/axel10/rodio" }
+rodio = { path = "rodio" }

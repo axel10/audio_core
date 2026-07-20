@@ -253,6 +253,9 @@ class PlayerController extends ChangeNotifier {
     if (_selectedPath == null) return;
     try {
       // debugPrint('[PlayerController] seek targetMs=${target.inMilliseconds}');
+      if (_playerState == PlayerState.completed) {
+        _playerState = PlayerState.paused;
+      }
       await _parent.engine.seek(target);
       _lastCommandTime = DateTime.now();
       _position = target;
@@ -347,6 +350,7 @@ class PlayerController extends ChangeNotifier {
     double nativeVolume, {
     String? error,
   }) {
+    debugPrint('[DartSnapshotLog] applySnapshot path=$path playbackState=$playbackState positionMs=${position.inMilliseconds} isPlaying=$isPlaying oldState=$_playerState');
 
     if (error != null) {
       setError(error);
