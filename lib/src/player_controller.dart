@@ -350,7 +350,7 @@ class PlayerController extends ChangeNotifier {
     double nativeVolume, {
     String? error,
   }) {
-    debugPrint('[DartSnapshotLog] applySnapshot path=$path playbackState=$playbackState positionMs=${position.inMilliseconds} isPlaying=$isPlaying oldState=$_playerState');
+    // debugPrint('[DartSnapshotLog] applySnapshot path=$path playbackState=$playbackState positionMs=${position.inMilliseconds} isPlaying=$isPlaying oldState=$_playerState');
 
     if (error != null) {
       setError(error);

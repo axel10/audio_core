@@ -1479,6 +1479,7 @@ pub fn init_app() {
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
     let _ = env_logger::builder()
         .filter_level(log::LevelFilter::Info)
+        .filter_module("pulseaudio", log::LevelFilter::Off)
         .try_init();
 
     info!("[AudioDeviceMonitor] init_app called, starting monitor thread...");
