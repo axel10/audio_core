@@ -10,6 +10,7 @@ import android.media.audiofx.Equalizer
 import android.media.audiofx.BassBoost
 import android.os.Build
 import android.provider.MediaStore
+import org.json.JSONObject
 import android.animation.ValueAnimator
 import android.os.Handler
 import android.os.Looper
@@ -429,8 +430,9 @@ class MyExoplayerPlugin :
                 return
             }
             "convertFileWithTransformer" -> {
-                val inputPath = call.argument<String>("inputPath")
+                val inputPathRaw = call.argument<String>("inputPath")
                     ?: return result.error("INVALID_ARGUMENT", "Input path is null", null)
+                val inputPath = resolveUri(context, inputPathRaw)
                 val outputPath = call.argument<String>("outputPath")
                     ?: return result.error("INVALID_ARGUMENT", "Output path is null", null)
                 val bitRate = call.argument<Int>("bitRate")
@@ -473,16 +475,18 @@ class MyExoplayerPlugin :
                 return
             }
             "crossfade" -> {
-                val path = call.argument<String>("path")
+                val pathRaw = call.argument<String>("path")
                     ?: return result.error("INVALID_ARGUMENT", "Path is null", null)
+                val path = resolveUri(context, pathRaw)
                 val durationMs = call.argument<Int>("durationMs")?.toLong() ?: 0L
                 val positionMs = call.argument<Int>("positionMs")?.toLong()
                 handleCrossfade(path, durationMs, positionMs, result)
                 return
             }
             "transition" -> {
-                val path = call.argument<String>("path")
+                val pathRaw = call.argument<String>("path")
                     ?: return result.error("INVALID_ARGUMENT", "Path is null", null)
+                val path = resolveUri(context, pathRaw)
                 val durationMs = call.argument<Int>("durationMs")?.toLong() ?: 0L
                 val positionMs = call.argument<Int>("positionMs")?.toLong()
                 val autoPlay = call.argument<Boolean>("autoPlay") ?: true
@@ -502,7 +506,8 @@ class MyExoplayerPlugin :
                 return
             }
             "load" -> {
-                val url = call.argument<String>("url") ?: return result.error("INVALID_ARGUMENT", "URL is null", null)
+                val urlRaw = call.argument<String>("url") ?: return result.error("INVALID_ARGUMENT", "URL is null", null)
+                val url = resolveUri(context, urlRaw)
                 val ctx = getOrCreatePlayerContext(playerId)
                 cancelActiveCrossfade()
                 NativeLog.d(
@@ -1562,6 +1567,9 @@ class MyExoplayerPlugin :
             "directoryExists" -> {
                 directoryExists(call.arguments, result)
             }
+            "listMusicFilesInDirectory" -> {
+                listMusicFilesInDirectory(call.arguments, result)
+            }
             else -> {
                 result.notImplemented()
             }
@@ -1801,6 +1809,137 @@ class MyExoplayerPlugin :
         }.start()
     }
 
+    private fun listMusicFilesInDirectory(arguments: Any?, result: Result) {
+        val safeActivity = activity ?: context ?: run {
+            result.error("no_context", "Android context is not available.", null)
+            return
+        }
+        if (arguments !is Map<*, *>) {
+            result.error("invalid_arguments", "Expected a map of arguments.", null)
+            return
+        }
+
+        val treeUriString = arguments["treeUri"]?.toString()
+        val relativeSubPath = arguments["relativeSubPath"]?.toString() ?: ""
+        
+        if (treeUriString.isNullOrEmpty()) {
+            result.error("invalid_arguments", "Missing treeUri.", null)
+            return
+        }
+
+        val treeUri = Uri.parse(treeUriString)
+        val resolver = safeActivity.contentResolver
+
+        Thread {
+            try {
+                val tree = DocumentFile.fromTreeUri(safeActivity, treeUri)
+                if (tree == null) {
+                    result.error("list_failed", "Failed to resolve the selected directory.", null)
+                    return@Thread
+                }
+
+                var targetDir: DocumentFile = tree
+                if (relativeSubPath.isNotEmpty() && relativeSubPath != ".") {
+                    val segments = relativeSubPath.replace('\\', '/').split("/").filter { it.isNotEmpty() }
+                    for (segment in segments) {
+                        val nextDir = targetDir.findFile(segment)
+                        if (nextDir == null || !nextDir.isDirectory) {
+                            result.success(emptyList<String>())
+                            return@Thread
+                        }
+                        targetDir = nextDir
+                    }
+                }
+
+                val musicFiles = mutableListOf<String>()
+                val supportedExtensions = setOf(
+                    "aac", "aif", "aiff", "alac", "caf", "flac", 
+                    "m4a", "m4b", "m4p", "mid", "midi", "mp3", 
+                    "ogg", "opus", "wav", "webm"
+                )
+
+                val targetDocId = DocumentsContract.getDocumentId(targetDir.uri)
+                val queue = java.util.ArrayDeque<Pair<String, String>>()
+                queue.add(Pair(targetDocId, ""))
+
+                var count = 0
+                val maxFilesLimit = 15000
+
+                while (queue.isNotEmpty()) {
+                    val (currentDocId, relativePrefix) = queue.poll()
+                    
+                    val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, currentDocId)
+                    val projection = arrayOf(
+                        DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                        DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                        DocumentsContract.Document.COLUMN_MIME_TYPE
+                    )
+
+                    var cursor: android.database.Cursor? = null
+                    try {
+                        cursor = resolver.query(childrenUri, projection, null, null, null)
+                        if (cursor != null) {
+                            val idIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                            val nameIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                            val mimeIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+
+                            while (cursor.moveToNext()) {
+                                val childId = cursor.getString(idIndex)
+                                val displayName = cursor.getString(nameIndex) ?: ""
+                                val mimeType = cursor.getString(mimeIndex) ?: ""
+
+                                if (displayName.startsWith(".") || displayName.startsWith("._")) {
+                                    continue
+                                }
+
+                                val relativePath = if (relativePrefix.isEmpty()) {
+                                    displayName
+                                } else {
+                                    "$relativePrefix/$displayName"
+                                }
+
+                                if (mimeType == DocumentsContract.Document.MIME_TYPE_DIR) {
+                                    queue.add(Pair(childId, relativePath))
+                                } else {
+                                    val ext = getExtension(displayName).lowercase()
+                                    if (supportedExtensions.contains(ext)) {
+                                        musicFiles.add(relativePath)
+                                        count++
+                                        if (count >= maxFilesLimit) {
+                                            break
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        NativeLog.w("AudioCore", "Error querying child documents for $currentDocId: ${e.message}")
+                    } finally {
+                        cursor?.close()
+                    }
+                    
+                    if (count >= maxFilesLimit) {
+                        NativeLog.w("AudioCore", "Reached safety scan limit of $maxFilesLimit files via SAF")
+                        break
+                    }
+                }
+
+                result.success(musicFiles)
+            } catch (e: Exception) {
+                result.error("list_failed", e.message, null)
+            }
+        }.start()
+    }
+
+    private fun getExtension(fileName: String): String {
+        val dotIndex = fileName.lastIndexOf('.')
+        return if (dotIndex >= 0 && dotIndex < fileName.length - 1) {
+            fileName.substring(dotIndex + 1)
+        } else {
+            ""
+        }
+    }
+
     private fun resolveDisplayPath(treeUri: Uri): String {
         return try {
             val docId = DocumentsContract.getTreeDocumentId(treeUri)
@@ -1817,6 +1956,58 @@ class MyExoplayerPlugin :
         } catch (e: Exception) {
             treeUri.toString()
         }
+    }
+
+    private fun resolvePhysicalPathToSafUri(context: Context, physicalPath: String): Uri? {
+        try {
+            val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            val mappingsJson = prefs.getString("flutter.saf_tree_mappings_v1", null) ?: return null
+            val mappings = JSONObject(mappingsJson)
+            
+            val normalizedFile = java.io.File(physicalPath).absolutePath.lowercase()
+            var bestRoot: String? = null
+            var bestTreeUriStr: String? = null
+            
+            val keys = mappings.keys()
+            while (keys.hasNext()) {
+                val rootPath = keys.next()
+                val normalizedRoot = java.io.File(rootPath).absolutePath.lowercase()
+                if (normalizedFile.startsWith(normalizedRoot)) {
+                    if (bestRoot == null || rootPath.length > bestRoot.length) {
+                        bestRoot = rootPath
+                        bestTreeUriStr = mappings.getString(rootPath)
+                    }
+                }
+            }
+            
+            if (bestRoot == null || bestTreeUriStr == null) return null
+            
+            val relativePath = physicalPath.substring(bestRoot.length).trimStart('/', '\\')
+            val normalizedRelativePath = relativePath.replace('\\', '/')
+            
+            val treeUri = Uri.parse(bestTreeUriStr)
+            val treeId = DocumentsContract.getTreeDocumentId(treeUri)
+            
+            val childDocumentId = if (normalizedRelativePath.isEmpty()) {
+                treeId
+            } else {
+                "$treeId/$normalizedRelativePath"
+            }
+            
+            return DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocumentId)
+        } catch (e: Exception) {
+            NativeLog.e("AudioCore", "Error resolving path to SAF URI: ${e.message}")
+            return null
+        }
+    }
+
+    private fun resolveUri(context: Context?, path: String): String {
+        if (context == null) return path
+        if (path.startsWith("content://") || path.startsWith("http://") || path.startsWith("https://")) {
+            return path
+        }
+        val resolved = resolvePhysicalPathToSafUri(context, path)
+        return resolved?.toString() ?: path
     }
 
     private fun mimeTypeForFileName(fileName: String): String {

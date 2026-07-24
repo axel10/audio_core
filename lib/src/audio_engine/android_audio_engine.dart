@@ -1,6 +1,8 @@
 import 'dart:async';
-import 'package:flutter/services.dart';
+import 'dart:ffi' as ffi;
+import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import '../fft_processor.dart';
 import '../rust/api/simple/equalizer.dart';
 import '../rust/api/simple_api.dart' as rust;
@@ -10,6 +12,8 @@ import '../audio_details.dart';
 import 'audio_engine_interface.dart';
 import 'flutter_taglib_metadata_bridge.dart';
 import 'track_artwork_support.dart';
+
+typedef _CloseDart = int Function(int fd);
 
 class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   static const MethodChannel _channel = MethodChannel('my_exoplayer');
@@ -269,17 +273,60 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
     throw UnsupportedError('PCM extraction is not available on Android.');
   }
 
+  static const MethodChannel _taglibChannel = MethodChannel('flutter_taglib');
+  static final _CloseDart _closeNativeFd = ffi.DynamicLibrary.process()
+      .lookupFunction<ffi.Int32 Function(ffi.Int32), _CloseDart>('close');
+
   @override
   Future<List<double>> getWaveform({
     required String path,
     required int expectedChunks,
     int sampleStride = 0,
-  }) =>
-      loadWaveformFromRust(
+  }) async {
+    try {
+      final directResult = await loadWaveformFromRust(
         path: path,
         expectedChunks: expectedChunks,
         sampleStride: sampleStride,
       );
+      if (directResult.isNotEmpty) return directResult;
+    } catch (_) {}
+
+    if (Platform.isAndroid) {
+      // 1. Try zero-copy openFileDescriptor with FFmpeg pipe: protocol
+      try {
+        final int? fd = await _taglibChannel.invokeMethod<int>(
+          'openFileDescriptor',
+          {
+            'uri': path,
+            'mode': 'r',
+          },
+        );
+        if (fd != null && fd >= 0) {
+          try {
+            final pipeResult = await loadWaveformFromRust(
+              path: 'pipe:$fd',
+              expectedChunks: expectedChunks,
+              sampleStride: sampleStride,
+            );
+            if (pipeResult.isNotEmpty) return pipeResult;
+          } finally {
+            try {
+              _closeNativeFd(fd);
+            } catch (e) {
+              debugPrint('[AndroidAudioEngine] Failed to close fd $fd: $e');
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint(
+          '[AndroidAudioEngine] getWaveform via openFileDescriptor (pipe) failed: $e',
+        );
+      }
+    }
+
+    return const <double>[];
+  }
 
   @override
   Future<void> setEqualizerConfig(EqualizerConfig config) async {
