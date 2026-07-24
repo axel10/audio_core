@@ -472,6 +472,7 @@ class AudioCoreController extends ChangeNotifier
   /// controls whether playback starts immediately.
   Future<void> playPaths(
     List<String> paths, {
+    int startIndex = 0,
     bool autoPlayFirst = true,
     FadeSettings? fadeSetting,
   }) async {
@@ -483,6 +484,12 @@ class AudioCoreController extends ChangeNotifier
 
     final resolvedTracks = resolveAudioTracks(paths);
     if (resolvedTracks.isEmpty) return;
+
+    final safeStartIndex = startIndex.clamp(0, resolvedTracks.length - 1);
+    final initialTrack = resolvedTracks[safeStartIndex];
+    final initialTargetKey =
+        _normalizeLocalPathKey(initialTrack.uri) ??
+        _normalizeLocalPathKey(initialTrack.id);
 
     final playlistController = playlist;
     await playlistController.ensureQueuePlaylist();
@@ -499,7 +506,6 @@ class AudioCoreController extends ChangeNotifier
     }
 
     final tracksToAdd = <AudioTrack>[];
-    String? firstTargetKey;
 
     for (final track in resolvedTracks) {
       final key =
@@ -507,11 +513,9 @@ class AudioCoreController extends ChangeNotifier
       if (key == null) continue;
 
       if (existingKeys.contains(key)) {
-        firstTargetKey ??= key;
         continue;
       }
 
-      firstTargetKey ??= key;
       tracksToAdd.add(track);
       existingKeys.add(key);
     }
@@ -525,7 +529,7 @@ class AudioCoreController extends ChangeNotifier
       );
     }
 
-    if (firstTargetKey == null) return;
+    if (initialTargetKey == null) return;
 
     final updatedQueuePlaylist = playlistController.playlistById(
       queuePlaylistId,
@@ -535,7 +539,7 @@ class AudioCoreController extends ChangeNotifier
           final trackKey =
               _normalizeLocalPathKey(track.uri) ??
               _normalizeLocalPathKey(track.id);
-          return trackKey == firstTargetKey;
+          return trackKey == initialTargetKey;
         }) ??
         -1;
     if (targetIndex < 0) return;
