@@ -2129,6 +2129,8 @@ class MyExoplayerPlugin :
         val duration = p.duration
         val clampedDuration = if (duration < 0) 0L else duration
 
+        val isLogicallyPlaying = p.isPlaying || (p.playWhenReady && p.playbackState == Player.STATE_BUFFERING)
+
         val stateMap = mapOf(
             "playerId" to id,
             "state" to when (p.playbackState) {
@@ -2138,7 +2140,7 @@ class MyExoplayerPlugin :
                 Player.STATE_ENDED -> "ENDED"
                 else -> "UNKNOWN"
             },
-            "isPlaying" to p.isPlaying,
+            "isPlaying" to isLogicallyPlaying,
             "duration" to clampedDuration,
             "position" to p.currentPosition,
             "updateTime" to System.currentTimeMillis(),
