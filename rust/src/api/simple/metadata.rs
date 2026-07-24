@@ -6,7 +6,6 @@ use zune_core::options::DecoderOptions;
 use zune_image::codecs::ImageFormat;
 use zune_image::image::Image;
 use zune_image::traits::OperationsTrait;
-use zune_imageprocs::crop::Crop;
 use zune_imageprocs::resize::{Resize, ResizeMethod};
 
 use super::palette::{
@@ -114,7 +113,7 @@ pub fn generate_track_artwork(
     }
 
     let (thumbnail_image, artwork_width, artwork_height) =
-        build_square_thumbnail(&picture_bytes, thumbnail_size.max(1) as usize)?;
+        build_thumbnail(&picture_bytes, thumbnail_size.max(1) as usize)?;
     let palette_options = ThemePaletteOptions {
         hue_cohesion,
         mesh_style_preset: MeshStylePreset::from_code(mesh_style_preset),
@@ -154,7 +153,7 @@ pub fn generate_track_artwork(
     let artwork_path = if save_large_artwork {
         let artwork_path = artworks_dir.join(format!("{md5_str}.webp"));
         if !artwork_path.exists() {
-            let (large_image, _, _) = build_square_thumbnail(&picture_bytes, 1000)?;
+            let (large_image, _, _) = build_thumbnail(&picture_bytes, 1000)?;
             let webp_bytes = encode_webp(&large_image, 90.0)?;
             fs::write(&artwork_path, &webp_bytes)?;
         }
@@ -201,7 +200,7 @@ pub fn generate_large_artwork(
 
     let artwork_path = artworks_dir.join(format!("{}.webp", md5_str));
     if !artwork_path.exists() {
-        let (large_image, _, _) = build_square_thumbnail(&picture_bytes, 1000)?;
+        let (large_image, _, _) = build_thumbnail(&picture_bytes, 1000)?;
         let webp_bytes = encode_webp(&large_image, 90.0)?;
         fs::write(&artwork_path, &webp_bytes)?;
     }
@@ -240,9 +239,9 @@ fn encode_webp(image: &Image, quality: f32) -> anyhow::Result<Vec<u8>> {
     Ok(webp_data.to_vec())
 }
 
-fn build_square_thumbnail(
+fn build_thumbnail(
     artwork_bytes: &[u8],
-    thumbnail_size: usize,
+    max_size: usize,
 ) -> anyhow::Result<(Image, usize, usize)> {
     let mut image = Image::read(ZCursor::new(artwork_bytes), DecoderOptions::default())
         .map_err(|err| anyhow::anyhow!("failed to decode artwork image: {err}"))?;
@@ -250,16 +249,17 @@ fn build_square_thumbnail(
     if width == 0 || height == 0 {
         anyhow::bail!("failed to decode artwork image: decoded dimensions are 0x0");
     }
-    let crop_size = width.min(height);
-    let offset_x = (width.saturating_sub(crop_size)) / 2;
-    let offset_y = (height.saturating_sub(crop_size)) / 2;
 
-    Crop::new(crop_size, crop_size, offset_x, offset_y)
-        .execute(&mut image)
-        .map_err(|err| anyhow::anyhow!("failed to crop artwork image: {err}"))?;
-    Resize::new(thumbnail_size, thumbnail_size, ResizeMethod::Bilinear)
-        .execute(&mut image)
-        .map_err(|err| anyhow::anyhow!("failed to resize artwork image: {err}"))?;
+    let max_dim = width.max(height);
+    if max_dim > max_size {
+        let scale = max_size as f64 / max_dim as f64;
+        let target_width = ((width as f64 * scale).round() as usize).max(1);
+        let target_height = ((height as f64 * scale).round() as usize).max(1);
+
+        Resize::new(target_width, target_height, ResizeMethod::Bilinear)
+            .execute(&mut image)
+            .map_err(|err| anyhow::anyhow!("failed to resize artwork image: {err}"))?;
+    }
 
     Ok((image, width, height))
 }
