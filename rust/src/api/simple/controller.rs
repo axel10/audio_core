@@ -273,6 +273,7 @@ struct PlayerController {
     pending_playback_state: Option<String>,
     last_decode_engine: Option<String>,
     last_fft_request_time: Arc<Mutex<std::time::Instant>>,
+    last_error: Option<String>,
 }
 
 struct PendingEdit {
@@ -368,6 +369,7 @@ impl PlayerController {
             pending_playback_state: None,
             last_decode_engine: None,
             last_fft_request_time: Arc::new(Mutex::new(std::time::Instant::now())),
+            last_error: None,
         }
     }
 
@@ -667,7 +669,7 @@ impl PlayerController {
             is_playing,
             volume: self.volume,
             path: public_deck.map(|deck| deck.loaded_path.clone()),
-            error: None,
+            error: self.last_error.clone(),
         }
     }
 
@@ -1504,26 +1506,90 @@ pub fn init_app() {
 
 pub fn load_audio_file(path: String) -> Result<(), String> {
     // 耗时操作放在锁外：打开文件、构建系统层级组件 (大约耗时几十毫秒以上)
-    let file = File::open(&path).map_err(|e| format!("open file failed: {e}"))?;
-    let backend = DecoderBackend::open(&path, file)?;
+    let file = match File::open(&path) {
+        Ok(f) => f,
+        Err(e) => {
+            let msg = format!("open file failed: {e}");
+            error!("[load_audio_file] path={}: {}", path, msg);
+            if let Ok(mut c) = controller().lock() {
+                c.last_error = Some(msg.clone());
+                super::notify_playback_state_changed();
+            }
+            return Err(msg);
+        }
+    };
+    let backend = match DecoderBackend::open(&path, file) {
+        Ok(b) => b,
+        Err(msg) => {
+            error!("[load_audio_file] path={}: {}", path, msg);
+            if let Ok(mut c) = controller().lock() {
+                c.last_error = Some(msg.clone());
+                super::notify_playback_state_changed();
+            }
+            return Err(msg);
+        }
+    };
 
     let mut c = controller()
         .lock()
         .map_err(|_| "player lock poisoned".to_string())?;
-    c.replace_current_from_backend(&path, backend, Duration::ZERO, false)
+    match c.replace_current_from_backend(&path, backend, Duration::ZERO, false) {
+        Ok(()) => {
+            c.last_error = None;
+            Ok(())
+        }
+        Err(msg) => {
+            error!("[load_audio_file] path={}: {}", path, msg);
+            c.last_error = Some(msg.clone());
+            super::notify_playback_state_changed();
+            Err(msg)
+        }
+    }
 }
 
 pub fn crossfade_to_audio_file(path: String, duration_ms: i64) -> Result<(), String> {
     // 耗时操作放在锁外：打开文件、构建系统层级组件 (大约耗时几十毫秒以上)
-    let file = File::open(&path).map_err(|e| format!("open file failed: {e}"))?;
-    let backend = DecoderBackend::open(&path, file)?;
+    let file = match File::open(&path) {
+        Ok(f) => f,
+        Err(e) => {
+            let msg = format!("open file failed: {e}");
+            error!("[crossfade_to_audio_file] path={}: {}", path, msg);
+            if let Ok(mut c) = controller().lock() {
+                c.last_error = Some(msg.clone());
+                super::notify_playback_state_changed();
+            }
+            return Err(msg);
+        }
+    };
+    let backend = match DecoderBackend::open(&path, file) {
+        Ok(b) => b,
+        Err(msg) => {
+            error!("[crossfade_to_audio_file] path={}: {}", path, msg);
+            if let Ok(mut c) = controller().lock() {
+                c.last_error = Some(msg.clone());
+                super::notify_playback_state_changed();
+            }
+            return Err(msg);
+        }
+    };
 
     let mut c = controller()
         .lock()
         .map_err(|_| "player lock poisoned".to_string())?;
     c.clear_pending_playback_state();
     let duration = Duration::from_millis(duration_ms.max(0) as u64);
-    c.start_crossfade_with_backend(&path, backend, duration)
+    match c.start_crossfade_with_backend(&path, backend, duration) {
+        Ok(()) => {
+            c.last_error = None;
+            Ok(())
+        }
+        Err(msg) => {
+            error!("[crossfade_to_audio_file] path={}: {}", path, msg);
+            c.last_error = Some(msg.clone());
+            super::notify_playback_state_changed();
+            Err(msg)
+        }
+    }
 }
 
 pub fn play_audio(fade_duration_ms: i64) -> Result<(), String> {
@@ -1531,7 +1597,11 @@ pub fn play_audio(fade_duration_ms: i64) -> Result<(), String> {
         .lock()
         .map_err(|_| "player lock poisoned".to_string())?;
     if c.public_deck().is_none() {
-        return Err("player is not initialized".to_string());
+        let msg = "player is not initialized".to_string();
+        error!("[play_audio] {}", msg);
+        c.last_error = Some(msg.clone());
+        super::notify_playback_state_changed();
+        return Err(msg);
     }
 
     c.pause_fade_in_progress = false;
@@ -1548,6 +1618,7 @@ pub fn play_audio(fade_duration_ms: i64) -> Result<(), String> {
     } else {
         c.play_all();
     }
+    c.last_error = None;
     Ok(())
 }
 

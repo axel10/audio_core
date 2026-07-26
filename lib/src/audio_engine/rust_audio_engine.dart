@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../fft_processor.dart';
 import '../rust/api/simple_api.dart' as rust;
@@ -27,6 +28,9 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   Future<void> initialize() async {
     _subscription = rust.subscribePlaybackState().listen((state) {
       _currentVolume = state.volume.clamp(0.0, 1.0);
+      if (state.error != null && state.error!.isNotEmpty) {
+        debugPrint('[RustAudioEngine] Playback state error: ${state.error}');
+      }
       _statusController.add(
         AudioStatus(
           path: state.path,
@@ -55,8 +59,13 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
-  Future<void> load(String path) {
-    return rust.loadAudioFile(path: path);
+  Future<void> load(String path) async {
+    try {
+      await rust.loadAudioFile(path: path);
+    } catch (e, st) {
+      debugPrint('[RustAudioEngine] loadAudioFile failed for "$path": $e\n$st');
+      rethrow;
+    }
   }
 
   @override
@@ -64,10 +73,17 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
     String path,
     Duration duration, {
     Duration? position,
-  }) => rust.crossfadeToAudioFile(
-    path: path,
-    durationMs: duration.inMilliseconds,
-  );
+  }) async {
+    try {
+      await rust.crossfadeToAudioFile(
+        path: path,
+        durationMs: duration.inMilliseconds,
+      );
+    } catch (e, st) {
+      debugPrint('[RustAudioEngine] crossfadeToAudioFile failed for "$path": $e\n$st');
+      rethrow;
+    }
+  }
 
   @override
   Future<void> transition(
@@ -77,37 +93,54 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
     required bool autoPlay,
     double? targetVolume,
   }) async {
-    final resolvedTargetVolume = (targetVolume ?? _currentVolume)
-        .clamp(0.0, 1.0)
-        .toDouble();
+    try {
+      final resolvedTargetVolume = (targetVolume ?? _currentVolume)
+          .clamp(0.0, 1.0)
+          .toDouble();
 
-    if (duration > Duration.zero) {
-      await rust.pauseAudio(fadeDurationMs: duration.inMilliseconds);
-    }
+      if (duration > Duration.zero) {
+        await rust.pauseAudio(fadeDurationMs: duration.inMilliseconds);
+      }
 
-    await rust.setAudioVolume(volume: resolvedTargetVolume);
-    await rust.loadAudioFile(path: path);
-    if (position != null) {
-      await rust.seekAudioMs(positionMs: position.inMilliseconds);
-    }
+      await rust.setAudioVolume(volume: resolvedTargetVolume);
+      await rust.loadAudioFile(path: path);
+      if (position != null) {
+        await rust.seekAudioMs(positionMs: position.inMilliseconds);
+      }
 
-    if (autoPlay) {
-      await rust.playAudio(fadeDurationMs: duration.inMilliseconds);
+      if (autoPlay) {
+        await rust.playAudio(fadeDurationMs: duration.inMilliseconds);
+      }
+      _currentVolume = resolvedTargetVolume;
+    } catch (e, st) {
+      debugPrint('[RustAudioEngine] transition failed for "$path": $e\n$st');
+      rethrow;
     }
-    _currentVolume = resolvedTargetVolume;
   }
 
   @override
-  Future<void> play({Duration? fadeDuration}) =>
-      rust.playAudio(fadeDurationMs: fadeDuration?.inMilliseconds ?? 0);
+  Future<void> play({Duration? fadeDuration}) async {
+    try {
+      await rust.playAudio(fadeDurationMs: fadeDuration?.inMilliseconds ?? 0);
+    } catch (e, st) {
+      debugPrint('[RustAudioEngine] playAudio failed: $e\n$st');
+      rethrow;
+    }
+  }
 
   @override
   Future<void> pause({Duration? fadeDuration}) =>
       rust.pauseAudio(fadeDurationMs: fadeDuration?.inMilliseconds ?? 0);
 
   @override
-  Future<void> seek(Duration position) =>
-      rust.seekAudioMs(positionMs: position.inMilliseconds);
+  Future<void> seek(Duration position) async {
+    try {
+      await rust.seekAudioMs(positionMs: position.inMilliseconds);
+    } catch (e, st) {
+      debugPrint('[RustAudioEngine] seekAudioMs failed: $e\n$st');
+      rethrow;
+    }
+  }
 
   @override
   Future<void> setVolume(double volume) =>

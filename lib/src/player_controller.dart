@@ -433,7 +433,10 @@ class PlayerController extends ChangeNotifier {
   @internal
   void setError(String? message) {
     _error = message;
-    if (message != null) _playerState = PlayerState.error;
+    if (message != null) {
+      _playerState = PlayerState.error;
+      debugPrint('[PlayerController] Error: $message');
+    }
     notifyListeners();
   }
 
