@@ -405,8 +405,7 @@ impl PlayerController {
             .with_sample_rate(
                 std::num::NonZeroU32::new(PLAYBACK_SAMPLE_RATE)
                     .expect("playback sample rate must be non-zero"),
-            )
-            .with_buffer_size(rodio::cpal::BufferSize::Fixed(2048));
+            );
         let sink = match preferred
             .with_error_callback(report_audio_stream_error)
             .open_stream()
@@ -417,10 +416,18 @@ impl PlayerController {
                     "[AudioTrace][Output] preferred sample_rate={} rejected: {}; falling back to device default",
                     PLAYBACK_SAMPLE_RATE, preferred_error
                 );
-                DeviceSinkBuilder::from_device(device)
+                let builder = DeviceSinkBuilder::from_device(device)
                     .map_err(|e| format!("open default audio device failed: {e}"))?
-                    .with_error_callback(report_audio_stream_error)
-                    .open_stream()
+                    .with_error_callback(report_audio_stream_error);
+
+                builder
+                    .open_sink_or_fallback()
+                    .or_else(|_| {
+                        eprintln!(
+                            "[AudioTrace][Output] default device fallback failed, trying open_default_sink"
+                        );
+                        DeviceSinkBuilder::open_default_sink()
+                    })
                     .map_err(|e| format!("open default audio device failed: {e}"))?
             }
         };
