@@ -840,7 +840,7 @@ class AudioCoreController extends ChangeNotifier
       //   );
       // }
     } catch (e) {
-      player.setError('FFT fetch failed: $e');
+      debugPrint('[AudioCore][FFT] fetch failed: $e');
       _latestFftCache = const [];
     }
   }
@@ -866,7 +866,6 @@ class AudioCoreController extends ChangeNotifier
       return normalize ? _normalizeWaveform(finalData) : finalData;
     } catch (e) {
       debugPrint('[AudioCore][Waveform] failed: $e');
-      player.setError('Waveform failed: $e');
       return const [];
     }
   }
