@@ -407,7 +407,10 @@ impl PlayerController {
                     .expect("playback sample rate must be non-zero"),
             )
             .with_buffer_size(rodio::cpal::BufferSize::Fixed(2048));
-        let sink = match preferred.open_stream() {
+        let sink = match preferred
+            .with_error_callback(report_audio_stream_error)
+            .open_stream()
+        {
             Ok(sink) => sink,
             Err(preferred_error) => {
                 eprintln!(
@@ -416,6 +419,7 @@ impl PlayerController {
                 );
                 DeviceSinkBuilder::from_device(device)
                     .map_err(|e| format!("open default audio device failed: {e}"))?
+                    .with_error_callback(report_audio_stream_error)
                     .open_stream()
                     .map_err(|e| format!("open default audio device failed: {e}"))?
             }
@@ -915,6 +919,15 @@ impl PlayerController {
 
 fn describe_output_device(device: &rodio::cpal::Device) -> String {
     format!("{:?}", device.id())
+}
+
+fn report_audio_stream_error(error: rodio::cpal::Error) {
+    let message = format!("audio output stream error: {error}");
+    error!("[AudioDeviceMonitor] {}", message);
+    if let Ok(mut controller) = controller().lock() {
+        controller.last_error = Some(message);
+        super::notify_playback_state_changed();
+    }
 }
 
 fn start_default_output_monitor() {
