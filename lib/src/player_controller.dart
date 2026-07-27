@@ -144,6 +144,7 @@ class PlayerController extends ChangeNotifier {
 
       _onTrackChanged(path);
     } catch (e) {
+      debugPrint('[PlayerController] load failed for path=$path: $e');
       setError('Load failed: $e');
     }
     notifyListeners();
@@ -199,6 +200,7 @@ class PlayerController extends ChangeNotifier {
       _isPlaying = false;
       _playerState = PlayerState.paused;
     } catch (e) {
+      debugPrint('[PlayerController] pause failed: $e');
       setError('Pause failed: $e');
     }
     notifyListeners();
@@ -244,6 +246,7 @@ class PlayerController extends ChangeNotifier {
       _isPlaying = true;
       _playerState = PlayerState.playing;
     } catch (e) {
+      debugPrint('[PlayerController] play failed for path=$_selectedPath: $e');
       setError('Play failed: $e');
     }
     notifyListeners();
@@ -260,6 +263,7 @@ class PlayerController extends ChangeNotifier {
       _lastCommandTime = DateTime.now();
       _position = target;
     } catch (e) {
+      debugPrint('[PlayerController] seek failed for target=$target: $e');
       setError('Seek failed: $e');
     }
     notifyListeners();
@@ -353,6 +357,7 @@ class PlayerController extends ChangeNotifier {
     // debugPrint('[DartSnapshotLog] applySnapshot path=$path playbackState=$playbackState positionMs=${position.inMilliseconds} isPlaying=$isPlaying oldState=$_playerState');
 
     if (error != null) {
+      debugPrint('[PlayerController] applySnapshot received native error: $error (path=$path)');
       setError(error);
       return;
     }
