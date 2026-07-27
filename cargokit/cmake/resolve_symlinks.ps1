@@ -6,6 +6,7 @@ function Resolve-Symlinks {
         [string] $Path
     )
 
+    [string] $Path = $Path.Replace('\', '/')
     [string] $separator = '/'
     [string[]] $parts = $Path.Split($separator)
 
