@@ -416,7 +416,6 @@ impl PlayerController {
                 );
                 DeviceSinkBuilder::from_device(device)
                     .map_err(|e| format!("open default audio device failed: {e}"))?
-                    .with_buffer_size(rodio::cpal::BufferSize::Fixed(2048))
                     .open_stream()
                     .map_err(|e| format!("open default audio device failed: {e}"))?
             }
@@ -820,7 +819,14 @@ impl PlayerController {
                 self.active_output_device_name = Some(name);
                 if let Some(p) = path {
                     info!("[AudioDeviceMonitor] Restoring playback to {}", p);
-                    let _ = self.replace_current_from_path(&p, pos, was_playing);
+                    if let Err(message) = self.replace_current_from_path(&p, pos, was_playing) {
+                        error!(
+                            "[AudioDeviceMonitor] playback restore failed path={}: {}",
+                            p, message
+                        );
+                        self.last_error = Some(format!("playback restore failed: {message}"));
+                        super::notify_playback_state_changed();
+                    }
                 }
             }
         }
@@ -1496,11 +1502,17 @@ pub fn init_app() {
     }
 
     if let Ok(mut c) = controller().lock() {
-        let _ = c.ensure_audio_output();
-        info!(
-            "[AudioDeviceMonitor] initial audio output ensured, sink={}",
-            c.sink.is_some()
-        );
+        match c.ensure_audio_output() {
+            Ok(()) => info!(
+                "[AudioDeviceMonitor] initial audio output ensured, sink={}",
+                c.sink.is_some()
+            ),
+            Err(message) => {
+                error!("[AudioDeviceMonitor] initial audio output failed: {}", message);
+                c.last_error = Some(format!("audio output initialization failed: {message}"));
+                super::notify_playback_state_changed();
+            }
+        }
     }
 }
 

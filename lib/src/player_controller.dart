@@ -357,7 +357,10 @@ class PlayerController extends ChangeNotifier {
     // debugPrint('[DartSnapshotLog] applySnapshot path=$path playbackState=$playbackState positionMs=${position.inMilliseconds} isPlaying=$isPlaying oldState=$_playerState');
 
     if (error != null) {
-      debugPrint('[PlayerController] applySnapshot received native error: $error (path=$path)');
+      debugPrint(
+        '[PlayerController] applySnapshot native error state=$playbackState '
+        'path=${path ?? "null"} positionMs=${position.inMilliseconds} error=$error',
+      );
       setError(error);
       return;
     }

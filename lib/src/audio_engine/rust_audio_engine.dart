@@ -28,9 +28,20 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   Future<void> initialize() async {
     _subscription = rust.subscribePlaybackState().listen((state) {
       _currentVolume = state.volume.clamp(0.0, 1.0);
-      if (state.error != null && state.error!.isNotEmpty) {
-        debugPrint('[RustAudioEngine] Playback state error: ${state.error}');
+      final nativeError = state.error?.trim();
+      final hasError = nativeError != null && nativeError.isNotEmpty;
+      final isErrorState = state.playbackState == 'ERROR';
+      if (hasError || isErrorState) {
+        debugPrint(
+          '[RustAudioEngine] Playback error state=${state.playbackState ?? "null"} '
+          'path=${state.path ?? "null"} error=${hasError ? nativeError : "<missing native error>"}',
+        );
       }
+      final propagatedError = hasError
+          ? nativeError
+          : (isErrorState
+                ? 'Native playback entered ERROR without a reason'
+                : null);
       _statusController.add(
         AudioStatus(
           path: state.path,
@@ -40,7 +51,7 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
           isPlaying: state.isPlaying,
           volume: state.volume,
           updateTimeSinceEpochMs: DateTime.now().millisecondsSinceEpoch,
-          error: state.error,
+          error: propagatedError,
         ),
       );
     });
@@ -80,7 +91,9 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
         durationMs: duration.inMilliseconds,
       );
     } catch (e, st) {
-      debugPrint('[RustAudioEngine] crossfadeToAudioFile failed for "$path": $e\n$st');
+      debugPrint(
+        '[RustAudioEngine] crossfadeToAudioFile failed for "$path": $e\n$st',
+      );
       rethrow;
     }
   }
@@ -201,12 +214,11 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
     required String path,
     required int expectedChunks,
     int sampleStride = 0,
-  }) =>
-      loadWaveformFromRust(
-        path: path,
-        expectedChunks: expectedChunks,
-        sampleStride: sampleStride,
-      );
+  }) => loadWaveformFromRust(
+    path: path,
+    expectedChunks: expectedChunks,
+    sampleStride: sampleStride,
+  );
 
   @override
   Future<Float32List> getAudioPcm({String? path, int sampleStride = 0}) =>
@@ -273,7 +285,10 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   @override
   Future<bool> registerPersistentAccess(String path) async {
     if (_isApple) {
-      final success = await _amberInvokeMethod<bool>('registerPersistentAccess', {'path': path});
+      final success = await _amberInvokeMethod<bool>(
+        'registerPersistentAccess',
+        {'path': path},
+      );
       return success ?? false;
     }
     return false;
@@ -289,7 +304,9 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   @override
   Future<bool> hasPersistentAccess(String path) async {
     if (_isApple) {
-      final success = await _amberInvokeMethod<bool>('hasPersistentAccess', {'path': path});
+      final success = await _amberInvokeMethod<bool>('hasPersistentAccess', {
+        'path': path,
+      });
       return success ?? false;
     }
     return false;
@@ -298,7 +315,9 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   @override
   Future<List<String>> listPersistentAccessPaths() async {
     if (_isApple) {
-      final paths = await _appleChannel.invokeListMethod<String>('listPersistentAccessPaths');
+      final paths = await _appleChannel.invokeListMethod<String>(
+        'listPersistentAccessPaths',
+      );
       return paths ?? const <String>[];
     }
     return const <String>[];
@@ -307,7 +326,9 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   @override
   Future<bool> beginScopedAccess(String path) async {
     if (_isApple) {
-      final success = await _amberInvokeMethod<bool>('beginScopedAccess', {'path': path});
+      final success = await _amberInvokeMethod<bool>('beginScopedAccess', {
+        'path': path,
+      });
       return success ?? false;
     }
     return true;
