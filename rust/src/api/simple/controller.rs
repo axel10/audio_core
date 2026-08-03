@@ -400,12 +400,16 @@ impl PlayerController {
             .default_output_device()
             .ok_or_else(|| "no default audio output device available".to_string())?;
         let device_name = describe_output_device(&device);
-        let preferred = DeviceSinkBuilder::from_device(device.clone())
+        let mut preferred = DeviceSinkBuilder::from_device(device.clone())
             .map_err(|e| format!("prepare preferred audio device failed: {e}"))?
             .with_sample_rate(
                 std::num::NonZeroU32::new(PLAYBACK_SAMPLE_RATE)
                     .expect("playback sample rate must be non-zero"),
             );
+        #[cfg(target_os = "linux")]
+        {
+            preferred = preferred.with_buffer_size(rodio::cpal::BufferSize::Fixed(1024));
+        }
         let sink = match preferred
             .with_error_callback(report_audio_stream_error)
             .open_stream()
