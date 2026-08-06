@@ -72,6 +72,9 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   @override
   Future<void> load(String path) async {
     try {
+      if (_isApple && path.isNotEmpty) {
+        await beginScopedAccess(path);
+      }
       await rust.loadAudioFile(path: path);
     } catch (e, st) {
       debugPrint('[RustAudioEngine] loadAudioFile failed for "$path": $e\n$st');
@@ -86,6 +89,9 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
     Duration? position,
   }) async {
     try {
+      if (_isApple && path.isNotEmpty) {
+        await beginScopedAccess(path);
+      }
       await rust.crossfadeToAudioFile(
         path: path,
         durationMs: duration.inMilliseconds,
@@ -107,6 +113,9 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
     double? targetVolume,
   }) async {
     try {
+      if (_isApple && path.isNotEmpty) {
+        await beginScopedAccess(path);
+      }
       final resolvedTargetVolume = (targetVolume ?? _currentVolume)
           .clamp(0.0, 1.0)
           .toDouble();
@@ -221,12 +230,23 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   );
 
   @override
-  Future<Float32List> getAudioPcm({String? path, int sampleStride = 0}) =>
-      rust.getAudioPcm(path: path, sampleStride: BigInt.from(sampleStride));
+  Future<Float32List> getAudioPcm({String? path, int sampleStride = 0}) async {
+    if (_isApple && path != null && path.isNotEmpty) {
+      await beginScopedAccess(path);
+    }
+    return rust.getAudioPcm(
+      path: path,
+      sampleStride: BigInt.from(sampleStride),
+    );
+  }
 
   @override
-  Future<int> getAudioPcmChannelCount({String? path}) =>
-      rust.getAudioPcmChannelCount(path: path);
+  Future<int> getAudioPcmChannelCount({String? path}) async {
+    if (_isApple && path != null && path.isNotEmpty) {
+      await beginScopedAccess(path);
+    }
+    return rust.getAudioPcmChannelCount(path: path);
+  }
 
   @override
   Future<void> setEqualizerConfig(EqualizerConfig config) =>

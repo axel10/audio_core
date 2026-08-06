@@ -482,6 +482,13 @@ class AudioCoreController extends ChangeNotifier
     }
     if (!isInitialized) return;
 
+    if (Platform.isIOS || Platform.isMacOS) {
+      for (final path in paths) {
+        await registerPersistentAccess(path: path);
+        await beginScopedAccess(path: path);
+      }
+    }
+
     final resolvedTracks = resolveAudioTracks(paths);
     if (resolvedTracks.isEmpty) return;
 
