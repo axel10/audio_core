@@ -88,6 +88,7 @@ class AudioCoreController extends ChangeNotifier
       parent: this,
     );
     visualizer.addListener(_handleVisualizerChanges);
+    player.addListener(_syncTicks);
 
     equalizer = EqualizerController(parent: this);
   }
@@ -119,6 +120,8 @@ class AudioCoreController extends ChangeNotifier
   String? _stopAfterCurrentTrackPath;
   Timer? _analysisTick;
   Timer? _renderTick;
+  Timer? _positionTick;
+  static const Duration _positionTickInterval = Duration(milliseconds: 250);
   StreamSubscription<AudioStatus>? _playbackStateSubscription;
 
   bool get isSupported =>
@@ -318,8 +321,10 @@ class AudioCoreController extends ChangeNotifier
   @override
   void dispose() {
     visualizer.removeListener(_handleVisualizerChanges);
+    player.removeListener(_syncTicks);
     _analysisTick?.cancel();
     _renderTick?.cancel();
+    _positionTick?.cancel();
     _playbackStateSubscription?.cancel();
     unawaited(_engine.dispose());
     visualizer.dispose();
@@ -735,9 +740,39 @@ class AudioCoreController extends ChangeNotifier
     }
   }
 
+  void _syncTicks() {
+    if (player.isPlaying) {
+      if (visualizer.enabled) {
+        _stopPositionTick();
+        _startVisualizerTicks();
+      } else {
+        _stopVisualizerTicks();
+        _startPositionTick();
+      }
+    } else {
+      _stopPositionTick();
+      if (!visualizer.enabled) {
+        _stopVisualizerTicks();
+      }
+    }
+  }
+
+  void _startPositionTick() {
+    if (_positionTick != null) return;
+    _positionTick = Timer.periodic(_positionTickInterval, (_) {
+      _advanceLocalPosition(_positionTickInterval);
+    });
+  }
+
+  void _stopPositionTick() {
+    _positionTick?.cancel();
+    _positionTick = null;
+  }
+
   void _startVisualizerTicks() {
     if (!visualizer.enabled) return;
     if (_analysisTick != null || _renderTick != null) return;
+    _stopPositionTick();
     _analysisTick = Timer.periodic(
       _analysisInterval,
       (_) => unawaited(_onAnalysisTick()),
@@ -754,19 +789,13 @@ class AudioCoreController extends ChangeNotifier
 
   void _handleVisualizerChanges() {
     unawaited(_engine.setFftCaptureEnabled(visualizer.enabled));
-    if (visualizer.enabled) {
-      if (player.isPlaying) {
-        _startVisualizerTicks();
-      }
-    } else {
-      _stopVisualizerTicks();
-    }
+    _syncTicks();
   }
 
   DateTime? _lastLocalAdvanceTime;
   DateTime? _lastEngineSyncTime;
 
-  void _advanceLocalPosition() {
+  void _advanceLocalPosition([Duration? fallbackInterval]) {
     if (!player.isPlaying || player.currentPath == null) {
       _lastLocalAdvanceTime = null;
       return;
@@ -782,7 +811,7 @@ class AudioCoreController extends ChangeNotifier
       final elapsed = now.difference(last);
       player.updatePosition(player.position + elapsed);
     } else {
-      player.updatePosition(player.position + _renderInterval);
+      player.updatePosition(player.position + (fallbackInterval ?? _renderInterval));
     }
 
     // Periodically re-sync with native engine to prevent drift
