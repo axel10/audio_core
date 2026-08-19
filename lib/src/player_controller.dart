@@ -189,6 +189,7 @@ class PlayerController extends ChangeNotifier {
       debugPrint('[PlayerController] pause ignored: Audio session is transitioning');
       return;
     }
+    debugPrint('[PlayerController] pause() called (withFade: $withFade, current isPlaying: $_isPlaying, state: $_playerState)');
     try {
       _lastPlayCommandTime = DateTime.fromMillisecondsSinceEpoch(0);
       final fadeDuration = _pauseResumeFadeDuration(
@@ -199,6 +200,7 @@ class PlayerController extends ChangeNotifier {
       _lastCommandTime = DateTime.now();
       _isPlaying = false;
       _playerState = PlayerState.paused;
+      debugPrint('[PlayerController] pause() completed: set isPlaying=false, state=paused');
     } catch (e) {
       debugPrint('[PlayerController] pause failed: $e');
       setError('Pause failed: $e');
@@ -216,6 +218,7 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     if (_selectedPath == null) return;
+    debugPrint('[PlayerController] play() called (path: $_selectedPath, state: $_playerState)');
 
     if (_playerState == PlayerState.completed) {
       final handled = await _parent.handlePlayRequested();
@@ -235,16 +238,12 @@ class PlayerController extends ChangeNotifier {
         wasReady: wasReady,
         fadeSetting: fadeSetting,
       );
-      // debugPrint(
-      //   '[PlayerController] play withFade=$withFade wasPaused=$wasPaused '
-      //   'wasReady=$wasReady fadeDurationMs=${fadeDuration?.inMilliseconds ?? 0} '
-      //   'current=$_selectedPath',
-      // );
       await _parent.engine.play(fadeDuration: fadeDuration);
       _lastCommandTime = DateTime.now();
       _lastPlayCommandTime = _lastCommandTime;
       _isPlaying = true;
       _playerState = PlayerState.playing;
+      debugPrint('[PlayerController] play() completed: set isPlaying=true, state=playing');
     } catch (e) {
       debugPrint('[PlayerController] play failed for path=$_selectedPath: $e');
       setError('Play failed: $e');

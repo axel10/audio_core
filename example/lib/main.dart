@@ -12,15 +12,10 @@ import 'mesh_demo_tab.dart';
 import 'widgets.dart';
 import 'random_lab_tab.dart';
 import 'transcode_tab.dart';
-import 'audio_handler.dart';
 import 'media_session_adapter.dart';
 import 'android_media_library_picker.dart';
 import 'apple_directory_tab.dart';
-import 'package:audio_service/audio_service.dart';
-import 'package:audio_session/audio_session.dart';
 import 'package:flutter_media_session/flutter_media_session.dart';
-
-AudioCoreHandler? audioHandler;
 
 const List<String> _audioFileExtensions = <String>[
   'aac',
@@ -47,10 +42,6 @@ void main() {
     () async {
       // 确保 Flutter 绑定已初始化
       WidgetsFlutterBinding.ensureInitialized();
-      
-      // Configure AudioSession to support background playback
-      final session = await AudioSession.instance;
-      await session.configure(const AudioSessionConfiguration.music());
 
       await AppLog.ensureInitialized();
       AppLog.install();
@@ -78,21 +69,9 @@ void main() {
         ),
       );
 
-      if (Platform.isIOS) {
-        final mediaSession = FlutterMediaSession();
-        await mediaSession.activate();
-        mediaSession.bind(AudioCoreMediaSessionAdapter(controller));
-      } else {
-        audioHandler = await AudioService.init(
-          builder: () => AudioCoreHandler(controller),
-          config: const AudioServiceConfig(
-            androidNotificationChannelId:
-                'com.flutter_rust_bridge.audio_core.channel.audio',
-            androidNotificationChannelName: 'Audio Playback',
-            androidNotificationOngoing: true,
-          ),
-        );
-      }
+      final mediaSession = FlutterMediaSession();
+      await mediaSession.activate();
+      mediaSession.bind(AudioCoreMediaSessionAdapter(controller));
 
       runApp(MyApp(controller: controller));
     },
@@ -620,14 +599,16 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
     return Card(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(
+        child: Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             ElevatedButton.icon(
               onPressed: _handleGetAudioDetails,
               icon: const Icon(Icons.info),
               label: Text(_showCurrentPlayingDetails ? 'Get Current Playing Details' : 'Select File Details'),
             ),
-            const SizedBox(width: 12),
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [

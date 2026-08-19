@@ -69,10 +69,19 @@ class AudioCoreMediaSessionAdapter implements MediaSessionAdapter {
     final state = player.currentState;
     final trackId = track?.id ?? player.currentPath;
 
-    // Check if meaningful state or track changed to avoid redundant spam during 60fps rendering
-    if (_lastIsPlaying != isPlaying ||
+    final changed = _lastIsPlaying != isPlaying ||
         _lastPlayerState != state ||
-        _lastTrackId != trackId) {
+        _lastTrackId != trackId;
+
+    debugPrint(
+      '[AudioCoreMediaSessionAdapter] _onPlayerOrPlaylistChanged: '
+      'isPlaying=$isPlaying (was $_lastIsPlaying), '
+      'state=$state (was $_lastPlayerState), '
+      'trackId=$trackId (was $_lastTrackId) -> changed=$changed',
+    );
+
+    // Check if meaningful state or track changed to avoid redundant spam during 60fps rendering
+    if (changed) {
       _lastIsPlaying = isPlaying;
       _lastPlayerState = state;
       _lastTrackId = trackId;
@@ -82,7 +91,10 @@ class AudioCoreMediaSessionAdapter implements MediaSessionAdapter {
 
   /// Synchronizes both metadata and playback state to the system controls.
   void sync() {
-    if (_session == null) return;
+    if (_session == null) {
+      debugPrint('[AudioCoreMediaSessionAdapter] sync skipped: _session is null');
+      return;
+    }
 
     final track = controller.playlist.currentTrack;
     final player = controller.player;
@@ -106,6 +118,7 @@ class AudioCoreMediaSessionAdapter implements MediaSessionAdapter {
         ?.toString();
 
     // 1. Update metadata
+    debugPrint('[AudioCoreMediaSessionAdapter] updateMetadata: title=$title, artist=$artist, duration=${duration.inMilliseconds}ms');
     FlutterMediaSessionPlatform.instance.updateMetadata(
       MediaMetadata(
         title: title,
@@ -161,6 +174,10 @@ class AudioCoreMediaSessionAdapter implements MediaSessionAdapter {
     }
 
     // 3. Update playback state
+    debugPrint(
+      '[AudioCoreMediaSessionAdapter] updatePlaybackState: '
+      'status=$status, pos=${player.position.inMilliseconds}ms, speed=${player.playbackSpeed}',
+    );
     FlutterMediaSessionPlatform.instance.updatePlaybackState(
       PlaybackState(
         status: status,
@@ -198,6 +215,7 @@ class AudioCoreMediaSessionAdapter implements MediaSessionAdapter {
   }
 
   void _handleMediaAction(MediaAction action) async {
+    debugPrint('[AudioCoreMediaSessionAdapter] _handleMediaAction received: ${action.name} (seekPosition: ${action.seekPosition})');
     try {
       switch (action.name) {
         case 'play':
@@ -206,6 +224,10 @@ class AudioCoreMediaSessionAdapter implements MediaSessionAdapter {
           break;
         case 'pause':
           await controller.player.pause();
+          sync();
+          break;
+        case 'togglePlayPause':
+          await controller.player.togglePlayPause();
           sync();
           break;
         case 'stop':

@@ -593,6 +593,9 @@ impl PlayerController {
         );
         player.append(notifying_source);
         if auto_play {
+            if let Some(sink) = self.sink.as_ref() {
+                sink.play();
+            }
             player.play();
         } else {
             player.pause();
@@ -700,6 +703,9 @@ impl PlayerController {
     }
 
     fn play_all(&self) {
+        if let Some(sink) = self.sink.as_ref() {
+            sink.play();
+        }
         if let Some(current) = self.current_deck.as_ref() {
             current.player.play();
         }
@@ -714,6 +720,9 @@ impl PlayerController {
         }
         if let Some(incoming) = self.incoming_deck.as_ref() {
             incoming.player.pause();
+        }
+        if let Some(sink) = self.sink.as_ref() {
+            sink.pause();
         }
     }
 
