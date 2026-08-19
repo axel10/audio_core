@@ -10,6 +10,7 @@ import audio_service
 import audio_session
 import desktop_drop
 import file_picker
+import flutter_media_session
 import shared_preferences_foundation
 import sqflite_darwin
 
@@ -19,6 +20,7 @@ func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
   AudioSessionPlugin.register(with: registry.registrar(forPlugin: "AudioSessionPlugin"))
   DesktopDropPlugin.register(with: registry.registrar(forPlugin: "DesktopDropPlugin"))
   FilePickerPlugin.register(with: registry.registrar(forPlugin: "FilePickerPlugin"))
+  FlutterMediaSessionPlugin.register(with: registry.registrar(forPlugin: "FlutterMediaSessionPlugin"))
   SharedPreferencesPlugin.register(with: registry.registrar(forPlugin: "SharedPreferencesPlugin"))
   SqflitePlugin.register(with: registry.registrar(forPlugin: "SqflitePlugin"))
 }

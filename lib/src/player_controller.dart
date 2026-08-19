@@ -169,7 +169,7 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> togglePlayPause({FadeSettings? fadeSetting}) async {
     if (_isAudioSessionTransitioning) {
-      // debugPrint('[PlayerController] togglePlayPause ignored: Audio session is transitioning');
+      debugPrint('[PlayerController] togglePlayPause ignored: Audio session is transitioning');
       return;
     }
     if (_selectedPath == null) return;
@@ -186,7 +186,7 @@ class PlayerController extends ChangeNotifier {
     bool bypassGuard = false,
   }) async {
     if (!bypassGuard && _isAudioSessionTransitioning) {
-      // debugPrint('[PlayerController] pause ignored: Audio session is transitioning');
+      debugPrint('[PlayerController] pause ignored: Audio session is transitioning');
       return;
     }
     try {
@@ -212,7 +212,7 @@ class PlayerController extends ChangeNotifier {
     bool bypassGuard = false,
   }) async {
     if (!bypassGuard && _isAudioSessionTransitioning) {
-      // debugPrint('[PlayerController] play ignored: Audio session is transitioning');
+      debugPrint('[PlayerController] play ignored: Audio session is transitioning');
       return;
     }
     if (_selectedPath == null) return;

@@ -13,12 +13,14 @@ import 'widgets.dart';
 import 'random_lab_tab.dart';
 import 'transcode_tab.dart';
 import 'audio_handler.dart';
+import 'media_session_adapter.dart';
 import 'android_media_library_picker.dart';
 import 'apple_directory_tab.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
+import 'package:flutter_media_session/flutter_media_session.dart';
 
-late AudioCoreHandler audioHandler;
+AudioCoreHandler? audioHandler;
 
 const List<String> _audioFileExtensions = <String>[
   'aac',
@@ -76,15 +78,21 @@ void main() {
         ),
       );
 
-      audioHandler = await AudioService.init(
-        builder: () => AudioCoreHandler(controller),
-        config: const AudioServiceConfig(
-          androidNotificationChannelId:
-              'com.flutter_rust_bridge.audio_core.channel.audio',
-          androidNotificationChannelName: 'Audio Playback',
-          androidNotificationOngoing: true,
-        ),
-      );
+      if (Platform.isIOS) {
+        final mediaSession = FlutterMediaSession();
+        await mediaSession.activate();
+        mediaSession.bind(AudioCoreMediaSessionAdapter(controller));
+      } else {
+        audioHandler = await AudioService.init(
+          builder: () => AudioCoreHandler(controller),
+          config: const AudioServiceConfig(
+            androidNotificationChannelId:
+                'com.flutter_rust_bridge.audio_core.channel.audio',
+            androidNotificationChannelName: 'Audio Playback',
+            androidNotificationOngoing: true,
+          ),
+        );
+      }
 
       runApp(MyApp(controller: controller));
     },
