@@ -293,6 +293,7 @@ class AudioCoreController extends ChangeNotifier
           if (shouldStopAfterCurrentTrack) {
             _stopAfterCurrentTrackPath = null;
             _lastEndedAutoAdvancePath = endedPath;
+            unawaited(_engine.pause());
             return;
           }
           if (endedPath == null || endedPath != _lastEndedAutoAdvancePath) {
@@ -854,11 +855,14 @@ class AudioCoreController extends ChangeNotifier
       return;
     }
 
-    if (playlist.mode == PlaylistMode.single) return;
+    if (playlist.mode == PlaylistMode.single) {
+      await _engine.pause();
+      return;
+    }
 
     final success = await playlist.playNext(reason: PlaybackReason.autoNext);
     if (!success) {
-      // End of queue logic could go here
+      await _engine.pause();
     }
   }
 
