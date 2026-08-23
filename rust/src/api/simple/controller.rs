@@ -873,7 +873,6 @@ impl PlayerController {
         self.cached_channels = 0;
         self.cached_sample_rate = 0;
         self.pending_edit = None;
-        self.equalizer = EqualizerShared::new(EqualizerConfig::default());
         self.last_decode_engine = None;
     }
 
