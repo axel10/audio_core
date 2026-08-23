@@ -104,6 +104,14 @@ class EqualizerController extends ChangeNotifier {
     await setConfig(_copyConfig(bandGainsDb: gains));
   }
 
+  Future<void> setBandGains(List<double> gainList) async {
+    final gains = Float32List.fromList(_config.bandGainsDb.toList());
+    for (int i = 0; i < gainList.length && i < maxEqualizerBands; i++) {
+      gains[i] = gainList[i];
+    }
+    await setConfig(_copyConfig(bandGainsDb: gains));
+  }
+
   Future<void> setPreamp(double preampDb) async =>
       setConfig(_copyConfig(preampDb: preampDb));
 

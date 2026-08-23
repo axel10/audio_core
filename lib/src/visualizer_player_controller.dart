@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/widgets.dart';
 import 'package:flutter_taglib/flutter_taglib.dart' as taglib;
 import 'package:flutter/services.dart';
 
@@ -1099,6 +1098,8 @@ class AudioCoreController extends ChangeNotifier
       equalizer.setBandCount(bandCount);
   Future<void> setEqualizerBandGain(int bandIndex, double gainDb) async =>
       equalizer.setBandGain(bandIndex, gainDb);
+  Future<void> setEqualizerBandGains(List<double> gains) async =>
+      equalizer.setBandGains(gains);
   Future<void> setEqualizerPreamp(double preampDb) async =>
       equalizer.setPreamp(preampDb);
   Future<void> setBassBoost(double gainDb) async =>

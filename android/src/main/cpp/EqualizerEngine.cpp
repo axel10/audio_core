@@ -155,6 +155,18 @@ void EqualizerEngine::init(int numBands, float sampleRate, int channels) {
 
     float defaultFrequencies[] = {31.25, 62.5, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0};
     
+    float qVal = 1.414f;
+    if (numBands > 1) {
+        float minFreq = 31.25f;
+        float maxFreq = 16000.0f;
+        float totalOctaves = std::log2(maxFreq / minFreq);
+        float bwOct = totalOctaves / (float)(numBands - 1);
+        float twoPowBw = std::pow(2.0f, bwOct);
+        qVal = std::sqrt(twoPowBw) / (twoPowBw - 1.0f);
+        if (qVal < 0.6f) qVal = 0.6f;
+        if (qVal > 5.0f) qVal = 5.0f;
+    }
+    
     for (int i = 0; i < numBands; ++i) {
         float freq;
         if (numBands == 10) {
@@ -170,11 +182,11 @@ void EqualizerEngine::init(int numBands, float sampleRate, int channels) {
         band.currentFrequency = freq;
         band.targetGainDb.store(0.0f, std::memory_order_relaxed);
         band.currentGainDb = 0.0f;
-        band.targetQ.store(1.41f, std::memory_order_relaxed);
-        band.currentQ = 1.41f;
+        band.targetQ.store(qVal, std::memory_order_relaxed);
+        band.currentQ = qVal;
         
         band.filter.prepare(channels);
-        band.filter.setPeaking(freq, mSampleRate, 0.0f, 1.41f);
+        band.filter.setPeaking(freq, mSampleRate, 0.0f, qVal);
         mBands.push_back(band);
     }
 }

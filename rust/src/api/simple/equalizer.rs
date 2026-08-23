@@ -294,10 +294,11 @@ impl EqualizerChain {
             );
 
             // EQ Bands
+            let q_factor = band_q_factor(band_count);
             for i in 0..band_count {
                 node = Box::new(
                     An(Unit::<U1, U1>::new(node))
-                        >> (pass() | var(&self.band_freqs[i]) | dc(1.0) | var(&self.band_gains[i]))
+                        >> (pass() | var(&self.band_freqs[i]) | dc(q_factor) | var(&self.band_gains[i]))
                         >> bell::<f32>(),
                 );
             }
@@ -455,3 +456,17 @@ fn band_center_frequency(index: usize, band_count: usize) -> f32 {
     let t = index as f32 / (band_count.saturating_sub(1) as f32);
     min_hz * ratio.powf(t)
 }
+
+fn band_q_factor(band_count: usize) -> f32 {
+    if band_count <= 1 {
+        return 1.414;
+    }
+
+    let total_octaves = (MAX_EQ_CENTER_HZ / MIN_EQ_CENTER_HZ).log2();
+    let bw_oct = total_octaves / (band_count.saturating_sub(1) as f32);
+
+    let two_pow_bw = 2.0_f32.powf(bw_oct);
+    let q = two_pow_bw.sqrt() / (two_pow_bw - 1.0);
+    q.clamp(0.6, 5.0)
+}
+
