@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../fft_processor.dart';
@@ -228,6 +227,22 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
     expectedChunks: expectedChunks,
     sampleStride: sampleStride,
   );
+
+  @override
+  Stream<List<double>> streamWaveform({
+    required String path,
+    required int expectedChunks,
+    int sampleStride = 0,
+  }) async* {
+    final waveform = await getWaveform(
+      path: path,
+      expectedChunks: expectedChunks,
+      sampleStride: sampleStride,
+    );
+    if (waveform.isNotEmpty) {
+      yield waveform;
+    }
+  }
 
   @override
   Future<Float32List> getAudioPcm({String? path, int sampleStride = 0}) async {

@@ -129,7 +129,8 @@ class PlayerController extends ChangeNotifier {
       // debugPrint(
       //   '[PlayerController] load path=$path nativeVolume=${nativeVolume ?? _volume}',
       // );
-      await _parent.engine.load(path);
+      final resolvedPath = await _parent.resolvePlayableUri(path);
+      await _parent.engine.load(resolvedPath);
       if (nativeVolume != null || _volume != 1.0) {
         await applyNativeVolume(nativeVolume ?? _volume);
       }
@@ -506,8 +507,10 @@ class SequentialFadeTransition extends PlaybackTransition {
       'initialIsPlaying=${player.isPlaying} currentVolume=${player.volume}',
     );
 
+    final resolvedUri = await player._parent.resolvePlayableUri(uri);
+
     await player._parent.engine.transition(
-      uri,
+      resolvedUri,
       duration,
       position: position,
       autoPlay: autoPlay,
@@ -559,7 +562,8 @@ class NativeCrossfadeTransition extends PlaybackTransition {
       '[NativeCrossfadeTransition] start uri=$uri autoPlay=$autoPlay '
       'positionMs=${position?.inMilliseconds} durationMs=${duration.inMilliseconds}',
     );
-    await player._parent.engine.crossfade(uri, duration, position: position);
+    final resolvedUri = await player._parent.resolvePlayableUri(uri);
+    await player._parent.engine.crossfade(resolvedUri, duration, position: position);
 
     // We update local state immediately
     player._selectedPath = uri;

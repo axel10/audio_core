@@ -23,7 +23,9 @@ import 'android_media_library.dart';
 import 'track_artwork.dart';
 import 'track_metadata.dart';
 import 'track_metadata_update.dart';
+import 'audio_uri_resolver.dart';
 
+export 'audio_uri_resolver.dart';
 export 'player_controller.dart';
 export 'playlist_controller.dart';
 export 'random_playback_models.dart';
@@ -360,6 +362,78 @@ class AudioCoreController extends ChangeNotifier
     }
   }
 
+  AudioUriResolver? _uriResolver;
+
+  /// Registers a custom URI resolver callback for resolving custom schemes
+  /// (e.g. `subsonic://...`, `webdav://...`) into playable local file paths or HTTP URLs.
+  void setUriResolver(AudioUriResolver? resolver) {
+    _uriResolver = resolver;
+  }
+
+  /// Resolves an arbitrary track URI through registered [AudioUriResolver]
+  /// and downloads remote HTTP streams into local cache if required by the audio engine.
+  @override
+  Future<String> resolvePlayableUri(String rawUri) async {
+    String uri = rawUri;
+    if (_uriResolver != null) {
+      try {
+        uri = await _uriResolver!(rawUri);
+      } catch (e) {
+        debugPrint('[AudioCoreController] Custom URI resolver failed for "$rawUri": $e');
+      }
+    }
+
+    if ((uri.startsWith('http://') || uri.startsWith('https://')) && !Platform.isAndroid) {
+      try {
+        uri = await _downloadHttpTrackToCache(uri);
+      } catch (e) {
+        debugPrint('[AudioCoreController] Failed to download HTTP track to cache: $e');
+      }
+    }
+
+    return uri;
+  }
+
+  Future<String> _downloadHttpTrackToCache(String url) async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+    final cacheDir = Directory('${Directory.systemTemp.path}/audio_core_http_cache');
+    if (!await cacheDir.exists()) {
+      await cacheDir.create(recursive: true);
+    }
+    final hash = url.hashCode.toRadixString(16);
+    final cachedFile = File('${cacheDir.path}/$hash.cache');
+    if (await cachedFile.exists() && await cachedFile.length() > 0) {
+      return cachedFile.path;
+    }
+
+    final tmpFile = File('${cachedFile.path}.tmp');
+    if (await tmpFile.exists()) {
+      try {
+        await tmpFile.delete();
+      } catch (_) {}
+    }
+
+    try {
+      final request = await client.getUrl(Uri.parse(url));
+      final response = await request.close();
+      if (response.statusCode >= 200 && response.statusCode < 400) {
+        final sink = tmpFile.openWrite();
+        await response.pipe(sink);
+        if (await tmpFile.exists() && await tmpFile.length() > 0) {
+          if (await cachedFile.exists()) await cachedFile.delete();
+          await tmpFile.rename(cachedFile.path);
+          return cachedFile.path;
+        }
+      }
+    } catch (e) {
+      debugPrint('[AudioCoreController] _downloadHttpTrackToCache error for $url: $e');
+      try {
+        if (await tmpFile.exists()) await tmpFile.delete();
+      } catch (_) {}
+    }
+    return url;
+  }
+
   @override
   Future<void> loadTrack({
     required bool autoPlay,
@@ -373,12 +447,6 @@ class AudioCoreController extends ChangeNotifier
         track.uri != _stopAfterCurrentTrackPath) {
       _stopAfterCurrentTrackPath = null;
     }
-
-    // debugPrint(
-    //   '[AudioCoreController] loadTrack track=${track.id} uri=${track.uri} '
-    //   'autoPlay=$autoPlay reason=$reason positionMs=${position?.inMilliseconds} '
-    //   'fadeSetting=${fadeSetting ?? _initialFadeSettings}',
-    // );
 
     await player.performTransition(
       uri: track.uri,
@@ -569,11 +637,29 @@ class AudioCoreController extends ChangeNotifier
   /// The returned tracks are validated and normalized, but they are not
   /// de-duplicated against the current queue. Callers can use them for
   /// library import or any other side effects.
+  /// Converts local file paths or remote URIs into normalized [AudioTrack] objects.
+  ///
+  /// The returned tracks are validated and normalized, but they are not
+  /// de-duplicated against the current queue. Callers can use them for
+  /// library import or any other side effects.
   List<AudioTrack> resolveAudioTracks(List<String> paths) {
     final tracks = <AudioTrack>[];
     final seenKeys = <String>{};
 
     for (final rawPath in paths) {
+      if (rawPath.contains('://')) {
+        if (!seenKeys.add(rawPath)) continue;
+        tracks.add(
+          AudioTrack(
+            id: rawPath,
+            title: _trackTitleFromPath(rawPath),
+            uri: rawPath,
+            metadata: <String, Object?>{'isLike': false, 'playCount': 0},
+          ),
+        );
+        continue;
+      }
+
       final normalizedPath = _normalizeLocalPath(rawPath);
       if (normalizedPath == null) continue;
       final key = _normalizeLocalPathKey(normalizedPath);
@@ -652,19 +738,30 @@ class AudioCoreController extends ChangeNotifier
 
   String? _normalizeLocalPath(String path) {
     final trimmed = path.trim();
-    if (trimmed.isEmpty || trimmed.contains('://')) {
+    if (trimmed.isEmpty) {
       return null;
+    }
+    if (trimmed.contains('://')) {
+      return trimmed;
     }
     return File(trimmed).absolute.path;
   }
 
   String? _normalizeLocalPathKey(String path) {
+    if (path.contains('://')) return path.trim();
     final normalized = _normalizeLocalPath(path);
     if (normalized == null) return null;
     return Platform.isWindows ? normalized.toLowerCase() : normalized;
   }
 
   String _trackTitleFromPath(String path) {
+    if (path.contains('://')) {
+      final uri = Uri.tryParse(path);
+      if (uri != null && uri.pathSegments.isNotEmpty) {
+        return uri.pathSegments.last;
+      }
+      return path;
+    }
     final uri = File(path).uri;
     if (uri.pathSegments.isNotEmpty) {
       return uri.pathSegments.last;
@@ -890,10 +987,11 @@ class AudioCoreController extends ChangeNotifier
     bool normalize = true,
     String? filePath,
   }) async {
-    final targetPath = filePath ?? player.currentPath;
-    if (targetPath == null) return const [];
+    final rawPath = filePath ?? player.currentPath;
+    if (rawPath == null) return const [];
+    final targetPath = await resolvePlayableUri(rawPath);
     debugPrint(
-      '[AudioCore][Waveform] request path=$targetPath expectedChunks=$expectedChunks sampleStride=$sampleStride normalize=$normalize',
+      '[AudioCore][Waveform] request rawPath=$rawPath resolved=$targetPath expectedChunks=$expectedChunks sampleStride=$sampleStride normalize=$normalize',
     );
     try {
       final finalData = await _engine.getWaveform(
@@ -906,6 +1004,31 @@ class AudioCoreController extends ChangeNotifier
     } catch (e) {
       debugPrint('[AudioCore][Waveform] failed: $e');
       return const [];
+    }
+  }
+
+  Stream<List<double>> streamWaveform({
+    required int expectedChunks,
+    int sampleStride = 0,
+    bool normalize = true,
+    String? filePath,
+  }) async* {
+    final rawPath = filePath ?? player.currentPath;
+    if (rawPath == null) return;
+    final targetPath = await resolvePlayableUri(rawPath);
+    debugPrint(
+      '[AudioCore][Waveform] stream request rawPath=$rawPath resolved=$targetPath expectedChunks=$expectedChunks',
+    );
+    try {
+      await for (final chunk in _engine.streamWaveform(
+        path: targetPath,
+        expectedChunks: expectedChunks,
+        sampleStride: sampleStride,
+      )) {
+        yield normalize ? _normalizeWaveform(chunk) : chunk;
+      }
+    } catch (e) {
+      debugPrint('[AudioCore][Waveform] stream error: $e');
     }
   }
 

@@ -329,6 +329,22 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
+  Stream<List<double>> streamWaveform({
+    required String path,
+    required int expectedChunks,
+    int sampleStride = 0,
+  }) async* {
+    final waveform = await getWaveform(
+      path: path,
+      expectedChunks: expectedChunks,
+      sampleStride: sampleStride,
+    );
+    if (waveform.isNotEmpty) {
+      yield waveform;
+    }
+  }
+
+  @override
   Future<void> setEqualizerConfig(EqualizerConfig config) async {
     final previous = _lastConfig;
     await _applyConfigToPlayer(

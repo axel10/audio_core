@@ -25,6 +25,9 @@ abstract class AudioVisualizerParent {
     FadeSettings? fadeSetting,
   });
 
+  /// Resolves an arbitrary track URI (remote or custom scheme) into a playable path.
+  Future<String> resolvePlayableUri(String rawUri);
+
   /// Called when playback should be cleared.
   Future<void> clearPlayback();
 

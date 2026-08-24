@@ -82,6 +82,21 @@ abstract class AudioEngine {
     int sampleStride = 0,
   });
 
+  Stream<List<double>> streamWaveform({
+    required String path,
+    required int expectedChunks,
+    int sampleStride = 0,
+  }) async* {
+    final waveform = await getWaveform(
+      path: path,
+      expectedChunks: expectedChunks,
+      sampleStride: sampleStride,
+    );
+    if (waveform.isNotEmpty) {
+      yield waveform;
+    }
+  }
+
   // Effects
   Future<void> setEqualizerConfig(EqualizerConfig config);
   Future<EqualizerConfig> getEqualizerConfig();

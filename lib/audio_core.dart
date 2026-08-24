@@ -7,6 +7,7 @@ export 'src/rust/api/simple_api.dart'
 export 'src/rust/frb_generated.dart' show RustLib;
 
 export 'src/visualizer_player_controller.dart';
+export 'src/audio_uri_resolver.dart';
 export 'src/fft_frame.dart';
 export 'src/fft_processor.dart';
 export 'src/rust/api/simple/equalizer.dart';

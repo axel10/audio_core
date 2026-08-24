@@ -1719,11 +1719,11 @@ pub fn seek_audio_ms(position_ms: i64) -> Result<(), String> {
         position_ms, target_ms, empty, was_playing
     );
 
-    if target < current.source_start_offset {
+    if !was_playing || target < current.source_start_offset {
         let path = current.loaded_path.clone();
         eprintln!(
-            "[RustSeekLog] target is before source_start_offset, falling back to replace_current_from_path path={} was_playing={}",
-            path, was_playing
+            "[RustSeekLog] not playing ({}) or target before source_start_offset, falling back to replace_current_from_path path={} was_playing={}",
+            !was_playing, path, was_playing
         );
         return c.replace_current_from_path(&path, target, was_playing);
     }
