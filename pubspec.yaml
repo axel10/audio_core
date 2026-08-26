@@ -18,6 +18,7 @@ dependencies:
     git:
       url: https://github.com/axel10/flutter_taglib
       ref: master
+  crypto: ^3.0.6
   meta: ^1.17.0
   path: ^1.9.0
   path_provider: ^2.1.5

@@ -24,8 +24,12 @@ import 'track_artwork.dart';
 import 'track_metadata.dart';
 import 'track_metadata_update.dart';
 import 'audio_uri_resolver.dart';
+import 'cache/audio_stream_cache_manager.dart';
+import 'cache/audio_stream_cache_proxy.dart';
 
 export 'audio_uri_resolver.dart';
+export 'cache/audio_stream_cache_manager.dart';
+export 'cache/audio_stream_cache_proxy.dart';
 export 'player_controller.dart';
 export 'playlist_controller.dart';
 export 'random_playback_models.dart';
@@ -54,12 +58,14 @@ class AudioCoreController extends ChangeNotifier
     FadeSettings fadeSettings = const FadeSettings(),
     VisualizerOptimizationOptions visualOptions =
         const VisualizerOptimizationOptions(),
+    AudioStreamCacheManager? streamCacheManager,
   }) {
     return _instance ??= AudioCoreController._internal(
       fftSize: fftSize,
       analysisFrequencyHz: analysisFrequencyHz,
       fadeSettings: fadeSettings,
       visualOptions: visualOptions,
+      streamCacheManager: streamCacheManager,
     );
   }
 
@@ -69,7 +75,12 @@ class AudioCoreController extends ChangeNotifier
     required FadeSettings fadeSettings,
     VisualizerOptimizationOptions visualOptions =
         const VisualizerOptimizationOptions(),
+    AudioStreamCacheManager? streamCacheManager,
   }) {
+    if (streamCacheManager != null) {
+      _streamCacheProxy = AudioStreamCacheProxy(cacheManager: streamCacheManager);
+    }
+
     if (Platform.isAndroid) {
       _engine = AndroidAudioEngine();
     } else {
@@ -329,10 +340,25 @@ class AudioCoreController extends ChangeNotifier
     _positionTick?.cancel();
     _playbackStateSubscription?.cancel();
     unawaited(_engine.dispose());
+    unawaited(_streamCacheProxy?.stop());
     visualizer.dispose();
     player.dispose();
     playlist.dispose();
     super.dispose();
+  }
+
+  AudioStreamCacheProxy? _streamCacheProxy;
+
+  /// Gets the [AudioStreamCacheProxy] used for progressive audio streaming and disk caching.
+  AudioStreamCacheProxy get streamCacheProxy =>
+      _streamCacheProxy ??= AudioStreamCacheProxy();
+
+  /// Gets the underlying [AudioStreamCacheManager] for cache management.
+  AudioStreamCacheManager get streamCacheManager => streamCacheProxy.cacheManager;
+
+  /// Sets a custom [AudioStreamCacheProxy] instance.
+  set streamCacheProxy(AudioStreamCacheProxy proxy) {
+    _streamCacheProxy = proxy;
   }
 
   // --- AudioVisualizerParent Implementation ---
@@ -365,73 +391,71 @@ class AudioCoreController extends ChangeNotifier
   AudioUriResolver? _uriResolver;
 
   /// Registers a custom URI resolver callback for resolving custom schemes
-  /// (e.g. `subsonic://...`, `webdav://...`) into playable local file paths or HTTP URLs.
+  /// (e.g. `subsonic://...`, `webdav://...`) into playable local file paths, HTTP URLs,
+  /// or [ResolvedAudioUri] instances.
   void setUriResolver(AudioUriResolver? resolver) {
     _uriResolver = resolver;
   }
 
   /// Resolves an arbitrary track URI through registered [AudioUriResolver]
-  /// and downloads remote HTTP streams into local cache if required by the audio engine.
+  /// and automatically routes HTTP(S) streams through [AudioStreamCacheProxy].
   @override
   Future<String> resolvePlayableUri(String rawUri) async {
-    String uri = rawUri;
+    dynamic resolved = rawUri;
     if (_uriResolver != null) {
       try {
-        uri = await _uriResolver!(rawUri);
+        resolved = await _uriResolver!(rawUri);
       } catch (e) {
         debugPrint('[AudioCoreController] Custom URI resolver failed for "$rawUri": $e');
       }
     }
 
-    if ((uri.startsWith('http://') || uri.startsWith('https://')) && !Platform.isAndroid) {
+    String uri;
+    Map<String, String>? headers;
+    String? cacheKey;
+
+    if (resolved is ResolvedAudioUri) {
+      uri = resolved.uri;
+      headers = resolved.headers;
+      cacheKey = resolved.cacheKey;
+    } else if (resolved is String) {
+      uri = resolved;
+    } else {
+      uri = rawUri;
+    }
+
+    // Pass remote HTTP/HTTPS streams through the local progressive cache proxy
+    if (uri.startsWith('http://') || uri.startsWith('https://')) {
+      // Don't proxy if already pointing to local loopback proxy
+      if (uri.startsWith('http://127.0.0.1:') || uri.startsWith('http://localhost:')) {
+        return uri;
+      }
+
+      final effectiveKey = cacheKey ?? uri;
       try {
-        uri = await _downloadHttpTrackToCache(uri);
+        if (await streamCacheManager.isTrackCached(effectiveKey)) {
+          final cachedFile = await streamCacheManager.getCacheFile(effectiveKey);
+          await streamCacheManager.touchCacheFile(cachedFile);
+          debugPrint('[AudioCoreController] Hit local stream cache for $effectiveKey: ${cachedFile.path}');
+          return cachedFile.path;
+        }
+      } catch (_) {}
+
+      try {
+        if (!streamCacheProxy.isRunning) {
+          await streamCacheProxy.start();
+        }
+        return streamCacheProxy.buildProxyUrl(
+          remoteUrl: uri,
+          headers: headers,
+          cacheKey: effectiveKey,
+        );
       } catch (e) {
-        debugPrint('[AudioCoreController] Failed to download HTTP track to cache: $e');
+        debugPrint('[AudioCoreController] Stream proxy routing failed for $uri: $e');
       }
     }
 
     return uri;
-  }
-
-  Future<String> _downloadHttpTrackToCache(String url) async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
-    final cacheDir = Directory('${Directory.systemTemp.path}/audio_core_http_cache');
-    if (!await cacheDir.exists()) {
-      await cacheDir.create(recursive: true);
-    }
-    final hash = url.hashCode.toRadixString(16);
-    final cachedFile = File('${cacheDir.path}/$hash.cache');
-    if (await cachedFile.exists() && await cachedFile.length() > 0) {
-      return cachedFile.path;
-    }
-
-    final tmpFile = File('${cachedFile.path}.tmp');
-    if (await tmpFile.exists()) {
-      try {
-        await tmpFile.delete();
-      } catch (_) {}
-    }
-
-    try {
-      final request = await client.getUrl(Uri.parse(url));
-      final response = await request.close();
-      if (response.statusCode >= 200 && response.statusCode < 400) {
-        final sink = tmpFile.openWrite();
-        await response.pipe(sink);
-        if (await tmpFile.exists() && await tmpFile.length() > 0) {
-          if (await cachedFile.exists()) await cachedFile.delete();
-          await tmpFile.rename(cachedFile.path);
-          return cachedFile.path;
-        }
-      }
-    } catch (e) {
-      debugPrint('[AudioCoreController] _downloadHttpTrackToCache error for $url: $e');
-      try {
-        if (await tmpFile.exists()) await tmpFile.delete();
-      } catch (_) {}
-    }
-    return url;
   }
 
   @override

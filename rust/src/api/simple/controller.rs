@@ -62,7 +62,7 @@ enum DecoderBackend {
  
 impl DecoderBackend {
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
-    fn open(path: &str, file: File) -> Result<Self, String> {
+    fn open(path: &str) -> Result<Self, String> {
         info!("[DecoderBackend] Attempting to open audio path: {}", path);
         match FfmpegAudioSource::open(path) {
             Ok(ffmpeg_source) => {
@@ -70,10 +70,19 @@ impl DecoderBackend {
                 Ok(Self::Ffmpeg(ffmpeg_source))
             }
             Err(ffmpeg_error) => {
+                let is_url = path.starts_with("http://") || path.starts_with("https://");
+                if is_url {
+                    error!(
+                        "[DecoderBackend] FFmpeg backend failed to open network stream {} (error: {})",
+                        path, ffmpeg_error
+                    );
+                    return Err(format!("FFmpeg failed to open network stream: {ffmpeg_error}"));
+                }
                 warn!(
                     "[DecoderBackend] FFmpeg backend failed to open (error: {}). Falling back to Symphonia",
                     ffmpeg_error
                 );
+                let file = File::open(path).map_err(|e| format!("open file failed: {e}"))?;
                 match Self::open_symphonia(file) {
                     Ok(symphonia_source) => {
                         info!("[DecoderBackend] Successfully opened via Symphonia backend");
@@ -90,9 +99,10 @@ impl DecoderBackend {
             }
         }
     }
- 
+
     #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios")))]
-    fn open(_path: &str, file: File) -> Result<Self, String> {
+    fn open(path: &str) -> Result<Self, String> {
+        let file = File::open(path).map_err(|e| format!("open file failed: {e}"))?;
         Self::open_symphonia(file)
     }
  
@@ -498,8 +508,7 @@ impl PlayerController {
         auto_play: bool,
         gain: f32,
     ) -> Result<PlaybackDeck, String> {
-        let file = File::open(path).map_err(|e| format!("open file failed: {e}"))?;
-        let backend = DecoderBackend::open(path, file)?;
+        let backend = DecoderBackend::open(path)?;
         self.open_deck_from_backend(path, backend, start_offset, auto_play, gain)
     }
 
@@ -619,8 +628,7 @@ impl PlayerController {
         start_offset: Duration,
         auto_play: bool,
     ) -> Result<(), String> {
-        let file = File::open(path).map_err(|e| format!("open file failed: {e}"))?;
-        let backend = DecoderBackend::open(path, file)?;
+        let backend = DecoderBackend::open(path)?;
         self.replace_current_from_backend(path, backend, start_offset, auto_play)
     }
 
@@ -770,8 +778,7 @@ impl PlayerController {
 
     #[allow(dead_code)]
     fn start_crossfade(&mut self, path: &str, duration: Duration) -> Result<(), String> {
-        let file = File::open(path).map_err(|e| format!("open file failed: {e}"))?;
-        let backend = DecoderBackend::open(path, file)?;
+        let backend = DecoderBackend::open(path)?;
         self.start_crossfade_with_backend(path, backend, duration)
     }
 
@@ -1549,20 +1556,7 @@ pub fn init_app() {
 }
 
 pub fn load_audio_file(path: String) -> Result<(), String> {
-    // 耗时操作放在锁外：打开文件、构建系统层级组件 (大约耗时几十毫秒以上)
-    let file = match File::open(&path) {
-        Ok(f) => f,
-        Err(e) => {
-            let msg = format!("open file failed: {e}");
-            error!("[load_audio_file] path={}: {}", path, msg);
-            if let Ok(mut c) = controller().lock() {
-                c.last_error = Some(msg.clone());
-                super::notify_playback_state_changed();
-            }
-            return Err(msg);
-        }
-    };
-    let backend = match DecoderBackend::open(&path, file) {
+    let backend = match DecoderBackend::open(&path) {
         Ok(b) => b,
         Err(msg) => {
             error!("[load_audio_file] path={}: {}", path, msg);
@@ -1592,20 +1586,7 @@ pub fn load_audio_file(path: String) -> Result<(), String> {
 }
 
 pub fn crossfade_to_audio_file(path: String, duration_ms: i64) -> Result<(), String> {
-    // 耗时操作放在锁外：打开文件、构建系统层级组件 (大约耗时几十毫秒以上)
-    let file = match File::open(&path) {
-        Ok(f) => f,
-        Err(e) => {
-            let msg = format!("open file failed: {e}");
-            error!("[crossfade_to_audio_file] path={}: {}", path, msg);
-            if let Ok(mut c) = controller().lock() {
-                c.last_error = Some(msg.clone());
-                super::notify_playback_state_changed();
-            }
-            return Err(msg);
-        }
-    };
-    let backend = match DecoderBackend::open(&path, file) {
+    let backend = match DecoderBackend::open(&path) {
         Ok(b) => b,
         Err(msg) => {
             error!("[crossfade_to_audio_file] path={}: {}", path, msg);
