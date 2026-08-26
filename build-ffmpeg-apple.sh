@@ -249,7 +249,8 @@ for target in "${TARGETS[@]}"; do
       --enable-filter=anull
       --enable-filter=aresample
       
-      --enable-protocol=file,pipe
+      --enable-network
+      --enable-protocol=file,pipe,http,tcp
       --enable-bsf=aac_adtstoasc
       --enable-parser=aac
       --enable-parser=aac_latm

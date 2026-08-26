@@ -217,7 +217,7 @@ configure_args=(
   --disable-ffplay
   --disable-ffprobe
   --disable-avdevice
-  --disable-network
+  --enable-network
   --enable-small
   --enable-pic
   --disable-static
@@ -235,6 +235,8 @@ configure_args=(
 
   --enable-protocol=file
   --enable-protocol=pipe
+  --enable-protocol=http
+  --enable-protocol=tcp
 
   --enable-filter=aformat
   --enable-filter=anull

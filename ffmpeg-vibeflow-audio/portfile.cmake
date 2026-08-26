@@ -219,12 +219,14 @@ if("audio" IN_LIST FEATURES)
         --disable-ffplay
         --disable-ffprobe
         --disable-avdevice
-        --disable-network
+        --enable-network
         --enable-small
         --enable-pic
 
         --enable-protocol=file
         --enable-protocol=pipe
+        --enable-protocol=http
+        --enable-protocol=tcp
 
         --disable-filters
         --enable-filter=aformat
