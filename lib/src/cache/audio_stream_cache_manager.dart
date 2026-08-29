@@ -11,10 +11,12 @@ class AudioStreamCacheManager {
   Directory? _cacheDir;
   final Directory? customCacheDirectory;
   final int Function()? maxCacheSizeBytesGetter;
+  void Function(String cacheKey, File file)? onTrackCached;
 
   AudioStreamCacheManager({
     this.customCacheDirectory,
     this.maxCacheSizeBytesGetter,
+    this.onTrackCached,
   }) {
     if (customCacheDirectory != null) {
       _cacheDir = customCacheDirectory;
@@ -59,7 +61,21 @@ class AudioStreamCacheManager {
   Future<File> getCacheFile(String cacheKey) async {
     final dir = await getCacheDirectory();
     final hash = md5.convert(utf8.encode(cacheKey)).toString();
-    return File(p.join(dir.path, '$hash.cache'));
+    var ext = p.extension(cacheKey);
+    if (ext.contains('?')) {
+      ext = ext.split('?').first;
+    }
+    if (ext.isEmpty || ext.length > 6 || !ext.startsWith('.')) {
+      ext = '.cache';
+    }
+    final primaryFile = File(p.join(dir.path, '$hash$ext'));
+    if (ext != '.cache' && !primaryFile.existsSync()) {
+      final legacyFile = File(p.join(dir.path, '$hash.cache'));
+      if (legacyFile.existsSync()) {
+        return legacyFile;
+      }
+    }
+    return primaryFile;
   }
 
   /// Checks if a cache key is already fully cached.
@@ -184,6 +200,7 @@ class AudioStreamCacheManager {
           await tmpFile.rename(cachedFile.path);
           await touchCacheFile(cachedFile);
           await pruneCacheIfNeeded();
+          onTrackCached?.call(cacheKey, cachedFile);
           return cachedFile;
         }
       }

@@ -143,6 +143,7 @@ class AudioCoreController extends ChangeNotifier
       Platform.isLinux ||
       Platform.isWindows;
   bool get isInitialized => _initialized;
+  bool get isTransitioning => _isTransitioning;
   EqualizerConfig get equalizerConfig => equalizer.config;
   bool get _usesRustPlaybackBackend =>
       Platform.isLinux || Platform.isWindows || Platform.isMacOS || Platform.isIOS;
