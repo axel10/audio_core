@@ -254,14 +254,21 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> seek(Duration target) async {
     if (_selectedPath == null) return;
+    final wasPlaying = _isPlaying;
+    final isNetworkStream = _selectedPath!.startsWith('http://') || _selectedPath!.startsWith('https://');
     try {
-      // debugPrint('[PlayerController] seek targetMs=${target.inMilliseconds}');
       if (_playerState == PlayerState.completed) {
         _playerState = PlayerState.paused;
+      } else if (isNetworkStream) {
+        _playerState = PlayerState.buffering;
+        notifyListeners();
       }
       await _parent.engine.seek(target);
       _lastCommandTime = DateTime.now();
       _position = target;
+      if (isNetworkStream) {
+        _playerState = wasPlaying ? PlayerState.playing : PlayerState.paused;
+      }
     } catch (e) {
       debugPrint('[PlayerController] seek failed for target=$target: $e');
       setError('Seek failed: $e');

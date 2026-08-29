@@ -151,21 +151,34 @@ class AudioStreamCacheManager {
       return cachedFile;
     }
 
-    final tmpFile = File('${cachedFile.path}.tmp');
+    final tmpFile = File('${cachedFile.path}.${DateTime.now().microsecondsSinceEpoch}.tmp');
     if (await tmpFile.exists()) {
       try {
         await tmpFile.delete();
       } catch (_) {}
     }
 
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 15)
+      ..badCertificateCallback = ((cert, host, port) => true);
     try {
-      final req = await client.getUrl(Uri.parse(remoteUrl));
+      final safeUrl = remoteUrl.contains(' ') || remoteUrl.contains('[') || remoteUrl.contains(']')
+          ? Uri.encodeFull(remoteUrl)
+          : remoteUrl;
+      final req = await client.getUrl(Uri.parse(safeUrl));
       headers?.forEach((k, v) => req.headers.set(k, v));
       final resp = await req.close();
       if (resp.statusCode >= 200 && resp.statusCode < 400) {
         final sink = tmpFile.openWrite();
-        await resp.pipe(sink);
+        try {
+          await for (final chunk in resp) {
+            sink.add(chunk);
+          }
+        } finally {
+          await sink.flush();
+          await sink.close();
+        }
+
         if (await tmpFile.exists() && await tmpFile.length() > 0) {
           if (await cachedFile.exists()) await cachedFile.delete();
           await tmpFile.rename(cachedFile.path);

@@ -98,7 +98,11 @@ void main() {
     expect(receivedBytes.length, equals(mockBytes.length));
     expect(receivedBytes, equals(mockBytes));
 
-    // 3. Verify that the track is now fully cached on disk
+    // 3. Verify that the track is fully cached on disk (awaiting the prefetch task)
+    await proxy.ensureBackgroundPrefetch(
+      targetUrl: remoteUrl,
+      cacheKey: 'mock_track_1',
+    );
     expect(await cacheManager.isTrackCached('mock_track_1'), isTrue);
 
     // 4. Second request should now serve directly from cache with partial range support
@@ -114,6 +118,72 @@ void main() {
     }
     expect(rangeBytes.length, equals(100));
     expect(rangeBytes, equals(mockBytes.sublist(100, 200)));
+
+    client.close();
+    await proxy.stop();
+    await mockUpstream.close(force: true);
+  });
+
+  test('AudioStreamCacheProxy correctly encodes and proxies upstream URLs with spaces, brackets and Unicode', () async {
+    final mockUpstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final mockBytes = List.generate(1024, (i) => (i * 7) % 256);
+
+    mockUpstream.listen((request) {
+      // The decoded path matches the special character track
+      if (Uri.decodeFull(request.uri.path) == '/music/(1) [] 君が好きだと叫びたい.flac') {
+        final range = request.headers.value(HttpHeaders.rangeHeader);
+        if (range != null && range.startsWith('bytes=')) {
+          final rangeStr = range.substring(6);
+          final parts = rangeStr.split('-');
+          final start = int.parse(parts[0]);
+          final end = parts.length > 1 && parts[1].isNotEmpty
+              ? int.parse(parts[1])
+              : mockBytes.length - 1;
+
+          final sub = mockBytes.sublist(start, end + 1);
+          request.response.statusCode = HttpStatus.partialContent;
+          request.response.headers.set(
+            HttpHeaders.contentRangeHeader,
+            'bytes $start-$end/${mockBytes.length}',
+          );
+          request.response.headers.contentLength = sub.length;
+          request.response.add(sub);
+          request.response.close();
+        } else {
+          request.response.statusCode = HttpStatus.ok;
+          request.response.headers.contentLength = mockBytes.length;
+          request.response.add(mockBytes);
+          request.response.close();
+        }
+      } else {
+        request.response.statusCode = HttpStatus.notFound;
+        request.response.close();
+      }
+    });
+
+    final proxy = AudioStreamCacheProxy(cacheManager: cacheManager);
+    final port = await proxy.start();
+
+    final unencodedRemoteUrl = 'http://127.0.0.1:${mockUpstream.port}/music/(1) [] 君が好きだと叫びたい.flac';
+    final proxyUrl = proxy.buildProxyUrl(
+      remoteUrl: unencodedRemoteUrl,
+      cacheKey: 'special_char_track',
+    );
+
+    final client = HttpClient();
+
+    // 1. Seek / Range request without full cache
+    final req = await client.getUrl(Uri.parse(proxyUrl));
+    req.headers.set(HttpHeaders.rangeHeader, 'bytes=500-799');
+    final resp = await req.close();
+
+    expect(resp.statusCode, HttpStatus.partialContent);
+    final received = <int>[];
+    await for (final chunk in resp) {
+      received.addAll(chunk);
+    }
+    expect(received.length, equals(300));
+    expect(received, equals(mockBytes.sublist(500, 800)));
 
     client.close();
     await proxy.stop();

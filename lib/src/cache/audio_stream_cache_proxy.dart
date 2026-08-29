@@ -12,6 +12,7 @@ class AudioStreamCacheProxy {
   final HttpClient _httpClient = HttpClient()
     ..connectionTimeout = const Duration(seconds: 15)
     ..idleTimeout = const Duration(seconds: 60)
+    ..badCertificateCallback = ((cert, host, port) => true)
     ..autoUncompress = false;
 
   AudioStreamCacheProxy({AudioStreamCacheManager? cacheManager})
@@ -19,6 +20,19 @@ class AudioStreamCacheProxy {
 
   int? get port => _port;
   bool get isRunning => _server != null;
+
+  static Uri safeParseUri(String url) {
+    try {
+      final parsed = Uri.parse(url);
+      if (parsed.hasScheme && parsed.hasAuthority) {
+        if (url.contains(' ') || url.contains('[') || url.contains(']')) {
+          return Uri.parse(Uri.encodeFull(url));
+        }
+        return parsed;
+      }
+    } catch (_) {}
+    return Uri.parse(Uri.encodeFull(url));
+  }
 
   /// Starts the local HTTP proxy server on a random loopback port.
   Future<int> start() async {
@@ -83,6 +97,48 @@ class AudioStreamCacheProxy {
     return uri.toString();
   }
 
+  final Map<String, Future<File>> _activePrefetches = {};
+
+  /// Eagerly triggers background caching for a track if not already cached.
+  Future<File>? ensureBackgroundPrefetch({
+    required String targetUrl,
+    Map<String, String>? headers,
+    required String cacheKey,
+  }) {
+    if (_activePrefetches.containsKey(cacheKey)) {
+      return _activePrefetches[cacheKey];
+    }
+
+    final future = _doBackgroundPrefetch(
+      targetUrl: targetUrl,
+      headers: headers,
+      cacheKey: cacheKey,
+    );
+    _activePrefetches[cacheKey] = future;
+    return future;
+  }
+
+  Future<File> _doBackgroundPrefetch({
+    required String targetUrl,
+    Map<String, String>? headers,
+    required String cacheKey,
+  }) async {
+    try {
+      final cached = await cacheManager.ensureTrackCached(
+        cacheKey: cacheKey,
+        remoteUrl: safeParseUri(targetUrl).toString(),
+        headers: headers,
+      );
+      debugPrint('[AudioStreamCacheProxy] Background prefetch completed for $cacheKey -> ${cached.path}');
+      return cached;
+    } catch (e) {
+      debugPrint('[AudioStreamCacheProxy] Background prefetch failed for $cacheKey: $e');
+      rethrow;
+    } finally {
+      _activePrefetches.remove(cacheKey);
+    }
+  }
+
   Future<void> _handleRequest(HttpRequest request) async {
     final path = request.uri.path;
     if (path == '/ping' || path == '/health') {
@@ -133,6 +189,15 @@ class AudioStreamCacheProxy {
         await _serveLocalFile(request, file);
         return;
       }
+
+      // Eagerly trigger background prefetch so the full file is downloaded rapidly in the background
+      unawaited(
+        ensureBackgroundPrefetch(
+          targetUrl: targetUrl,
+          headers: upstreamHeaders,
+          cacheKey: cacheKey,
+        ),
+      );
 
       await _proxyUpstreamRequest(request, targetUrl, upstreamHeaders, cacheKey);
     } catch (e, stack) {
@@ -194,9 +259,21 @@ class AudioStreamCacheProxy {
     String cacheKey,
   ) async {
     final clientRangeHeader = request.headers.value(HttpHeaders.rangeHeader);
-    final upstreamUri = Uri.parse(targetUrl);
+    final upstreamUri = safeParseUri(targetUrl);
 
-    final upstreamReq = await _httpClient.getUrl(upstreamUri);
+    final HttpClientRequest upstreamReq;
+    try {
+      upstreamReq = await _httpClient.getUrl(upstreamUri);
+    } catch (e) {
+      debugPrint('[AudioStreamCacheProxy] Failed to connect to upstream $upstreamUri: $e');
+      try {
+        request.response
+          ..statusCode = HttpStatus.badGateway
+          ..write('Bad Gateway: $e')
+          ..close();
+      } catch (_) {}
+      return;
+    }
 
     // Forward upstream headers
     upstreamHeaders.forEach((k, v) {
@@ -207,7 +284,20 @@ class AudioStreamCacheProxy {
       upstreamReq.headers.set(HttpHeaders.rangeHeader, clientRangeHeader);
     }
 
-    final upstreamResp = await upstreamReq.close();
+    final HttpClientResponse upstreamResp;
+    try {
+      upstreamResp = await upstreamReq.close();
+    } catch (e) {
+      debugPrint('[AudioStreamCacheProxy] Upstream response error from $upstreamUri: $e');
+      try {
+        request.response
+          ..statusCode = HttpStatus.badGateway
+          ..write('Bad Gateway: $e')
+          ..close();
+      } catch (_) {}
+      return;
+    }
+
     final statusCode = upstreamResp.statusCode;
     request.response.statusCode = statusCode;
 
@@ -228,65 +318,22 @@ class AudioStreamCacheProxy {
       request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
     }
 
-    // Tee stream: If starting from beginning and status is 200, write to .tmp cache in background while streaming
-    final isFullStream = (clientRangeHeader == null || clientRangeHeader == 'bytes=0-') &&
-        (statusCode == HttpStatus.ok);
-
-    if (isFullStream) {
-      final cachedFile = await cacheManager.getCacheFile(cacheKey);
-      final tmpFile = File('${cachedFile.path}.tmp');
-      IOSink? fileSink;
-      try {
-        if (await tmpFile.exists()) {
-          await tmpFile.delete();
-        }
-        fileSink = tmpFile.openWrite();
-      } catch (_) {}
-
-      var writeFailed = false;
-      var chunkCount = 0;
-      try {
-        await for (final chunk in upstreamResp) {
+    var chunkCount = 0;
+    try {
+      await for (final chunk in upstreamResp) {
+        try {
           request.response.add(chunk);
           if (chunkCount++ < 5) {
             await request.response.flush();
           }
-          if (fileSink != null && !writeFailed) {
-            try {
-              fileSink.add(chunk);
-            } catch (_) {
-              writeFailed = true;
-            }
-          }
-        }
-      } finally {
-        if (fileSink != null) {
-          try {
-            await fileSink.flush();
-            await fileSink.close();
-            if (!writeFailed && await tmpFile.exists() && await tmpFile.length() > 0) {
-              if (await cachedFile.exists()) await cachedFile.delete();
-              await tmpFile.rename(cachedFile.path);
-              await cacheManager.touchCacheFile(cachedFile);
-              await cacheManager.pruneCacheIfNeeded();
-            } else {
-              if (await tmpFile.exists()) await tmpFile.delete();
-            }
-          } catch (_) {
-            if (await tmpFile.exists()) await tmpFile.delete();
-          }
+        } catch (_) {
+          break;
         }
       }
-    } else {
-      var chunkCount = 0;
-      await for (final chunk in upstreamResp) {
-        request.response.add(chunk);
-        if (chunkCount++ < 5) {
-          await request.response.flush();
-        }
-      }
-    }
+    } catch (_) {}
 
-    await request.response.close();
+    try {
+      await request.response.close();
+    } catch (_) {}
   }
 }
