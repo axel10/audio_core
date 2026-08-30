@@ -9,6 +9,7 @@ use rodio::{
     source::UniformSourceIterator,
 };
 use std::fs::File;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
@@ -358,6 +359,146 @@ where
     }
 }
 
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
+const PREFETCH_BUFFER_CAPACITY: usize = 44_100; // ~0.5 second of stereo 44.1kHz audio
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
+const MICRO_RAMP_SAMPLES: usize = 256; // ~5.8ms micro-ramp in at 44.1kHz stereo
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
+struct PrefetchSource {
+    consumer: rtrb::Consumer<f32>,
+    stop_flag: Arc<AtomicBool>,
+    is_eof: Arc<AtomicBool>,
+    channels: rodio::ChannelCount,
+    sample_rate: rodio::SampleRate,
+    total_duration: Option<Duration>,
+    ramp_counter: usize,
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
+impl PrefetchSource {
+    fn new<S>(source: S) -> Self
+    where
+        S: Source<Item = f32> + Send + 'static,
+    {
+        let channels = source.channels();
+        let sample_rate = source.sample_rate();
+        let total_duration = source.total_duration();
+
+        let (mut producer, consumer) = rtrb::RingBuffer::<f32>::new(PREFETCH_BUFFER_CAPACITY);
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let is_eof = Arc::new(AtomicBool::new(false));
+
+        let thread_stop_flag = Arc::clone(&stop_flag);
+        let thread_is_eof = Arc::clone(&is_eof);
+
+        thread::Builder::new()
+            .name("AudioPrefetchWorker".to_string())
+            .spawn(move || {
+                let mut source = source;
+                while !thread_stop_flag.load(Ordering::Relaxed) {
+                    let available = producer.slots();
+                    if available == 0 {
+                        thread::sleep(Duration::from_millis(5));
+                        continue;
+                    }
+
+                    let chunk_limit = available.min(512);
+                    let mut eof = false;
+
+                    for _ in 0..chunk_limit {
+                        match source.next() {
+                            Some(sample) => {
+                                if producer.push(sample).is_err() {
+                                    // Consumer dropped
+                                    return;
+                                }
+                            }
+                            None => {
+                                eof = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if eof {
+                        thread_is_eof.store(true, Ordering::Release);
+                        break;
+                    }
+                }
+            })
+            .expect("spawn audio prefetch thread failed");
+
+        Self {
+            consumer,
+            stop_flag,
+            is_eof,
+            channels,
+            sample_rate,
+            total_duration,
+            ramp_counter: 0,
+        }
+    }
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
+impl Drop for PrefetchSource {
+    fn drop(&mut self) {
+        self.stop_flag.store(true, Ordering::Release);
+    }
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
+impl Iterator for PrefetchSource {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.consumer.pop() {
+            Ok(mut sample) => {
+                if self.ramp_counter < MICRO_RAMP_SAMPLES {
+                    let ramp = self.ramp_counter as f32 / MICRO_RAMP_SAMPLES as f32;
+                    sample *= ramp;
+                    self.ramp_counter += 1;
+                }
+                Some(sample)
+            }
+            Err(_) => {
+                if self.is_eof.load(Ordering::Acquire) && self.consumer.is_empty() {
+                    None
+                } else {
+                    // Smooth underrun with silence rather than glitching
+                    Some(0.0)
+                }
+            }
+        }
+    }
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
+impl Source for PrefetchSource {
+    fn current_span_len(&self) -> Option<usize> {
+        None
+    }
+
+    fn channels(&self) -> rodio::ChannelCount {
+        self.channels
+    }
+
+    fn sample_rate(&self) -> rodio::SampleRate {
+        self.sample_rate
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.total_duration
+    }
+
+    fn try_seek(&mut self, _pos: Duration) -> Result<(), rodio::source::SeekError> {
+        Err(rodio::source::SeekError::Other(std::sync::Arc::new(
+            std::io::Error::other("PrefetchSource seeks via deck recreation"),
+        )))
+    }
+}
+
 impl PlayerController {
     fn new() -> Self {
         Self {
@@ -410,16 +551,13 @@ impl PlayerController {
             .default_output_device()
             .ok_or_else(|| "no default audio output device available".to_string())?;
         let device_name = describe_output_device(&device);
-        let mut preferred = DeviceSinkBuilder::from_device(device.clone())
+        let preferred = DeviceSinkBuilder::from_device(device.clone())
             .map_err(|e| format!("prepare preferred audio device failed: {e}"))?
             .with_sample_rate(
                 std::num::NonZeroU32::new(PLAYBACK_SAMPLE_RATE)
                     .expect("playback sample rate must be non-zero"),
-            );
-        #[cfg(target_os = "linux")]
-        {
-            preferred = preferred.with_buffer_size(rodio::cpal::BufferSize::Fixed(1024));
-        }
+            )
+            .with_buffer_size(rodio::cpal::BufferSize::Fixed(2048));
         let sink = match preferred
             .with_error_callback(report_audio_stream_error)
             .open_stream()
@@ -581,13 +719,19 @@ impl PlayerController {
             Box::new(eq_source)
         };
         let speed_source = SpeedSource::new(audio_source, Arc::clone(&self.playback_speed));
+        let fft_source = FftSource::new(
+            speed_source,
+            Arc::clone(&latest_fft),
+            Arc::clone(&self.last_fft_request_time),
+        );
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
+        let playback_source = PrefetchSource::new(fft_source);
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios")))]
+        let playback_source = fft_source;
+
         let end_path = path.to_string();
         let notifying_source = EndNotifySource::new(
-            FftSource::new(
-                speed_source,
-                Arc::clone(&latest_fft),
-                Arc::clone(&self.last_fft_request_time),
-            ),
+            playback_source,
             move || {
                 if let Ok(mut c) = controller().lock() {
                     c.mark_track_ended(&end_path);

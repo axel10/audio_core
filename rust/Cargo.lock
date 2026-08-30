@@ -202,6 +202,7 @@ dependencies = [
  "realfft",
  "rodio",
  "rodio-wsola",
+ "rtrb",
  "rusty-chromaprint",
  "serde",
  "serde_json",
