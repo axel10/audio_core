@@ -292,7 +292,9 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
       if (directResult.isNotEmpty) return directResult;
     } catch (_) {}
 
-    if (Platform.isAndroid) {
+    if (Platform.isAndroid &&
+        !path.startsWith('http://') &&
+        !path.startsWith('https://')) {
       // 1. Try zero-copy openFileDescriptor with FFmpeg pipe: protocol
       try {
         final int? fd = await _taglibChannel.invokeMethod<int>(
