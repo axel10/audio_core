@@ -14,6 +14,7 @@ on:
     paths:
       - '.github/workflows/build-ffmpeg.yml'
       - 'build-ffmpeg-android.sh'
+      - 'build-ffmpeg-apple.sh'
       - 'build-ffmpeg-linux.sh'
       - 'download_sources.sh'
       - 'ffmpeg-vibeflow-audio/**'
@@ -24,6 +25,7 @@ on:
     paths:
       - '.github/workflows/build-ffmpeg.yml'
       - 'build-ffmpeg-android.sh'
+      - 'build-ffmpeg-apple.sh'
       - 'build-ffmpeg-linux.sh'
       - 'download_sources.sh'
       - 'ffmpeg-vibeflow-audio/**'
@@ -231,3 +233,48 @@ jobs:
           files: ffmpeg_lib_android.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-apple:
+    name: Build FFmpeg Apple (macOS & iOS)
+    runs-on: macos-14
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          brew install nasm automake autoconf libtool pkg-config
+
+      - name: Download source codes
+        run: |
+          chmod +x download_sources.sh
+          ./download_sources.sh
+
+      - name: Build FFmpeg XCFramework (Apple)
+        run: |
+          chmod +x build-ffmpeg-apple.sh
+          ./build-ffmpeg-apple.sh --clean
+
+      - name: Package build outputs (Apple)
+        run: |
+          tar -czf ffmpeg_lib_apple.tar.gz -C darwin FFmpeg.xcframework
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg_lib_apple
+          path: ffmpeg_lib_apple.tar.gz
+          retention-days: 90
+
+      - name: Upload to GitHub Release
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag || github.event.release.tag_name }}
+          files: ffmpeg_lib_apple.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
