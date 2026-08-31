@@ -10,7 +10,7 @@ if [[ -d "$target_dir" ]]; then
   exit 0
 fi
 
-download_url="https://github.com/axel10/audio_core/releases/download/0.6/ffmpeg_lib_apple.tar.gz"
+download_url="https://github.com/axel10/audio_core/releases/download/0.7/ffmpeg_lib_apple.tar.gz"
 temp_file="$repo_root/ffmpeg_lib_apple_temp.tar.gz"
 
 echo "Downloading precompiled FFmpeg Apple libraries from $download_url..."
