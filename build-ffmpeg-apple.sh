@@ -291,7 +291,10 @@ for target in "${TARGETS[@]}"; do
       configure_args+=("--enable-decoder=$decoder")
     done
     
-    "$ffmpeg_root/configure" "${configure_args[@]}"
+    export PKG_CONFIG_PATH="$opus_install/lib/pkgconfig:$lame_install/lib/pkgconfig"
+    export PKG_CONFIG_LIBDIR="$opus_install/lib/pkgconfig:$lame_install/lib/pkgconfig"
+
+    "$ffmpeg_root/configure" --pkg-config-flags="--static" "${configure_args[@]}"
     
     log "Building FFmpeg for $subpath..."
     make -j"$JOBS"
