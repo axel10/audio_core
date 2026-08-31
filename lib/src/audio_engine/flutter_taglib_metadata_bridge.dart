@@ -470,7 +470,8 @@ Future<AudioDetails> getAudioDetailsWithFlutterTaglib({
 
     try {
       final info = file.audioInfo;
-      final fileSize = File(candidate).lengthSync();
+      final fileObj = File(candidate);
+      final fileSize = fileObj.existsSync() ? fileObj.lengthSync() : 0;
       final ext = p.extension(candidate).replaceAll('.', '').toLowerCase();
 
       final rawFormat = ext;
