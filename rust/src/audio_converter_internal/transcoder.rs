@@ -824,14 +824,20 @@ pub(crate) fn transcode_direct(
     for (stream, mut packet) in ictx.packets() {
         if stream.index() == transcoder.stream_index {
             packet.rescale_ts(stream.time_base(), transcoder.decoder_time_base);
-            transcoder
-                .send_packet_to_decoder(&packet)
-                .map_err(|error| {
-                    ConversionFailure::with_log(
+            if let Err(error) = transcoder.send_packet_to_decoder(&packet) {
+                if transcoder.decoded_sample_count > 0 || transcoder.decoded_frame_logs > 0 {
+                    push_log_line(
+                        &mut transcoder.debug_log,
+                        format!("warning: send_packet_to_decoder ignored non-fatal error: {error}"),
+                    );
+                    break;
+                } else {
+                    return Err(ConversionFailure::with_log(
                         format!("send_packet_to_decoder failed: {error}"),
                         transcoder.debug_log.clone(),
-                    )
-                })?;
+                    ));
+                }
+            }
             let should_continue = transcoder
                 .receive_and_process_decoded_frames(&mut octx)
                 .map_err(|error| {
