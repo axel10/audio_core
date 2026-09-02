@@ -3,12 +3,10 @@ use ffmpeg_core::ffmpeg;
 
 use crate::api::audio_converter::models::AndroidConvertRequest;
 
-pub use ffmpeg::codec::Id;
-
 #[derive(Clone, Copy)]
 pub(crate) struct AudioCodecSpec {
-    pub preferred_name: &'static str,
-    pub fallback_id: ffmpeg::codec::Id,
+    pub(crate) preferred_name: &'static str,
+    pub(crate) fallback_id: ffmpeg::codec::Id,
 }
 
 impl AudioCodecSpec {

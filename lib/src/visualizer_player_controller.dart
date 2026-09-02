@@ -12,6 +12,7 @@ import 'playlist_controller.dart';
 import 'visualizer_controller.dart';
 import 'rust/api/simple_api.dart'
     hide FadeSettings, FadeMode, TrackMetadataUpdate;
+import 'rust/api/simple/controller.dart' as rust_controller;
 import 'rust/frb_generated.dart';
 import 'fft_processor.dart';
 import 'player_state_snapshot.dart';
@@ -1705,4 +1706,46 @@ class AudioCoreController extends ChangeNotifier
       }
     }
   }
+
+  /// Enumerates available output audio devices (e.g. WASAPI render endpoints).
+  Future<List<AudioDeviceDesc>> getAudioOutputDevices() async {
+    try {
+      return await rust_controller.getAudioOutputDevices();
+    } catch (e) {
+      debugPrint('[AudioCore] getAudioOutputDevices failed: $e');
+      return <AudioDeviceDesc>[];
+    }
+  }
+
+  /// Sets the audio output mode (Shared vs WasapiExclusive), device id, and options.
+  Future<void> setAudioOutputMode({
+    required AudioOutputMode mode,
+    String? deviceId,
+    bool releaseOnPause = false,
+    bool bitPerfect = true,
+  }) async {
+    try {
+      await rust_controller.setAudioOutputMode(
+        mode: mode,
+        deviceId: deviceId,
+        releaseOnPause: releaseOnPause,
+        bitPerfect: bitPerfect,
+      );
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[AudioCore] setAudioOutputMode failed: $e');
+      rethrow;
+    }
+  }
+
+  /// Retrieves the active audio hardware format (sample rate, bit depth, channels, DAC name).
+  Future<ActiveAudioHardwareFormat?> getActiveAudioHardwareFormat() async {
+    try {
+      return await rust_controller.getActiveAudioHardwareFormat();
+    } catch (e) {
+      debugPrint('[AudioCore] getActiveAudioHardwareFormat failed: $e');
+      return null;
+    }
+  }
 }
+

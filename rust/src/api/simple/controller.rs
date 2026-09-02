@@ -217,6 +217,93 @@ fn controller() -> &'static Mutex<PlayerController> {
     PLAYER_CONTROLLER.get_or_init(|| Mutex::new(PlayerController::new()))
 }
 
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct AudioDeviceDesc {
+    pub id: String,
+    pub name: String,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum AudioOutputMode {
+    Shared,
+    WasapiExclusive,
+}
+
+impl Default for AudioOutputMode {
+    fn default() -> Self {
+        Self::Shared
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ActiveAudioHardwareFormat {
+    pub mode: AudioOutputMode,
+    pub device_name: String,
+    pub sample_rate: u32,
+    pub bit_depth: u16,
+    pub channels: u16,
+    pub is_bit_perfect: bool,
+}
+
+struct OutputSinkConfig {
+    channel_count: rodio::ChannelCount,
+    sample_rate: rodio::SampleRate,
+}
+
+impl OutputSinkConfig {
+    fn channel_count(&self) -> rodio::ChannelCount {
+        self.channel_count
+    }
+    fn sample_rate(&self) -> rodio::SampleRate {
+        self.sample_rate
+    }
+}
+
+enum OutputSink {
+    Shared(MixerDeviceSink),
+    #[cfg(target_os = "windows")]
+    WasapiExclusive(super::wasapi_sink::wasapi_impl::WasapiExclusiveSink),
+}
+
+impl OutputSink {
+    fn mixer(&self) -> rodio::mixer::Mixer {
+        match self {
+            Self::Shared(s) => s.mixer().clone(),
+            #[cfg(target_os = "windows")]
+            Self::WasapiExclusive(w) => w.mixer(),
+        }
+    }
+
+    fn config(&self) -> OutputSinkConfig {
+        match self {
+            Self::Shared(s) => OutputSinkConfig {
+                channel_count: s.config().channel_count(),
+                sample_rate: s.config().sample_rate(),
+            },
+            #[cfg(target_os = "windows")]
+            Self::WasapiExclusive(w) => OutputSinkConfig {
+                channel_count: std::num::NonZero::new(w.format_config().channels)
+                    .unwrap_or_else(|| std::num::NonZero::new(2).unwrap()),
+                sample_rate: std::num::NonZero::new(w.format_config().sample_rate)
+                    .unwrap_or_else(|| std::num::NonZero::new(44100).unwrap()),
+            },
+        }
+    }
+
+    fn play(&self) {
+        if let Self::Shared(s) = self {
+            s.play();
+        }
+    }
+
+    fn pause(&self) {
+        if let Self::Shared(s) = self {
+            s.pause();
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PlaybackState {
     pub playback_state: Option<String>,
@@ -266,7 +353,11 @@ impl PlaybackDeck {
 }
 
 struct PlayerController {
-    sink: Option<MixerDeviceSink>,
+    output_mode: AudioOutputMode,
+    target_output_device_id: Option<String>,
+    release_on_pause: bool,
+    bit_perfect: bool,
+    sink: Option<OutputSink>,
     active_output_device_name: Option<String>,
     current_deck: Option<PlaybackDeck>,
     incoming_deck: Option<PlaybackDeck>,
@@ -502,6 +593,10 @@ impl Source for PrefetchSource {
 impl PlayerController {
     fn new() -> Self {
         Self {
+            output_mode: AudioOutputMode::Shared,
+            target_output_device_id: None,
+            release_on_pause: true,
+            bit_perfect: false,
             sink: None,
             active_output_device_name: None,
             current_deck: None,
@@ -535,15 +630,49 @@ impl PlayerController {
             return Ok(());
         }
 
+        #[cfg(target_os = "windows")]
+        if self.output_mode == AudioOutputMode::WasapiExclusive {
+            let (target_sr, target_ch) = self.get_desired_exclusive_format();
+            match super::wasapi_sink::wasapi_impl::WasapiExclusiveSink::open(
+                self.target_output_device_id.as_deref(),
+                target_sr,
+                target_ch,
+            ) {
+                Ok(w_sink) => {
+                    let dev_name = w_sink.device_name().to_string();
+                    info!(
+                        "[WasapiExclusive] Opened WASAPI exclusive sink on '{}' ({}Hz, {}ch)",
+                        dev_name, target_sr, target_ch
+                    );
+                    self.active_output_device_name = Some(dev_name);
+                    self.sink = Some(OutputSink::WasapiExclusive(w_sink));
+                    return Ok(());
+                }
+                Err(e) => {
+                    warn!(
+                        "[WasapiExclusive] Failed to open WASAPI exclusive sink: {e}, falling back to shared output"
+                    );
+                }
+            }
+        }
+
         info!("[AudioDeviceMonitor] ensure_audio_output: opening new default output");
         let (sink, device_name) = Self::open_current_default_output()?;
         info!(
             "[AudioDeviceMonitor] ensure_audio_output: opened device '{}'",
             device_name
         );
-        self.sink = Some(sink);
+        self.sink = Some(OutputSink::Shared(sink));
         self.active_output_device_name = Some(device_name);
         Ok(())
+    }
+
+    fn get_desired_exclusive_format(&self) -> (u32, u16) {
+        if self.cached_sample_rate > 0 && self.cached_channels > 0 {
+            (self.cached_sample_rate, self.cached_channels as u16)
+        } else {
+            (PLAYBACK_SAMPLE_RATE, 2)
+        }
     }
 
     fn open_current_default_output() -> Result<(MixerDeviceSink, String), String> {
@@ -658,13 +787,6 @@ impl PlayerController {
         auto_play: bool,
         gain: f32,
     ) -> Result<PlaybackDeck, String> {
-        self.ensure_audio_output()?;
-
-        // 先把播放器挂载到系统混音器上 (制造时间差，让后台音频流消耗 Empty 缓冲区，彻底消除底层 Bug 隐患)
-        let player = self.create_player()?;
-        let latest_fft = Arc::new(Mutex::new(vec![0.0; RAW_FFT_BINS]));
-        clear_fft_buffer(&latest_fft);
-
         let total = backend.total_duration().unwrap_or(Duration::ZERO);
         let clamped_offset = if total.is_zero() {
             start_offset
@@ -682,9 +804,51 @@ impl PlayerController {
             }
         }
 
-        player.set_volume((self.volume * gain).clamp(0.0, 1.0));
         let decode_engine = backend.engine().to_string();
         let decoded_source = backend.into_source();
+        let src_channels = decoded_source.channels().get();
+        let src_sample_rate = decoded_source.sample_rate().get();
+        self.cached_channels = src_channels as usize;
+        self.cached_sample_rate = src_sample_rate;
+
+        #[cfg(target_os = "windows")]
+        if self.output_mode == AudioOutputMode::WasapiExclusive {
+            let needs_reopen = match &self.sink {
+                Some(OutputSink::WasapiExclusive(w)) => {
+                    w.format_config().sample_rate != src_sample_rate
+                        || w.format_config().channels != src_channels
+                }
+                _ => true,
+            };
+            if needs_reopen {
+                info!(
+                    "[WasapiExclusive] Auto-switching hardware sample rate: {}Hz, {}ch",
+                    src_sample_rate, src_channels
+                );
+                self.sink = None;
+                if let Ok(w_sink) = super::wasapi_sink::wasapi_impl::WasapiExclusiveSink::open(
+                    self.target_output_device_id.as_deref(),
+                    src_sample_rate,
+                    src_channels,
+                ) {
+                    self.active_output_device_name = Some(w_sink.device_name().to_string());
+                    self.sink = Some(OutputSink::WasapiExclusive(w_sink));
+                }
+            }
+        }
+
+        self.ensure_audio_output()?;
+
+        let player = self.create_player()?;
+        let latest_fft = Arc::new(Mutex::new(vec![0.0; RAW_FFT_BINS]));
+        clear_fft_buffer(&latest_fft);
+
+        if self.output_mode == AudioOutputMode::WasapiExclusive && self.bit_perfect {
+            player.set_volume(1.0);
+        } else {
+            player.set_volume((self.volume * gain).clamp(0.0, 1.0));
+        }
+
         eprintln!(
             "[AudioTrace][Decode] path={} engine={} channels={} sample_rate={} duration_ms={}",
             path,
@@ -752,6 +916,12 @@ impl PlayerController {
             player.play();
         } else {
             player.pause();
+            #[cfg(target_os = "windows")]
+            if self.output_mode == AudioOutputMode::WasapiExclusive && self.release_on_pause {
+                info!("[WasapiExclusive] Releasing exclusive sink after paused deck setup");
+                self.sink = None;
+                self.active_output_device_name = None;
+            }
         }
 
         Ok(PlaybackDeck {
@@ -827,7 +997,8 @@ impl PlayerController {
     fn playback_state_snapshot(&self) -> PlaybackState {
         let public_deck = self.public_deck();
         let is_playing = public_deck.map(PlaybackDeck::is_playing).unwrap_or(false)
-            && !self.pause_fade_in_progress;
+            && !self.pause_fade_in_progress
+            && self.sink.is_some();
 
         PlaybackState {
             playback_state: self.pending_playback_state.clone(),
@@ -854,7 +1025,19 @@ impl PlayerController {
         }
     }
 
-    fn play_all(&self) {
+    fn play_all(&mut self) -> Result<(), String> {
+        #[cfg(target_os = "windows")]
+        if self.output_mode == AudioOutputMode::WasapiExclusive && self.sink.is_none() {
+            if let Some(path) = self.public_path().map(str::to_string) {
+                let pos = self.public_position();
+                info!(
+                    "[WasapiExclusive] Re-acquiring exclusive sink on play at pos {:?}",
+                    pos
+                );
+                return self.replace_current_from_path(&path, pos, true);
+            }
+        }
+
         if let Some(sink) = self.sink.as_ref() {
             sink.play();
         }
@@ -864,9 +1047,10 @@ impl PlayerController {
         if let Some(incoming) = self.incoming_deck.as_ref() {
             incoming.player.play();
         }
+        Ok(())
     }
 
-    fn pause_all(&self) {
+    fn pause_all(&mut self) {
         if let Some(current) = self.current_deck.as_ref() {
             current.player.pause();
         }
@@ -876,14 +1060,21 @@ impl PlayerController {
         if let Some(sink) = self.sink.as_ref() {
             sink.pause();
         }
+        #[cfg(target_os = "windows")]
+        if self.output_mode == AudioOutputMode::WasapiExclusive && self.release_on_pause {
+            info!("[WasapiExclusive] Releasing exclusive sink on pause");
+            self.sink = None;
+            self.active_output_device_name = None;
+        }
     }
 
-    fn toggle_all(&self) -> Result<bool, String> {
+    fn toggle_all(&mut self) -> Result<bool, String> {
         let public_deck = self
             .public_deck()
             .ok_or_else(|| "player is not initialized".to_string())?;
-        if public_deck.player.is_paused() {
-            self.play_all();
+        let is_paused = public_deck.player.is_paused() || self.sink.is_none();
+        if is_paused {
+            self.play_all()?;
             Ok(true)
         } else {
             self.pause_all();
@@ -961,6 +1152,11 @@ impl PlayerController {
     }
 
     fn poll_output_device(&mut self) {
+        #[cfg(target_os = "windows")]
+        if self.output_mode == AudioOutputMode::WasapiExclusive {
+            return;
+        }
+
         let current_default_device = rodio::cpal::default_host().default_output_device();
         let current_name = current_default_device.as_ref().map(describe_output_device);
 
@@ -990,7 +1186,7 @@ impl PlayerController {
         // Attempt to open new output
         if current_name.is_some() {
             if let Ok((new_sink, name)) = Self::open_current_default_output() {
-                self.sink = Some(new_sink);
+                self.sink = Some(OutputSink::Shared(new_sink));
                 self.active_output_device_name = Some(name);
                 if let Some(p) = path {
                     info!("[AudioDeviceMonitor] Restoring playback to {}", p);
@@ -1690,15 +1886,20 @@ pub fn init_app() {
     }
 
     if let Ok(mut c) = controller().lock() {
-        match c.ensure_audio_output() {
-            Ok(()) => info!(
-                "[AudioDeviceMonitor] initial audio output ensured, sink={}",
-                c.sink.is_some()
-            ),
-            Err(message) => {
-                error!("[AudioDeviceMonitor] initial audio output failed: {}", message);
-                c.last_error = Some(format!("audio output initialization failed: {message}"));
-                super::notify_playback_state_changed();
+        #[cfg(target_os = "windows")]
+        if c.output_mode == AudioOutputMode::WasapiExclusive && c.release_on_pause {
+            info!("[WasapiExclusive] init_app: deferring exclusive sink opening until playback");
+        } else {
+            match c.ensure_audio_output() {
+                Ok(()) => info!(
+                    "[AudioDeviceMonitor] initial audio output ensured, sink={}",
+                    c.sink.is_some()
+                ),
+                Err(message) => {
+                    error!("[AudioDeviceMonitor] initial audio output failed: {}", message);
+                    c.last_error = Some(format!("audio output initialization failed: {message}"));
+                    super::notify_playback_state_changed();
+                }
             }
         }
     }
@@ -1783,16 +1984,17 @@ pub fn play_audio(fade_duration_ms: i64) -> Result<(), String> {
     let duration = Duration::from_millis(fade_duration_ms.max(0) as u64);
     if !duration.is_zero() {
         let master_volume = c.volume;
-        c.play_all();
+        c.play_all()?;
         if let Some(deck) = c.current_deck.as_mut() {
             deck.gain = 0.0;
             deck.apply_master_volume(master_volume);
         }
         c.start_volume_fade(0.0, 1.0, duration, false);
     } else {
-        c.play_all();
+        c.play_all()?;
     }
     c.last_error = None;
+    super::notify_playback_state_changed();
     Ok(())
 }
 
@@ -1811,15 +2013,18 @@ pub fn pause_audio(fade_duration_ms: i64) -> Result<(), String> {
     } else {
         c.pause_fade_in_progress = false;
         c.pause_all();
+        super::notify_playback_state_changed();
     }
     Ok(())
 }
 
 pub fn toggle_audio() -> Result<bool, String> {
-    let c = controller()
+    let mut c = controller()
         .lock()
         .map_err(|_| "player lock poisoned".to_string())?;
-    c.toggle_all()
+    let res = c.toggle_all()?;
+    super::notify_playback_state_changed();
+    Ok(res)
 }
 
 pub fn seek_audio_ms(position_ms: i64) -> Result<(), String> {
@@ -1834,6 +2039,7 @@ pub fn seek_audio_ms(position_ms: i64) -> Result<(), String> {
 
     let target_ms = position_ms.max(0) as u64;
     let mut target = Duration::from_millis(target_ms);
+    let has_sink = c.sink.is_some();
     let Some(current) = c.current_deck.as_mut() else {
         return Err("audio is not loaded".to_string());
     };
@@ -1843,13 +2049,13 @@ pub fn seek_audio_ms(position_ms: i64) -> Result<(), String> {
     }
 
     let empty = current.player.empty();
-    let was_playing = current.is_playing();
+    let was_playing = current.is_playing() && has_sink;
     eprintln!(
         "[RustSeekLog] seek_audio_ms position_ms={} target_ms={} empty={} was_playing={}",
         position_ms, target_ms, empty, was_playing
     );
 
-    if !was_playing || target < current.source_start_offset {
+    if !was_playing || target < current.source_start_offset || !has_sink {
         let path = current.loaded_path.clone();
         eprintln!(
             "[RustSeekLog] not playing ({}) or target before source_start_offset, falling back to replace_current_from_path path={} was_playing={}",
@@ -1988,6 +2194,110 @@ pub fn get_audio_decode_engine() -> String {
 pub fn handle_device_changed() -> Result<(), String> {
     // Legacy stub: device switching is now fully handled by internal periodic polling in Rust.
     Ok(())
+}
+
+pub fn get_audio_output_devices() -> Result<Vec<AudioDeviceDesc>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        super::wasapi_sink::wasapi_impl::enumerate_wasapi_render_devices()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let mut list = Vec::new();
+        if let Some(dev) = rodio::cpal::default_host().default_output_device() {
+            let name = describe_output_device(&dev);
+            list.push(AudioDeviceDesc {
+                id: name.clone(),
+                name,
+                is_default: true,
+            });
+        }
+        Ok(list)
+    }
+}
+
+pub fn set_audio_output_mode(
+    mode: AudioOutputMode,
+    device_id: Option<String>,
+    release_on_pause: bool,
+    bit_perfect: bool,
+) -> Result<(), String> {
+    let mut c = controller()
+        .lock()
+        .map_err(|_| "player lock poisoned".to_string())?;
+
+    info!(
+        "[AudioOutput] Setting audio output mode: {:?}, device: {:?}, release_on_pause: {}, bit_perfect: {}",
+        mode, device_id, release_on_pause, bit_perfect
+    );
+
+    c.output_mode = mode;
+    c.target_output_device_id = device_id;
+    c.release_on_pause = release_on_pause;
+    c.bit_perfect = bit_perfect;
+
+    let was_playing = c.any_deck_playing();
+    let pos = c.public_position();
+    let path = c.public_path().map(str::to_string);
+
+    // Reset sink to force reinitialization with new backend/device
+    c.sink = None;
+    c.active_output_device_name = None;
+    if let Some(d) = c.current_deck.take() {
+        d.clear();
+    }
+    if let Some(d) = c.incoming_deck.take() {
+        d.clear();
+    }
+
+    if was_playing || !c.release_on_pause || c.output_mode != AudioOutputMode::WasapiExclusive {
+        if let Err(e) = c.ensure_audio_output() {
+            error!("[AudioOutput] Failed to open new audio output sink: {e}");
+            return Err(e);
+        }
+    }
+
+    if let Some(p) = path {
+        if let Err(message) = c.replace_current_from_path(&p, pos, was_playing) {
+            error!("[AudioOutput] Failed to resume track {p}: {message}");
+            c.last_error = Some(format!("resume track failed: {message}"));
+        }
+    }
+
+    super::notify_playback_state_changed();
+    Ok(())
+}
+
+pub fn get_active_audio_hardware_format() -> Option<ActiveAudioHardwareFormat> {
+    let c = controller().lock().ok()?;
+    match &c.sink {
+        #[cfg(target_os = "windows")]
+        Some(OutputSink::WasapiExclusive(w)) => {
+            let cfg = w.format_config();
+            Some(ActiveAudioHardwareFormat {
+                mode: AudioOutputMode::WasapiExclusive,
+                device_name: w.device_name().to_string(),
+                sample_rate: cfg.sample_rate,
+                bit_depth: cfg.bit_depth,
+                channels: cfg.channels,
+                is_bit_perfect: c.bit_perfect,
+            })
+        }
+        Some(OutputSink::Shared(s)) => {
+            Some(ActiveAudioHardwareFormat {
+                mode: AudioOutputMode::Shared,
+                device_name: c
+                    .active_output_device_name
+                    .clone()
+                    .unwrap_or_else(|| "Default Audio Device".to_string()),
+                sample_rate: s.config().sample_rate().get(),
+                bit_depth: 32,
+                channels: s.config().channel_count().get(),
+                is_bit_perfect: false,
+            })
+        }
+        None => None,
+    }
 }
 
 pub fn prepare_for_file_write() -> Result<(), String> {

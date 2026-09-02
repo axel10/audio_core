@@ -6,6 +6,9 @@ pub mod equalizer;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
 pub mod fft;
 
+#[cfg(target_os = "windows")]
+pub(crate) mod wasapi_sink;
+
 pub mod metadata;
 pub mod palette;
 
@@ -59,6 +62,29 @@ pub mod controller {
                 mode: FadeMode::Crossfade,
             }
         }
+    }
+
+    #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+    pub struct AudioDeviceDesc {
+        pub id: String,
+        pub name: String,
+        pub is_default: bool,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    pub enum AudioOutputMode {
+        Shared,
+        WasapiExclusive,
+    }
+
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    pub struct ActiveAudioHardwareFormat {
+        pub mode: AudioOutputMode,
+        pub device_name: String,
+        pub sample_rate: u32,
+        pub bit_depth: u16,
+        pub channels: u16,
+        pub is_bit_perfect: bool,
     }
 
     #[derive(Debug, Clone, Default)]
@@ -371,6 +397,20 @@ pub mod controller {
     }
     pub fn handle_device_changed() -> Result<(), String> {
         Ok(())
+    }
+    pub fn get_audio_output_devices() -> Result<Vec<AudioDeviceDesc>, String> {
+        Ok(Vec::new())
+    }
+    pub fn set_audio_output_mode(
+        _mode: AudioOutputMode,
+        _device_id: Option<String>,
+        _release_on_pause: bool,
+        _bit_perfect: bool,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+    pub fn get_active_audio_hardware_format() -> Option<ActiveAudioHardwareFormat> {
+        None
     }
 
     fn parse_target_path(path: Option<String>, empty_error: &str) -> Result<String, String> {

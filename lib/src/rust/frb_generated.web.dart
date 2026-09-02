@@ -95,7 +95,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String dco_decode_String(dynamic raw);
 
   @protected
+  ActiveAudioHardwareFormat dco_decode_active_audio_hardware_format(
+    dynamic raw,
+  );
+
+  @protected
   AudioDetails dco_decode_audio_details(dynamic raw);
+
+  @protected
+  AudioDeviceDesc dco_decode_audio_device_desc(dynamic raw);
+
+  @protected
+  AudioOutputMode dco_decode_audio_output_mode(dynamic raw);
 
   @protected
   bool dco_decode_bool(dynamic raw);
@@ -103,6 +114,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   BTreeMapStringU32
   dco_decode_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32(
+    dynamic raw,
+  );
+
+  @protected
+  ActiveAudioHardwareFormat dco_decode_box_autoadd_active_audio_hardware_format(
     dynamic raw,
   );
 
@@ -143,6 +159,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String> dco_decode_list_String(dynamic raw);
 
   @protected
+  List<AudioDeviceDesc> dco_decode_list_audio_device_desc(dynamic raw);
+
+  @protected
   Float32List dco_decode_list_prim_f_32_strict(dynamic raw);
 
   @protected
@@ -167,6 +186,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  ActiveAudioHardwareFormat?
+  dco_decode_opt_box_autoadd_active_audio_hardware_format(dynamic raw);
+
+  @protected
   int? dco_decode_opt_box_autoadd_i_32(dynamic raw);
 
   @protected
@@ -186,6 +209,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   TrackPicture dco_decode_track_picture(dynamic raw);
+
+  @protected
+  int dco_decode_u_16(dynamic raw);
 
   @protected
   int dco_decode_u_32(dynamic raw);
@@ -258,7 +284,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
+  ActiveAudioHardwareFormat sse_decode_active_audio_hardware_format(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   AudioDetails sse_decode_audio_details(SseDeserializer deserializer);
+
+  @protected
+  AudioDeviceDesc sse_decode_audio_device_desc(SseDeserializer deserializer);
+
+  @protected
+  AudioOutputMode sse_decode_audio_output_mode(SseDeserializer deserializer);
 
   @protected
   bool sse_decode_bool(SseDeserializer deserializer);
@@ -266,6 +303,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   BTreeMapStringU32
   sse_decode_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  ActiveAudioHardwareFormat sse_decode_box_autoadd_active_audio_hardware_format(
     SseDeserializer deserializer,
   );
 
@@ -310,6 +352,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String> sse_decode_list_String(SseDeserializer deserializer);
 
   @protected
+  List<AudioDeviceDesc> sse_decode_list_audio_device_desc(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   Float32List sse_decode_list_prim_f_32_strict(SseDeserializer deserializer);
 
   @protected
@@ -332,6 +379,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   BTreeMapStringU32?
   sse_decode_opt_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  ActiveAudioHardwareFormat?
+  sse_decode_opt_box_autoadd_active_audio_hardware_format(
     SseDeserializer deserializer,
   );
 
@@ -359,6 +412,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   TrackPicture sse_decode_track_picture(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_u_16(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_32(SseDeserializer deserializer);
@@ -443,7 +499,25 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_String(String self, SseSerializer serializer);
 
   @protected
+  void sse_encode_active_audio_hardware_format(
+    ActiveAudioHardwareFormat self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_audio_details(AudioDetails self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_audio_device_desc(
+    AudioDeviceDesc self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_audio_output_mode(
+    AudioOutputMode self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_bool(bool self, SseSerializer serializer);
@@ -452,6 +526,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void
   sse_encode_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerBTreeMapStringu32(
     BTreeMapStringU32 self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_active_audio_hardware_format(
+    ActiveAudioHardwareFormat self,
     SseSerializer serializer,
   );
 
@@ -501,6 +581,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_audio_device_desc(
+    List<AudioDeviceDesc> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_prim_f_32_strict(
     Float32List self,
     SseSerializer serializer,
@@ -538,6 +624,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_active_audio_hardware_format(
+    ActiveAudioHardwareFormat? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_i_32(int? self, SseSerializer serializer);
 
   @protected
@@ -566,6 +658,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_track_picture(TrackPicture self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_u_16(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_32(int self, SseSerializer serializer);
