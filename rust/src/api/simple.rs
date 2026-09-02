@@ -71,8 +71,9 @@ pub mod controller {
         pub is_default: bool,
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
     pub enum AudioOutputMode {
+        #[default]
         Shared,
         WasapiExclusive,
     }
