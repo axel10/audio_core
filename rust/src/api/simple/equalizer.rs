@@ -7,7 +7,12 @@ use std::sync::{
 };
 use std::time::Duration;
 
-pub const MAX_EQ_BANDS: usize = 20;
+pub const MAX_EQ_BANDS: usize = 32;
+pub const ISO_31_FREQUENCIES: [f32; 31] = [
+    20.0, 25.0, 31.5, 40.0, 50.0, 63.0, 80.0, 100.0, 125.0, 160.0, 200.0, 250.0, 315.0, 400.0,
+    500.0, 630.0, 800.0, 1000.0, 1250.0, 1600.0, 2000.0, 2500.0, 3150.0, 4000.0, 5000.0,
+    6300.0, 8000.0, 10000.0, 12500.0, 16000.0, 20000.0,
+];
 const MIN_EQ_CENTER_HZ: f32 = 32.0;
 const MAX_EQ_CENTER_HZ: f32 = 16_000.0;
 const DEFAULT_BASS_BOOST_HZ: f32 = 80.0;
@@ -446,6 +451,9 @@ where
 }
 
 fn band_center_frequency(index: usize, band_count: usize) -> f32 {
+    if band_count == 31 && index < 31 {
+        return ISO_31_FREQUENCIES[index];
+    }
     if band_count <= 1 {
         return 1_000.0;
     }
@@ -458,6 +466,9 @@ fn band_center_frequency(index: usize, band_count: usize) -> f32 {
 }
 
 fn band_q_factor(band_count: usize) -> f32 {
+    if band_count == 31 {
+        return 4.318;
+    }
     if band_count <= 1 {
         return 1.414;
     }

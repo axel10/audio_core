@@ -12,11 +12,18 @@ class EqualizerController extends ChangeNotifier {
 
   final AudioVisualizerParent _parent;
 
-  static const int maxEqualizerBands = 20;
+  static const int maxEqualizerBands = 32;
   static const double minFrequencyHz = 32.0;
   static const double maxFrequencyHz = 16000.0;
   static const double bassBoostFrequencyHz = 80.0;
   static const double bassBoostQ = 0.75;
+
+  /// Standard ISO 266 1/3-octave 31-band center frequencies (Hz).
+  static const List<double> standard31Frequencies = [
+    20.0, 25.0, 31.5, 40.0, 50.0, 63.0, 80.0, 100.0, 125.0, 160.0,
+    200.0, 250.0, 315.0, 400.0, 500.0, 630.0, 800.0, 1000.0, 1250.0, 1600.0,
+    2000.0, 2500.0, 3150.0, 4000.0, 5000.0, 6300.0, 8000.0, 10000.0, 12500.0, 16000.0, 20000.0,
+  ];
 
   EqualizerConfig _config = _makeDefaultConfig();
   EqualizerConfig get config => _config;
@@ -133,6 +140,7 @@ class EqualizerController extends ChangeNotifier {
     final count = (bandCount ?? _config.bandCount).clamp(0, maxEqualizerBands);
     if (count <= 0) return const [];
     if (count == 1) return const [1000.0];
+    if (count == 31) return standard31Frequencies;
     final ratio = maxFrequencyHz / minFrequencyHz;
     return List.generate(
       count,

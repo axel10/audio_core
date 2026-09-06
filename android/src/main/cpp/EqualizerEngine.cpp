@@ -154,9 +154,16 @@ void EqualizerEngine::init(int numBands, float sampleRate, int channels) {
     if (numBands < 1) return;
 
     float defaultFrequencies[] = {31.25, 62.5, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0};
+    const float iso31Frequencies[] = {
+        20.0f, 25.0f, 31.5f, 40.0f, 50.0f, 63.0f, 80.0f, 100.0f, 125.0f, 160.0f,
+        200.0f, 250.0f, 315.0f, 400.0f, 500.0f, 630.0f, 800.0f, 1000.0f, 1250.0f, 1600.0f,
+        2000.0f, 2500.0f, 3150.0f, 4000.0f, 5000.0f, 6300.0f, 8000.0f, 10000.0f, 12500.0f, 16000.0f, 20000.0f
+    };
     
     float qVal = 1.414f;
-    if (numBands > 1) {
+    if (numBands == 31) {
+        qVal = 4.318f;
+    } else if (numBands > 1) {
         float minFreq = 31.25f;
         float maxFreq = 16000.0f;
         float totalOctaves = std::log2(maxFreq / minFreq);
@@ -169,7 +176,9 @@ void EqualizerEngine::init(int numBands, float sampleRate, int channels) {
     
     for (int i = 0; i < numBands; ++i) {
         float freq;
-        if (numBands == 10) {
+        if (numBands == 31 && i < 31) {
+             freq = iso31Frequencies[i];
+        } else if (numBands == 10) {
              freq = defaultFrequencies[i];
         } else {
              float minFreq = 31.25f;
