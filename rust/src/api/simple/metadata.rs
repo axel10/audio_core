@@ -243,8 +243,24 @@ fn build_thumbnail(
     artwork_bytes: &[u8],
     max_size: usize,
 ) -> anyhow::Result<(Image, usize, usize)> {
-    let mut image = Image::read(ZCursor::new(artwork_bytes), DecoderOptions::default())
-        .map_err(|err| anyhow::anyhow!("failed to decode artwork image: {err}"))?;
+    let mut image = match Image::read(ZCursor::new(artwork_bytes), DecoderOptions::default()) {
+        Ok(img) => img,
+        Err(zune_err) => {
+            // Fallback to webp decoder if zune-image cannot decode (e.g. WebP / Unknown format)
+            if let Some(webp_image) = webp::Decoder::new(artwork_bytes).decode() {
+                let width = webp_image.width() as usize;
+                let height = webp_image.height() as usize;
+                let colorspace = if webp_image.is_alpha() {
+                    zune_core::colorspace::ColorSpace::RGBA
+                } else {
+                    zune_core::colorspace::ColorSpace::RGB
+                };
+                Image::from_u8(&webp_image, width, height, colorspace)
+            } else {
+                return Err(anyhow::anyhow!("failed to decode artwork image: {zune_err}"));
+            }
+        }
+    };
     let (width, height) = image.dimensions();
     if width == 0 || height == 0 {
         anyhow::bail!("failed to decode artwork image: decoded dimensions are 0x0");
