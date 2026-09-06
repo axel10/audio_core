@@ -201,7 +201,6 @@ class PlaylistController extends ChangeNotifier {
     }
   }
 
-  @internal
   Future<void> updatePlaylistTracks(
     String id,
     List<AudioTrack> newTracks, {
