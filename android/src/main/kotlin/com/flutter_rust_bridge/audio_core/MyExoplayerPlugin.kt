@@ -26,6 +26,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.RendererCapabilities
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -59,6 +60,9 @@ import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
 import io.flutter.plugin.common.PluginRegistry.ActivityResultListener
 import io.flutter.plugin.common.PluginRegistry.RequestPermissionsResultListener
+import com.flutter_rust_bridge.audio_core.extractor.DsfExtractor
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.ExtractorsFactory
 
 @UnstableApi
 private class FlacSkippingMediaCodecAudioRenderer(
@@ -310,9 +314,8 @@ class MyExoplayerPlugin :
                     return
                 }
 
-                // The vendored FFmpeg extension should only receive the FLAC
-                // stream because the MediaCodec renderer above explicitly
-                // rejects FLAC before renderer selection happens.
+                // The FFmpeg extension is the fallback for FLAC and the sole
+                // renderer for DSF, which Android's MediaCodec does not support.
                 out.add(
                     FfmpegAudioRenderer(
                         eventHandler,
@@ -338,7 +341,16 @@ class MyExoplayerPlugin :
             .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
 
+        val extractorsFactory = ExtractorsFactory {
+            arrayOf(
+                DsfExtractor(),
+                *DefaultExtractorsFactory().createExtractors(),
+            )
+        }
+        val mediaSourceFactory = DefaultMediaSourceFactory(safeContext, extractorsFactory)
+
         val player = ExoPlayer.Builder(safeContext, renderersFactory)
+            .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(audioAttributes, handleAudioFocus)
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(androidx.media3.common.C.WAKE_MODE_LOCAL)

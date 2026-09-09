@@ -77,8 +77,15 @@ import java.util.List;
     encoding = outputFloat ? C.ENCODING_PCM_FLOAT : C.ENCODING_PCM_16BIT;
     outputBufferSize =
         outputFloat ? INITIAL_OUTPUT_BUFFER_SIZE_32BIT : INITIAL_OUTPUT_BUFFER_SIZE_16BIT;
+    int inputSampleRate = getInputSampleRate(format);
     nativeContext =
-        ffmpegInitialize(codecName, extraData, outputFloat, format.sampleRate, format.channelCount);
+        ffmpegInitialize(
+            codecName,
+            extraData,
+            outputFloat,
+            inputSampleRate,
+            format.channelCount,
+            format.sampleRate);
     if (nativeContext == 0) {
       throw new FfmpegDecoderException("Initialization failed.");
     }
@@ -258,6 +265,21 @@ import java.util.List;
     }
   }
 
+  private static int getInputSampleRate(Format format) {
+    if (!"audio/x-dsf".equals(format.sampleMimeType) || format.initializationData.isEmpty()) {
+      return format.sampleRate;
+    }
+    byte[] dsdClockRate = format.initializationData.get(0);
+    if (dsdClockRate.length != 4) {
+      return format.sampleRate;
+    }
+    int dsdRate = (dsdClockRate[0] & 0xFF)
+        | ((dsdClockRate[1] & 0xFF) << 8)
+        | ((dsdClockRate[2] & 0xFF) << 16)
+        | ((dsdClockRate[3] & 0xFF) << 24);
+    return dsdRate > 0 && dsdRate % 8 == 0 ? dsdRate / 8 : format.sampleRate;
+  }
+
   private static byte[] getAlacExtraData(List<byte[]> initializationData) {
     // FFmpeg's ALAC decoder expects an ALAC atom, which contains the ALAC "magic cookie", as extra
     // data. initializationData[0] contains only the magic cookie, and so we need to package it into
@@ -354,7 +376,8 @@ import java.util.List;
       @Nullable byte[] extraData,
       boolean outputFloat,
       int rawSampleRate,
-      int rawChannelCount);
+      int rawChannelCount,
+      int outputSampleRate);
 
   private native int ffmpegDecode(
       long context,

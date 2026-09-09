@@ -149,6 +149,9 @@ public final class FfmpegLibrary {
         return "pcm_mulaw";
       case MimeTypes.AUDIO_ALAW:
         return "pcm_alaw";
+      case "audio/x-dsf":
+        // DSF stores its DSD bitstream least-significant-bit first.
+        return "dsd_lsbf";
       case MimeTypes.VIDEO_H264:
         return "h264";
       case MimeTypes.VIDEO_H265:

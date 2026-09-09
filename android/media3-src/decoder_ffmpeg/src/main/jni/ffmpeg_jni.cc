@@ -85,7 +85,8 @@ const AVCodec* getCodecByName(JNIEnv* env, jstring codecName);
  */
 AVCodecContext* createContext(JNIEnv* env, const AVCodec* codec,
                               jbyteArray extraData, jboolean outputFloat,
-                              jint rawSampleRate, jint rawChannelCount);
+                              jint rawSampleRate, jint rawChannelCount,
+                              jint outputSampleRate);
 
 struct GrowOutputBufferCallback {
   uint8_t* operator()(int requiredSize) const;
@@ -93,6 +94,11 @@ struct GrowOutputBufferCallback {
   JNIEnv* env;
   jobject thiz;
   jobject decoderOutputBuffer;
+};
+
+struct AudioResampleContext {
+  SwrContext* swr;
+  int output_sample_rate;
 };
 
 /**
@@ -156,14 +162,15 @@ LIBRARY_FUNC(jboolean, ffmpegHasDecoder, jstring codecName) {
 
 AUDIO_DECODER_FUNC(jlong, ffmpegInitialize, jstring codecName,
                    jbyteArray extraData, jboolean outputFloat,
-                   jint rawSampleRate, jint rawChannelCount) {
+                   jint rawSampleRate, jint rawChannelCount,
+                   jint outputSampleRate) {
   const AVCodec* codec = getCodecByName(env, codecName);
   if (!codec) {
     LOGE("Codec not found.");
     return 0L;
   }
   return (jlong)createContext(env, codec, extraData, outputFloat, rawSampleRate,
-                              rawChannelCount);
+                              rawChannelCount, outputSampleRate);
 }
 
 AUDIO_DECODER_FUNC(jint, ffmpegDecode, jlong context, jobject inputData,
@@ -225,7 +232,10 @@ AUDIO_DECODER_FUNC(jint, ffmpegGetSampleRate, jlong context) {
     LOGE("Context must be non-NULL.");
     return -1;
   }
-  return ((AVCodecContext*)context)->sample_rate;
+  AudioResampleContext* resampleContext =
+      static_cast<AudioResampleContext*>(((AVCodecContext*)context)->opaque);
+  return resampleContext ? resampleContext->output_sample_rate
+                         : ((AVCodecContext*)context)->sample_rate;
 }
 
 AUDIO_DECODER_FUNC(jlong, ffmpegReset, jlong jContext, jbyteArray extraData) {
@@ -249,7 +259,8 @@ AUDIO_DECODER_FUNC(jlong, ffmpegReset, jlong jContext, jbyteArray extraData) {
     }
     return (jlong)createContext(env, codec, extraData, outputFloat,
                                 /* rawSampleRate= */ -1,
-                                /* rawChannelCount= */ -1);
+                                /* rawChannelCount= */ -1,
+                                /* outputSampleRate= */ -1);
   }
 
   avcodec_flush_buffers(context);
@@ -274,7 +285,8 @@ const AVCodec* getCodecByName(JNIEnv* env, jstring codecName) {
 
 AVCodecContext* createContext(JNIEnv* env, const AVCodec* codec,
                               jbyteArray extraData, jboolean outputFloat,
-                              jint rawSampleRate, jint rawChannelCount) {
+                              jint rawSampleRate, jint rawChannelCount,
+                              jint outputSampleRate) {
   AVCodecContext* context = avcodec_alloc_context3(codec);
   if (!context) {
     LOGE("Failed to allocate context.");
@@ -295,11 +307,24 @@ AVCodecContext* createContext(JNIEnv* env, const AVCodec* codec,
     env->GetByteArrayRegion(extraData, 0, size, (jbyte*)context->extradata);
   }
   if (context->codec_id == AV_CODEC_ID_PCM_MULAW ||
-      context->codec_id == AV_CODEC_ID_PCM_ALAW) {
+      context->codec_id == AV_CODEC_ID_PCM_ALAW ||
+      context->codec_id == AV_CODEC_ID_DSD_LSBF ||
+      context->codec_id == AV_CODEC_ID_DSD_MSBF ||
+      context->codec_id == AV_CODEC_ID_DSD_LSBF_PLANAR ||
+      context->codec_id == AV_CODEC_ID_DSD_MSBF_PLANAR) {
     context->sample_rate = rawSampleRate;
     av_channel_layout_default(&context->ch_layout, rawChannelCount);
   }
   context->err_recognition = AV_EF_IGNORE_ERR;
+  AudioResampleContext* resampleContext =
+      static_cast<AudioResampleContext*>(av_mallocz(sizeof(AudioResampleContext)));
+  if (!resampleContext) {
+    releaseContext(context);
+    return NULL;
+  }
+  resampleContext->output_sample_rate =
+      outputSampleRate > 0 ? outputSampleRate : context->sample_rate;
+  context->opaque = resampleContext;
   int result = avcodec_open2(context, codec, NULL);
   if (result < 0) {
     logError("avcodec_open2", result);
@@ -345,13 +370,15 @@ int decodePacket(AVCodecContext* context, AVPacket* packet,
     int sampleCount = frame->nb_samples;
     int dataSize = av_samples_get_buffer_size(NULL, channelCount, sampleCount,
                                               sampleFormat, 1);
-    SwrContext* resampleContext = static_cast<SwrContext*>(context->opaque);
+    AudioResampleContext* audioResampleContext =
+        static_cast<AudioResampleContext*>(context->opaque);
+    SwrContext* resampleContext = audioResampleContext->swr;
     if (!resampleContext) {
       result =
           swr_alloc_set_opts2(&resampleContext,             // ps
                               &context->ch_layout,          // out_ch_layout
                               context->request_sample_fmt,  // out_sample_fmt
-                              sampleRate,                   // out_sample_rate
+                              audioResampleContext->output_sample_rate, // out_sample_rate
                               &context->ch_layout,          // in_ch_layout
                               sampleFormat,                 // in_sample_fmt
                               sampleRate,                   // in_sample_rate
@@ -369,7 +396,7 @@ int decodePacket(AVCodecContext* context, AVPacket* packet,
         av_frame_free(&frame);
         return transformError(result);
       }
-      context->opaque = resampleContext;
+      audioResampleContext->swr = resampleContext;
     }
 
     int outSampleSize = av_get_bytes_per_sample(context->request_sample_fmt);
@@ -388,21 +415,18 @@ int decodePacket(AVCodecContext* context, AVPacket* packet,
         return AUDIO_DECODER_ERROR_OTHER;
       }
     }
-    result = swr_convert(resampleContext, &outputBuffer, bufferOutSize,
+    result = swr_convert(resampleContext, &outputBuffer, outSamples,
                          (const uint8_t**)frame->data, frame->nb_samples);
     av_frame_free(&frame);
     if (result < 0) {
       logError("swr_convert", result);
       return AUDIO_DECODER_ERROR_INVALID_DATA;
     }
-    int available = swr_get_out_samples(resampleContext, 0);
-    if (available != 0) {
-      LOGE("Expected no samples remaining after resampling, but found %d.",
-           available);
-      return AUDIO_DECODER_ERROR_INVALID_DATA;
-    }
-    outputBuffer += bufferOutSize;
-    outSize += bufferOutSize;
+    int producedSize = result * outSampleSize * channelCount;
+    // A resampler may retain a small FIR-filter delay. It is consumed by the
+    // next packet and is only flushed once the stream reaches end of input.
+    outputBuffer += producedSize;
+    outSize += producedSize;
   }
   return outSize;
 }
@@ -423,9 +447,11 @@ void releaseContext(AVCodecContext* context) {
   if (!context) {
     return;
   }
-  SwrContext* swrContext;
-  if ((swrContext = (SwrContext*)context->opaque)) {
-    swr_free(&swrContext);
+  AudioResampleContext* resampleContext =
+      static_cast<AudioResampleContext*>(context->opaque);
+  if (resampleContext) {
+    swr_free(&resampleContext->swr);
+    av_free(resampleContext);
     context->opaque = NULL;
   }
   avcodec_free_context(&context);
