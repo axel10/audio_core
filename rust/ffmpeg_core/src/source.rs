@@ -9,6 +9,21 @@ use ffmpeg_next as ffmpeg;
 
 use crate::{ensure_initialized, AudioProbe, Error, Result};
 
+// DSD decoders expose a PCM-equivalent stream at the DSD clock rate divided
+// by eight (for example, 352.8 kHz for DSD64). It must be low-pass filtered
+// before downsampling; Rodio's output converter only discards samples.
+const DSD_OUTPUT_SAMPLE_RATE: u32 = 48_000;
+
+fn is_dsd_codec(codec_id: ffmpeg::codec::Id) -> bool {
+    matches!(
+        codec_id,
+        ffmpeg::codec::Id::DSD_LSBF
+            | ffmpeg::codec::Id::DSD_MSBF
+            | ffmpeg::codec::Id::DSD_LSBF_PLANAR
+            | ffmpeg::codec::Id::DSD_MSBF_PLANAR
+    )
+}
+
 fn is_again(error: &ffmpeg::Error) -> bool {
     matches!(
         *error,
@@ -78,6 +93,7 @@ pub struct AudioSource {
     target_format: ffmpeg::format::Sample,
     target_layout: ffmpeg::ChannelLayout,
     target_rate: u32,
+    resample_to_fixed_rate: bool,
     pending_samples: VecDeque<f32>,
     finished: bool,
 }
@@ -140,9 +156,14 @@ impl AudioSource {
             return Err(Error::InvalidChannelCount);
         }
 
+        let resample_to_fixed_rate = is_dsd_codec(decoder.id());
         let target_format = ffmpeg::format::Sample::F32(SampleType::Packed);
         let target_layout = source_layout;
-        let target_rate = source_rate;
+        let target_rate = if resample_to_fixed_rate {
+            DSD_OUTPUT_SAMPLE_RATE
+        } else {
+            source_rate
+        };
         let resampler = build_resampler(
             source_format,
             source_layout,
@@ -162,7 +183,7 @@ impl AudioSource {
         let total_duration = input_duration(&input, source_rate);
         let probe = AudioProbe {
             channels: channel_count,
-            sample_rate: source_rate,
+            sample_rate: target_rate,
             total_duration,
             seekable: true,
         };
@@ -179,6 +200,7 @@ impl AudioSource {
             target_format,
             target_layout,
             target_rate,
+            resample_to_fixed_rate,
             pending_samples: VecDeque::new(),
             finished: false,
         })
@@ -256,9 +278,11 @@ impl AudioSource {
             self.source_layout = input_layout;
             self.source_rate = input_rate;
             self.target_layout = input_layout;
-            self.target_rate = input_rate;
+            if !self.resample_to_fixed_rate {
+                self.target_rate = input_rate;
+            }
             self.probe.channels = input_layout.channels() as u16;
-            self.probe.sample_rate = input_rate;
+            self.probe.sample_rate = self.target_rate;
             self.resampler = build_resampler(
                 self.source_format,
                 self.source_layout,
@@ -426,5 +450,20 @@ impl Iterator for AudioSource {
     fn size_hint(&self) -> (usize, Option<usize>) {
         let len = self.pending_samples.len();
         (len, Some(len))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_dsd_codec;
+    use ffmpeg_next as ffmpeg;
+
+    #[test]
+    fn identifies_all_ffmpeg_dsd_codecs() {
+        assert!(is_dsd_codec(ffmpeg::codec::Id::DSD_LSBF));
+        assert!(is_dsd_codec(ffmpeg::codec::Id::DSD_MSBF));
+        assert!(is_dsd_codec(ffmpeg::codec::Id::DSD_LSBF_PLANAR));
+        assert!(is_dsd_codec(ffmpeg::codec::Id::DSD_MSBF_PLANAR));
+        assert!(!is_dsd_codec(ffmpeg::codec::Id::FLAC));
     }
 }
