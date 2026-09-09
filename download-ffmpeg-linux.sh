@@ -10,7 +10,16 @@ if [[ -f "$target_dir/lib/pkgconfig/libavcodec.pc" ]]; then
   exit 0
 fi
 
-download_url="https://github.com/axel10/audio_core/releases/download/0.7/ffmpeg_lib_linux.tar.gz"
+# Load central configuration
+config_file="$script_dir/ffmpeg_version.env"
+if [[ -f "$config_file" ]]; then
+  # shellcheck source=/dev/null
+  source "$config_file"
+fi
+
+ffmpeg_version="${FFMPEG_VERSION:-0.7}"
+ffmpeg_base_url="${FFMPEG_BASE_URL:-https://github.com/axel10/audio_core/releases/download}"
+download_url="${FFMPEG_URL_LINUX:-$ffmpeg_base_url/$ffmpeg_version/ffmpeg_lib_linux.tar.gz}"
 temp_file="$repo_root/ffmpeg_lib_linux_temp.tar.gz"
 
 echo "Downloading precompiled FFmpeg Linux libraries from $download_url..."

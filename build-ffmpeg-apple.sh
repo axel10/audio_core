@@ -252,22 +252,8 @@ for target in "${TARGETS[@]}"; do
       --enable-network
       --enable-protocol=file,pipe,http,tcp
       --enable-bsf=aac_adtstoasc
-      --enable-parser=aac
-      --enable-parser=aac_latm
-      --enable-parser=flac
-      --enable-parser=mpegaudio
-      --enable-parser=opus
-      --enable-parser=vorbis
-      
-      --enable-demuxer=aac
-      --enable-demuxer=aiff
-      --enable-demuxer=caf
-      --enable-demuxer=flac
-      --enable-demuxer=mov
-      --enable-demuxer=mp3
-      --enable-demuxer=ogg
-      --enable-demuxer=wav
-      --enable-demuxer=matroska
+      --enable-parsers
+      --enable-demuxers
       
       # Add Encoders, Muxers, and Libs
       --enable-libmp3lame

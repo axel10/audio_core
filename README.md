@@ -46,6 +46,32 @@ sudo pacman -S --needed base-devel cmake pkgconf alsa-lib
 2. 准备本地 FFmpeg 产物。
 3. 再执行 Flutter/Linux 构建。
 
+### FFmpeg 产物版本与下载地址（统一配置）
+
+各平台预编译 FFmpeg 的**版本和下载地址集中在 `ffmpeg_version.env`**，不要在任何脚本或构建文件里硬编码：
+
+```ini
+FFMPEG_VERSION=0.7
+FFMPEG_BASE_URL=https://github.com/axel10/audio_core/releases/download
+
+# 可选：按平台整条覆盖下载地址（设置后忽略上面两项）
+# FFMPEG_URL_APPLE= / FFMPEG_URL_LINUX= / FFMPEG_URL_WINDOWS= / FFMPEG_URL_ANDROID=
+```
+
+读取该文件的入口：
+
+| 平台 | 入口 |
+| --- | --- |
+| Apple | `download-ffmpeg-apple.sh` |
+| Linux | `download-ffmpeg-linux.sh` |
+| Windows | `download-ffmpeg-windows.ps1` |
+| Android | `android/build.gradle` 的 `downloadFFmpeg` 任务 |
+
+升级版本时，除改 `FFMPEG_VERSION` 外，还要手工同步下面这些**离线场景**（它们无法读取 env）：
+
+- `packaging/flatpak/io.github.axel10.vynody.yml`：URL 和 `sha256` 都要改。
+- `.github/workflows/build-ffmpeg.yml`：发布用的 release tag 必须与 `FFMPEG_VERSION` 一致。
+
 ### 生成 Linux FFmpeg 产物
 
 仓库提供了 Linux FFmpeg 下载脚本：

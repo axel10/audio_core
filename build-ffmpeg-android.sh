@@ -371,21 +371,8 @@ configure_args=(
   --enable-protocol=pipe
   --enable-protocol=http
   --enable-protocol=tcp
-  --enable-parser=aac
-  --enable-parser=aac_latm
-  --enable-parser=flac
-  --enable-parser=mpegaudio
-  --enable-parser=opus
-  --enable-parser=vorbis
-  --enable-demuxer=aac
-  --enable-demuxer=aiff
-  --enable-demuxer=caf
-  --enable-demuxer=flac
-  --enable-demuxer=matroska
-  --enable-demuxer=mov
-  --enable-demuxer=mp3
-  --enable-demuxer=ogg
-  --enable-demuxer=wav
+  --enable-parsers
+  --enable-demuxers
   --enable-muxer=adts
   --enable-muxer=flac
   --enable-muxer=ipod

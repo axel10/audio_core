@@ -4,7 +4,24 @@ $scriptDir = Split-Path -Parent -Path $MyInvocation.MyCommand.Definition
 $repoRoot = Resolve-Path $scriptDir
 $targetDir = Join-Path -Path $repoRoot -ChildPath "windows\third_party\ffmpeg"
 
+$configFile = Join-Path -Path $repoRoot -ChildPath "ffmpeg_version.env"
 $ffmpegVersion = "0.7"
+$ffmpegBaseUrl = "https://github.com/axel10/audio_core/releases/download"
+$ffmpegUrlWindows = ""
+
+if (Test-Path -LiteralPath $configFile) {
+    Get-Content -LiteralPath $configFile | ForEach-Object {
+        $line = $_.Trim()
+        if ($line -and -not $line.StartsWith("#") -and $line -match '^([^=]+)=(.*)$') {
+            $k = $matches[1].Trim()
+            $v = $matches[2].Trim().Trim('"').Trim("'")
+            if ($k -eq "FFMPEG_VERSION") { $ffmpegVersion = $v }
+            elseif ($k -eq "FFMPEG_BASE_URL") { $ffmpegBaseUrl = $v }
+            elseif ($k -eq "FFMPEG_URL_WINDOWS") { $ffmpegUrlWindows = $v }
+        }
+    }
+}
+
 $versionFile = Join-Path -Path $targetDir -ChildPath "version.txt"
 $checkFile = Join-Path -Path $targetDir -ChildPath "bin\avcodec-62.dll"
 
@@ -17,7 +34,7 @@ if ((Test-Path -LiteralPath $checkFile) -and (Test-Path -LiteralPath $versionFil
     }
 }
 
-$downloadUrl = "https://github.com/axel10/audio_core/releases/download/$ffmpegVersion/ffmpeg_lib_windows.zip"
+$downloadUrl = if ($ffmpegUrlWindows) { $ffmpegUrlWindows } else { "$ffmpegBaseUrl/$ffmpegVersion/ffmpeg_lib_windows.zip" }
 $tempFile = Join-Path -Path $repoRoot -ChildPath "ffmpeg_lib_windows_temp.zip"
 
 Write-Host "Downloading precompiled FFmpeg Windows libraries from $downloadUrl..."

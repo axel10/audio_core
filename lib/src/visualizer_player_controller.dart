@@ -428,11 +428,6 @@ class AudioCoreController extends ChangeNotifier
 
     // Pass remote HTTP/HTTPS streams through the local progressive cache proxy
     if (uri.startsWith('http://') || uri.startsWith('https://')) {
-      // Don't proxy if already pointing to local loopback proxy
-      if (uri.startsWith('http://127.0.0.1:') || uri.startsWith('http://localhost:')) {
-        return uri;
-      }
-
       final effectiveKey = cacheKey ?? uri;
       try {
         if (await streamCacheManager.isTrackCached(effectiveKey)) {
@@ -442,6 +437,11 @@ class AudioCoreController extends ChangeNotifier
           return cachedFile.path;
         }
       } catch (_) {}
+
+      // Don't proxy if already pointing to local loopback proxy
+      if (uri.startsWith('http://127.0.0.1:') || uri.startsWith('http://localhost:')) {
+        return uri;
+      }
 
       try {
         if (!streamCacheProxy.isRunning) {

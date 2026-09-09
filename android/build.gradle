@@ -114,17 +114,56 @@ cargokit {
 
 task downloadFFmpeg {
     def targetDir = file("ffmpeg_lib")
+    // Central configuration: audio_core/ffmpeg_version.env. Declared as an input so that
+    // bumping FFMPEG_VERSION invalidates the task and triggers a re-download.
+    def configFile = file("../ffmpeg_version.env")
+    if (configFile.exists()) {
+        inputs.file(configFile)
+    }
     outputs.dir(targetDir)
 
     doLast {
-        if (!targetDir.exists() || targetDir.list().length == 0) {
+        def ffmpegVersion = "0.7"
+        def ffmpegBaseUrl = "https://github.com/axel10/audio_core/releases/download"
+        def ffmpegUrlAndroid = ""
+
+        if (configFile.exists()) {
+            for (String rawLine : configFile.readLines()) {
+                def entry = rawLine.trim()
+                if (!entry || entry.startsWith("#")) continue
+                def separator = entry.indexOf('=')
+                if (separator <= 0) continue
+                def key = entry.substring(0, separator).trim()
+                def value = entry.substring(separator + 1).trim()
+                if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+                    value = value.substring(1, value.length() - 1)
+                }
+                if (key == "FFMPEG_VERSION") {
+                    ffmpegVersion = value
+                } else if (key == "FFMPEG_BASE_URL") {
+                    ffmpegBaseUrl = value
+                } else if (key == "FFMPEG_URL_ANDROID") {
+                    ffmpegUrlAndroid = value
+                }
+            }
+        }
+
+        def versionFile = new File(targetDir, "version.txt")
+        def hasBinaries = targetDir.exists() && targetDir.list().length > 0
+        def isUpToDate = hasBinaries && versionFile.exists() && versionFile.text.trim() == ffmpegVersion
+
+        if (!isUpToDate) {
+            if (hasBinaries) {
+                println "Existing FFmpeg Android binaries do not match version ${ffmpegVersion}, refreshing..."
+                targetDir.deleteDir()
+            }
             println "--------------------------------------------------------"
-            println "FFmpeg precompiled binaries for Android not found."
+            println "FFmpeg precompiled binaries for Android (${ffmpegVersion}) not found."
             println "Downloading from GitHub Releases..."
             println "--------------------------------------------------------"
             
             targetDir.mkdirs()
-            def downloadUrl = "https://github.com/axel10/audio_core/releases/download/0.7/ffmpeg_lib_android.tar.gz"
+            def downloadUrl = ffmpegUrlAndroid ? ffmpegUrlAndroid : "${ffmpegBaseUrl}/${ffmpegVersion}/ffmpeg_lib_android.tar.gz"
             def tempFile = file("ffmpeg_lib_temp.tar.gz")
             
             try {
@@ -152,6 +191,7 @@ task downloadFFmpeg {
                     into file("..")
                 }
                 println "FFmpeg binaries downloaded and extracted successfully!"
+                versionFile.text = ffmpegVersion
             } catch (Exception e) {
                 if (tempFile.exists()) {
                     tempFile.delete()

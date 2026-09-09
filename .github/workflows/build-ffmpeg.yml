@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'GitHub Release Tag to publish to (e.g. 0.0.1). Leave empty to compile without publishing.'
+        description: 'GitHub Release Tag to publish to (e.g. 0.0.1). Leave empty to compile without publishing. Must match FFMPEG_VERSION in ffmpeg_version.env.'
         required: false
         default: ''
   push:
