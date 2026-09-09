@@ -1853,9 +1853,9 @@ class MyExoplayerPlugin :
 
                 val musicFiles = mutableListOf<String>()
                 val supportedExtensions = setOf(
-                    "aac", "aif", "aiff", "alac", "caf", "flac", 
-                    "m4a", "m4b", "m4p", "mid", "midi", "mp3", 
-                    "ogg", "opus", "wav", "webm"
+                    "aac", "aif", "aiff", "alac", "ape", "caf", "dff",
+                    "dsf", "flac", "m4a", "m4b", "m4p", "mid", "midi",
+                    "mp3", "ogg", "opus", "wav", "webm", "wma"
                 )
 
                 val targetDocId = DocumentsContract.getDocumentId(targetDir.uri)
