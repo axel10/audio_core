@@ -472,22 +472,94 @@ Future<AudioDetails> getAudioDetailsWithFlutterTaglib({
       final info = file.audioInfo;
       final fileObj = File(candidate);
       final fileSize = fileObj.existsSync() ? fileObj.lengthSync() : 0;
-      final ext = p.extension(candidate).replaceAll('.', '').toLowerCase();
 
-      final rawFormat = ext;
-      String formatName = rawFormat;
-      if (rawFormat == 'mpeg') {
-        formatName = 'mp3';
-      } else if (rawFormat == 'mp4') {
-        formatName = 'm4a';
+      final detectedFormat = (file.format ?? info.format)?.trim().toLowerCase();
+      String formatName = '';
+      String codecName = '';
+
+      if (detectedFormat != null &&
+          detectedFormat.isNotEmpty &&
+          detectedFormat != 'cache' &&
+          detectedFormat != 'tmp') {
+        if (detectedFormat == 'mpeg' ||
+            detectedFormat == 'mp3' ||
+            detectedFormat == 'mp1' ||
+            detectedFormat == 'mp2') {
+          formatName = 'mp3';
+          codecName = 'mp3';
+        } else if (detectedFormat == 'flac' || detectedFormat == 'oggflac') {
+          formatName = 'flac';
+          codecName = 'flac';
+        } else if (detectedFormat == 'aac') {
+          formatName = 'm4a';
+          codecName = 'aac';
+        } else if (detectedFormat == 'alac') {
+          formatName = 'm4a';
+          codecName = 'alac';
+        } else if (detectedFormat == 'mp4') {
+          formatName = 'm4a';
+          codecName = 'aac';
+        } else if (detectedFormat == 'vorbis' || detectedFormat == 'ogg') {
+          formatName = 'ogg';
+          codecName = 'vorbis';
+        } else if (detectedFormat == 'opus') {
+          formatName = 'opus';
+          codecName = 'opus';
+        } else if (detectedFormat == 'wav') {
+          formatName = 'wav';
+          codecName = 'pcm';
+        } else if (detectedFormat == 'aiff') {
+          formatName = 'aiff';
+          codecName = 'pcm';
+        } else if (detectedFormat == 'ape') {
+          formatName = 'ape';
+          codecName = 'ape';
+        } else if (detectedFormat == 'wma') {
+          formatName = 'wma';
+          codecName = 'wma';
+        } else if (detectedFormat == 'wavpack') {
+          formatName = 'wv';
+          codecName = 'wavpack';
+        } else if (detectedFormat == 'mpc') {
+          formatName = 'mpc';
+          codecName = 'musepack';
+        } else if (detectedFormat == 'tta') {
+          formatName = 'tta';
+          codecName = 'tta';
+        } else if (detectedFormat == 'dsf' || detectedFormat == 'dff') {
+          formatName = detectedFormat;
+          codecName = 'dsd';
+        } else {
+          formatName = detectedFormat;
+          codecName = detectedFormat;
+        }
       }
 
-      final rawCodec = ext;
-      String codecName = rawCodec;
-      if (rawCodec == 'mpeg') {
-        codecName = 'mp3';
-      } else if (rawCodec == 'mp4') {
-        codecName = 'aac';
+      // Fallback: resolve from candidate extension or fallbackMediaUri if TagLib format was missing
+      if (formatName.isEmpty || codecName.isEmpty) {
+        var ext = p.extension(candidate).replaceAll('.', '').toLowerCase();
+        if (ext == 'cache' || ext == 'tmp') ext = '';
+        if (ext.isEmpty && fallbackMediaUri != null) {
+          var fbExt = p.extension(fallbackMediaUri).replaceAll('.', '').toLowerCase();
+          if (fbExt.contains('?')) fbExt = fbExt.split('?').first;
+          if (fbExt != 'cache' && fbExt != 'tmp') {
+            ext = fbExt;
+          }
+        }
+        if (ext.isNotEmpty) {
+          if (formatName.isEmpty) {
+            formatName = (ext == 'mpeg') ? 'mp3' : (ext == 'mp4' ? 'm4a' : ext);
+          }
+          if (codecName.isEmpty) {
+            if (ext == 'mpeg' || ext == 'mp3') {
+              codecName = 'mp3';
+            } else if (ext == 'mp4' || ext == 'm4a') {
+              codecName = 'aac';
+            } else {
+              codecName = ext;
+            }
+          }
+        }
       }
 
       return AudioDetails(

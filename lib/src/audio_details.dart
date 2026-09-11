@@ -54,6 +54,30 @@ class AudioDetails {
     );
   }
 
+  AudioDetails copyWith({
+    String? formatName,
+    String? codecName,
+    Duration? duration,
+    int? bitrate,
+    int? sampleRate,
+    int? channels,
+    int? bitDepth,
+    String? bitrateMode,
+    int? fileSize,
+  }) {
+    return AudioDetails(
+      formatName: formatName ?? this.formatName,
+      codecName: codecName ?? this.codecName,
+      duration: duration ?? this.duration,
+      bitrate: bitrate ?? this.bitrate,
+      sampleRate: sampleRate ?? this.sampleRate,
+      channels: channels ?? this.channels,
+      bitDepth: bitDepth ?? this.bitDepth,
+      bitrateMode: bitrateMode ?? this.bitrateMode,
+      fileSize: fileSize ?? this.fileSize,
+    );
+  }
+
   @override
   String toString() {
     return 'AudioDetails(formatName: $formatName, codecName: $codecName, duration: $duration, bitrate: $bitrate, sampleRate: $sampleRate, channels: $channels, bitDepth: $bitDepth, bitrateMode: $bitrateMode, fileSize: $fileSize)';

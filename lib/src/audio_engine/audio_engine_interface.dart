@@ -159,6 +159,7 @@ abstract class AudioEngine {
 
   Future<AudioDetails> getAudioDetails({
     required String path,
+    String? fallbackMediaUri,
   }) async {
     throw UnimplementedError(
       'getAudioDetails is not implemented on this platform.',

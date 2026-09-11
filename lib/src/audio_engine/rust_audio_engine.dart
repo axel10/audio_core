@@ -431,8 +431,14 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
-  Future<AudioDetails> getAudioDetails({required String path}) async {
-    return getAudioDetailsWithFlutterTaglib(path: path);
+  Future<AudioDetails> getAudioDetails({
+    required String path,
+    String? fallbackMediaUri,
+  }) async {
+    return getAudioDetailsWithFlutterTaglib(
+      path: path,
+      fallbackMediaUri: fallbackMediaUri,
+    );
   }
 
   @override
