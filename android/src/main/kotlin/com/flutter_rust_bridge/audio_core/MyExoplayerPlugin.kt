@@ -1864,11 +1864,19 @@ class MyExoplayerPlugin :
                 }
 
                 val musicFiles = mutableListOf<String>()
-                val supportedExtensions = setOf(
-                    "aac", "aif", "aiff", "alac", "ape", "caf", "dff",
-                    "dsf", "flac", "m4a", "m4b", "m4p", "mid", "midi",
-                    "mp3", "ogg", "opus", "wav", "webm", "wma"
-                )
+                val customExtensions = (arguments["extensions"] as? List<*>)
+                    ?.filterIsInstance<String>()
+                    ?.map { it.lowercase().removePrefix(".") }
+                    ?.toSet()
+                val supportedExtensions = if (!customExtensions.isNullOrEmpty()) {
+                    customExtensions
+                } else {
+                    setOf(
+                        "aac", "aif", "aiff", "alac", "ape", "caf", "dff",
+                        "dsf", "flac", "m4a", "m4b", "m4p", "mid", "midi",
+                        "mp3", "ogg", "opus", "wav", "webm", "wma"
+                    )
+                }
 
                 val targetDocId = DocumentsContract.getDocumentId(targetDir.uri)
                 val queue = java.util.ArrayDeque<Pair<String, String>>()
