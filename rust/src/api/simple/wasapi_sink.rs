@@ -188,12 +188,15 @@ pub(crate) mod wasapi_impl {
         target_sample_rate: u32,
         channels: u16,
     ) -> Result<WasapiFormatConfig, String> {
+        // Prioritize Integer PCM formats over IEEE Float in exclusive mode.
+        // Many USB DACs report support for Float32 in exclusive mode, but produce
+        // loud static/distortion or cannot handle it properly in hardware.
         let candidates = [
-            SampleType::Float32,
-            SampleType::Int24In32,
             SampleType::Int32,
-            SampleType::Int24In24,
+            SampleType::Int24In32,
             SampleType::Int16,
+            SampleType::Int24In24,
+            SampleType::Float32,
         ];
 
         for &st in &candidates {
@@ -308,12 +311,22 @@ pub(crate) mod wasapi_impl {
                 let mut min_period: i64 = 0;
                 let _ = audio_client.GetDevicePeriod(Some(&mut default_period), Some(&mut min_period));
 
-                let mut buffer_duration = if min_period > 0 {
-                    min_period
-                } else if default_period > 0 {
-                    default_period
+                // For WASAPI exclusive mode, using the hardware minimum period (min_period) on USB DACs
+                // easily causes buffer underruns (clicks, pops, static) due to micro-scheduling jitter.
+                // A safe buffer duration of 50ms (500,000 in 100-ns units) prevents underruns while keeping
+                // latency imperceptible. Ensure it respects device limits (>= min_period).
+                const TARGET_SAFE_PERIOD: i64 = 500_000; // 50ms
+
+                let base_period = if default_period > 0 {
+                    default_period.max(TARGET_SAFE_PERIOD)
                 } else {
-                    100_000 // 10ms (100,000 in 100-nanosecond units)
+                    TARGET_SAFE_PERIOD
+                };
+
+                let mut buffer_duration = if min_period > 0 {
+                    base_period.max(min_period)
+                } else {
+                    base_period
                 };
 
                 let p_wf = &format_config.wave_format as *const _ as *const WAVEFORMATEX;
