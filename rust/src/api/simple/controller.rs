@@ -376,6 +376,7 @@ struct PlayerController {
     last_decode_engine: Option<String>,
     last_fft_request_time: Arc<Mutex<std::time::Instant>>,
     last_error: Option<String>,
+    sink_invalidated: bool,
 }
 
 struct PendingEdit {
@@ -616,6 +617,7 @@ impl PlayerController {
             last_decode_engine: None,
             last_fft_request_time: Arc::new(Mutex::new(std::time::Instant::now())),
             last_error: None,
+            sink_invalidated: false,
         }
     }
 
@@ -1027,13 +1029,32 @@ impl PlayerController {
 
     fn play_all(&mut self) -> Result<(), String> {
         #[cfg(target_os = "windows")]
-        if self.output_mode == AudioOutputMode::WasapiExclusive && self.sink.is_none() {
+        if self.output_mode == AudioOutputMode::WasapiExclusive
+            && (self.sink.is_none() || self.sink_invalidated)
+        {
             if let Some(path) = self.public_path().map(str::to_string) {
                 let pos = self.public_position();
                 info!(
                     "[WasapiExclusive] Re-acquiring exclusive sink on play at pos {:?}",
                     pos
                 );
+                self.sink_invalidated = false;
+                self.sink = None;
+                self.active_output_device_name = None;
+                return self.replace_current_from_path(&path, pos, true);
+            }
+        }
+
+        if self.sink_invalidated || self.sink.is_none() {
+            if let Some(path) = self.public_path().map(str::to_string) {
+                let pos = self.public_position();
+                info!(
+                    "[AudioOutput] Re-acquiring sink on play at pos {:?}",
+                    pos
+                );
+                self.sink_invalidated = false;
+                self.sink = None;
+                self.active_output_device_name = None;
                 return self.replace_current_from_path(&path, pos, true);
             }
         }
@@ -1072,7 +1093,9 @@ impl PlayerController {
         let public_deck = self
             .public_deck()
             .ok_or_else(|| "player is not initialized".to_string())?;
-        let is_paused = public_deck.player.is_paused() || self.sink.is_none();
+        let is_paused = public_deck.player.is_paused()
+            || self.sink.is_none()
+            || self.sink_invalidated;
         if is_paused {
             self.play_all()?;
             Ok(true)
@@ -1160,44 +1183,51 @@ impl PlayerController {
         let current_default_device = rodio::cpal::default_host().default_output_device();
         let current_name = current_default_device.as_ref().map(describe_output_device);
 
-        if self.active_output_device_name == current_name && self.sink.is_some() {
+        let device_changed = self.active_output_device_name != current_name;
+        let needs_recovery = self.sink_invalidated || self.sink.is_none() || device_changed;
+
+        if !needs_recovery {
             return;
         }
 
         info!(
-            "[AudioDeviceMonitor] Output device change detected: {:?} -> {:?}",
-            self.active_output_device_name, current_name
+            "[AudioDeviceMonitor] Output device change/recovery detected: device_changed={}, sink_invalidated={}, sink_is_none={}, current_name={:?}",
+            device_changed, self.sink_invalidated, self.sink.is_none(), current_name
         );
 
         let was_playing = self.any_deck_playing();
         let pos = self.public_position();
         let path = self.public_path().map(str::to_string);
 
-        // Clear current output
+        // Clear current dead output and reset invalidation flag
         self.sink = None;
         self.active_output_device_name = None;
-        if let Some(d) = self.current_deck.take() {
-            d.clear();
-        }
-        if let Some(d) = self.incoming_deck.take() {
-            d.clear();
-        }
+        self.sink_invalidated = false;
 
         // Attempt to open new output
         if current_name.is_some() {
-            if let Ok((new_sink, name)) = Self::open_current_default_output() {
-                self.sink = Some(OutputSink::Shared(new_sink));
-                self.active_output_device_name = Some(name);
-                if let Some(p) = path {
-                    info!("[AudioDeviceMonitor] Restoring playback to {}", p);
-                    if let Err(message) = self.replace_current_from_path(&p, pos, was_playing) {
-                        error!(
-                            "[AudioDeviceMonitor] playback restore failed path={}: {}",
-                            p, message
-                        );
-                        self.last_error = Some(format!("playback restore failed: {message}"));
-                        super::notify_playback_state_changed();
+            match Self::open_current_default_output() {
+                Ok((new_sink, name)) => {
+                    self.sink = Some(OutputSink::Shared(new_sink));
+                    self.active_output_device_name = Some(name);
+                    self.last_error = None;
+                    if let Some(p) = path {
+                        info!("[AudioDeviceMonitor] Restoring playback to {}", p);
+                        if let Err(message) = self.replace_current_from_path(&p, pos, was_playing) {
+                            error!(
+                                "[AudioDeviceMonitor] playback restore failed path={}: {}",
+                                p, message
+                            );
+                            self.last_error = Some(format!("playback restore failed: {message}"));
+                            super::notify_playback_state_changed();
+                        }
                     }
+                }
+                Err(e) => {
+                    warn!(
+                        "[AudioDeviceMonitor] Failed to open default audio output during recovery: {}",
+                        e
+                    );
                 }
             }
         }
@@ -1215,6 +1245,7 @@ impl PlayerController {
         }
         self.active_output_device_name = None;
         self.sink = None;
+        self.sink_invalidated = false;
         self.cached_path = None;
         self.cached_pcm = None;
         self.cached_channels = 0;
@@ -1293,9 +1324,10 @@ fn report_audio_stream_error(error: rodio::cpal::Error) {
     if is_transient {
         warn!("[AudioDeviceMonitor] Transient stream warning: {}", message);
     } else {
-        error!("[AudioDeviceMonitor] {}", message);
+        error!("[AudioDeviceMonitor] Fatal audio stream error: {}", message);
         if let Ok(mut controller) = controller().lock() {
             controller.last_error = Some(message);
+            controller.sink_invalidated = true;
             super::notify_playback_state_changed();
         }
     }
@@ -2243,6 +2275,7 @@ pub fn set_audio_output_mode(
     // Reset sink to force reinitialization with new backend/device
     c.sink = None;
     c.active_output_device_name = None;
+    c.sink_invalidated = false;
     if let Some(d) = c.current_deck.take() {
         d.clear();
     }
