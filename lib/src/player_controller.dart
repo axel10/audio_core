@@ -173,7 +173,13 @@ class PlayerController extends ChangeNotifier {
       debugPrint('[PlayerController] togglePlayPause ignored: Audio session is transitioning');
       return;
     }
-    if (_selectedPath == null) return;
+    if (_selectedPath == null) {
+      final handled = await _parent.handlePlayRequested();
+      if (!handled) {
+        await _parent.loadTrack(autoPlay: true, fadeSetting: fadeSetting);
+      }
+      return;
+    }
     if (_isPlaying) {
       await pause(fadeSetting: fadeSetting);
     } else {
@@ -190,7 +196,9 @@ class PlayerController extends ChangeNotifier {
       debugPrint('[PlayerController] pause ignored: Audio session is transitioning');
       return;
     }
-    debugPrint('[PlayerController] pause() called (withFade: $withFade, current isPlaying: $_isPlaying, state: $_playerState)');
+    debugPrint(
+      '[PlayerController] pause() called (withFade: $withFade, current isPlaying: $_isPlaying, state: $_playerState)',
+    );
     try {
       _lastPlayCommandTime = DateTime.fromMillisecondsSinceEpoch(0);
       final fadeDuration = _pauseResumeFadeDuration(
@@ -201,7 +209,9 @@ class PlayerController extends ChangeNotifier {
       _lastCommandTime = DateTime.now();
       _isPlaying = false;
       _playerState = PlayerState.paused;
-      debugPrint('[PlayerController] pause() completed: set isPlaying=false, state=paused');
+      debugPrint(
+        '[PlayerController] pause() completed: set isPlaying=false, state=paused',
+      );
     } catch (e) {
       debugPrint('[PlayerController] pause failed: $e');
       setError('Pause failed: $e');
@@ -218,7 +228,13 @@ class PlayerController extends ChangeNotifier {
       debugPrint('[PlayerController] play ignored: Audio session is transitioning');
       return;
     }
-    if (_selectedPath == null) return;
+    if (_selectedPath == null) {
+      final handled = await _parent.handlePlayRequested();
+      if (!handled) {
+        await _parent.loadTrack(autoPlay: true, fadeSetting: fadeSetting);
+      }
+      return;
+    }
     debugPrint('[PlayerController] play() called (path: $_selectedPath, state: $_playerState)');
 
     if (_playerState == PlayerState.completed) {
@@ -547,6 +563,7 @@ class ImmediateTransition extends PlaybackTransition {
     Duration? position,
   }) async {
     await player.load(uri);
+    if (player.currentState == PlayerState.error) return;
     if (position != null) await player.seek(position);
     if (autoPlay) await player.play(withFade: false, bypassGuard: true);
   }

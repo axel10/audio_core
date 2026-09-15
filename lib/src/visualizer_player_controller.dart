@@ -409,6 +409,7 @@ class AudioCoreController extends ChangeNotifier
         resolved = await _uriResolver!(rawUri);
       } catch (e) {
         debugPrint('[AudioCoreController] Custom URI resolver failed for "$rawUri": $e');
+        rethrow;
       }
     }
 
@@ -455,6 +456,13 @@ class AudioCoreController extends ChangeNotifier
       } catch (e) {
         debugPrint('[AudioCoreController] Stream proxy routing failed for $uri: $e');
       }
+    }
+
+    if (uri.contains('://') &&
+        !uri.startsWith('http://') &&
+        !uri.startsWith('https://') &&
+        !uri.startsWith('file://')) {
+      throw StateError('Unresolvable custom audio URI scheme: $uri');
     }
 
     return uri;
