@@ -12,6 +12,7 @@ class AudioStreamCacheManager {
   final Directory? customCacheDirectory;
   final int Function()? maxCacheSizeBytesGetter;
   void Function(String cacheKey, File file)? onTrackCached;
+  final Map<String, Future<File>> _activeDownloads = {};
 
   AudioStreamCacheManager({
     this.customCacheDirectory,
@@ -26,7 +27,9 @@ class AudioStreamCacheManager {
   /// Synchronous fallback cache directory.
   Directory get cacheDirectorySync {
     if (_cacheDir != null) return _cacheDir!;
-    final dir = Directory(p.join(Directory.systemTemp.path, defaultCacheSubdir));
+    final dir = Directory(
+      p.join(Directory.systemTemp.path, defaultCacheSubdir),
+    );
     if (!dir.existsSync()) {
       dir.createSync(recursive: true);
     }
@@ -48,7 +51,9 @@ class AudioStreamCacheManager {
       _cacheDir = targetDir;
       return targetDir;
     } catch (_) {
-      final targetDir = Directory(p.join(Directory.systemTemp.path, defaultCacheSubdir));
+      final targetDir = Directory(
+        p.join(Directory.systemTemp.path, defaultCacheSubdir),
+      );
       if (!await targetDir.exists()) {
         await targetDir.create(recursive: true);
       }
@@ -107,7 +112,10 @@ class AudioStreamCacheManager {
     int totalBytes = 0;
 
     try {
-      await for (final entity in dir.list(recursive: true, followLinks: false)) {
+      await for (final entity in dir.list(
+        recursive: true,
+        followLinks: false,
+      )) {
         if (entity is File && !entity.path.endsWith('.tmp')) {
           files.add(entity);
           totalBytes += await entity.length();
@@ -125,7 +133,9 @@ class AudioStreamCacheManager {
         stats[f] = DateTime.fromMillisecondsSinceEpoch(0);
       }
     }
-    files.sort((a, b) => (stats[a] ?? DateTime(0)).compareTo(stats[b] ?? DateTime(0)));
+    files.sort(
+      (a, b) => (stats[a] ?? DateTime(0)).compareTo(stats[b] ?? DateTime(0)),
+    );
 
     // Clean down to 85% of limit to avoid frequent thrashing
     final targetBytes = (limit * 0.85).toInt();
@@ -135,7 +145,9 @@ class AudioStreamCacheManager {
         final len = await f.length();
         await f.delete();
         totalBytes -= len;
-        debugPrint('[AudioStreamCache] Pruned cached file: ${f.path} ($len bytes)');
+        debugPrint(
+          '[AudioStreamCache] Pruned cached file: ${f.path} ($len bytes)',
+        );
       } catch (_) {}
     }
   }
@@ -146,7 +158,10 @@ class AudioStreamCacheManager {
     if (!await dir.exists()) return 0;
     int total = 0;
     try {
-      await for (final entity in dir.list(recursive: true, followLinks: false)) {
+      await for (final entity in dir.list(
+        recursive: true,
+        followLinks: false,
+      )) {
         if (entity is File && !entity.path.endsWith('.tmp')) {
           total += await entity.length();
         }
@@ -161,13 +176,38 @@ class AudioStreamCacheManager {
     required String remoteUrl,
     Map<String, String>? headers,
   }) async {
+    final active = _activeDownloads[cacheKey];
+    if (active != null) return active;
+
+    final future = _downloadTrack(
+      cacheKey: cacheKey,
+      remoteUrl: remoteUrl,
+      headers: headers,
+    );
+    _activeDownloads[cacheKey] = future;
+    try {
+      return await future;
+    } finally {
+      if (identical(_activeDownloads[cacheKey], future)) {
+        _activeDownloads.remove(cacheKey);
+      }
+    }
+  }
+
+  Future<File> _downloadTrack({
+    required String cacheKey,
+    required String remoteUrl,
+    Map<String, String>? headers,
+  }) async {
     final cachedFile = await getCacheFile(cacheKey);
     if (await cachedFile.exists() && await cachedFile.length() > 0) {
       await touchCacheFile(cachedFile);
       return cachedFile;
     }
 
-    final tmpFile = File('${cachedFile.path}.${DateTime.now().microsecondsSinceEpoch}.tmp');
+    final tmpFile = File(
+      '${cachedFile.path}.${DateTime.now().microsecondsSinceEpoch}.tmp',
+    );
     if (await tmpFile.exists()) {
       try {
         await tmpFile.delete();
@@ -178,7 +218,10 @@ class AudioStreamCacheManager {
       ..connectionTimeout = const Duration(seconds: 15)
       ..badCertificateCallback = ((cert, host, port) => true);
     try {
-      final safeUrl = remoteUrl.contains(' ') || remoteUrl.contains('[') || remoteUrl.contains(']')
+      final safeUrl =
+          remoteUrl.contains(' ') ||
+              remoteUrl.contains('[') ||
+              remoteUrl.contains(']')
           ? Uri.encodeFull(remoteUrl)
           : remoteUrl;
       final req = await client.getUrl(Uri.parse(safeUrl));
