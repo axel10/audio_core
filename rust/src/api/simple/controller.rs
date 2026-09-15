@@ -10,7 +10,7 @@ use rodio::{
 };
 use std::fs::File;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 use std::{cmp, f64};
@@ -452,7 +452,9 @@ where
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
-const PREFETCH_BUFFER_CAPACITY: usize = 44_100; // ~0.5 second of stereo 44.1kHz audio
+const BUFFER_DURATION_SECS: usize = 3;
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
+const MIN_PREFETCH_BUFFER_CAPACITY: usize = 176_400; // ~2 seconds of 44.1kHz stereo
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
 const MICRO_RAMP_SAMPLES: usize = 256; // ~5.8ms micro-ramp in at 44.1kHz stereo
 
@@ -465,6 +467,8 @@ struct PrefetchSource {
     sample_rate: rodio::SampleRate,
     total_duration: Option<Duration>,
     ramp_counter: usize,
+    last_sample: f32,
+    underrun_ramp: usize,
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
@@ -477,9 +481,20 @@ impl PrefetchSource {
         let sample_rate = source.sample_rate();
         let total_duration = source.total_duration();
 
-        let (mut producer, consumer) = rtrb::RingBuffer::<f32>::new(PREFETCH_BUFFER_CAPACITY);
+        let samples_per_sec = (sample_rate.get() as usize).saturating_mul(channels.get() as usize);
+        let capacity = samples_per_sec
+            .saturating_mul(BUFFER_DURATION_SECS)
+            .max(MIN_PREFETCH_BUFFER_CAPACITY);
+
+        // Target ~0.8s of audio pre-roll before releasing to playback engine
+        let target_preroll = (samples_per_sec * 8 / 10).min(capacity / 2).max(4096);
+
+        let (mut producer, consumer) = rtrb::RingBuffer::<f32>::new(capacity);
         let stop_flag = Arc::new(AtomicBool::new(false));
         let is_eof = Arc::new(AtomicBool::new(false));
+
+        let preroll_sync = Arc::new((Mutex::new(false), Condvar::new()));
+        let thread_preroll_sync = Arc::clone(&preroll_sync);
 
         let thread_stop_flag = Arc::clone(&stop_flag);
         let thread_is_eof = Arc::clone(&is_eof);
@@ -488,17 +503,28 @@ impl PrefetchSource {
             .name("AudioPrefetchWorker".to_string())
             .spawn(move || {
                 let mut source = source;
+                let mut preroll_notified = false;
+
                 while !thread_stop_flag.load(Ordering::Relaxed) {
                     let available = producer.slots();
                     if available == 0 {
-                        thread::sleep(Duration::from_millis(5));
+                        if !preroll_notified {
+                            let (lock, cvar) = &*thread_preroll_sync;
+                            if let Ok(mut ready) = lock.lock() {
+                                *ready = true;
+                                cvar.notify_all();
+                            }
+                            preroll_notified = true;
+                        }
+                        thread::sleep(Duration::from_millis(10));
                         continue;
                     }
 
-                    let chunk_limit = available.min(512);
+                    // Fill in chunks up to 4096 samples to sustain high I/O throughput
+                    let chunk_size = available.min(4096);
                     let mut eof = false;
 
-                    for _ in 0..chunk_limit {
+                    for _ in 0..chunk_size {
                         match source.next() {
                             Some(sample) => {
                                 if producer.push(sample).is_err() {
@@ -513,13 +539,45 @@ impl PrefetchSource {
                         }
                     }
 
+                    if !preroll_notified {
+                        let slots_filled = capacity.saturating_sub(producer.slots());
+                        if slots_filled >= target_preroll || eof {
+                            let (lock, cvar) = &*thread_preroll_sync;
+                            if let Ok(mut ready) = lock.lock() {
+                                *ready = true;
+                                cvar.notify_all();
+                            }
+                            preroll_notified = true;
+                        }
+                    }
+
                     if eof {
                         thread_is_eof.store(true, Ordering::Release);
                         break;
                     }
                 }
+
+                if !preroll_notified {
+                    let (lock, cvar) = &*thread_preroll_sync;
+                    if let Ok(mut ready) = lock.lock() {
+                        *ready = true;
+                        cvar.notify_all();
+                    }
+                }
             })
             .expect("spawn audio prefetch thread failed");
+
+        // Wait with a bounded timeout for pre-roll so start of playback has a full cushion
+        {
+            let (lock, cvar) = &*preroll_sync;
+            if let Ok(ready_guard) = lock.lock() {
+                let _ = cvar.wait_timeout_while(
+                    ready_guard,
+                    Duration::from_millis(500),
+                    |ready| !*ready,
+                );
+            }
+        }
 
         Self {
             consumer,
@@ -529,6 +587,8 @@ impl PrefetchSource {
             sample_rate,
             total_duration,
             ramp_counter: 0,
+            last_sample: 0.0,
+            underrun_ramp: MICRO_RAMP_SAMPLES,
         }
     }
 }
@@ -552,14 +612,26 @@ impl Iterator for PrefetchSource {
                     sample *= ramp;
                     self.ramp_counter += 1;
                 }
+                if self.underrun_ramp < MICRO_RAMP_SAMPLES {
+                    let ramp = self.underrun_ramp as f32 / MICRO_RAMP_SAMPLES as f32;
+                    sample *= ramp;
+                    self.underrun_ramp += 1;
+                }
+                self.last_sample = sample;
                 Some(sample)
             }
             Err(_) => {
                 if self.is_eof.load(Ordering::Acquire) && self.consumer.is_empty() {
                     None
                 } else {
-                    // Smooth underrun with silence rather than glitching
-                    Some(0.0)
+                    self.underrun_ramp = 0;
+                    if self.last_sample.abs() > 1e-4 {
+                        self.last_sample *= 0.85;
+                        Some(self.last_sample)
+                    } else {
+                        self.last_sample = 0.0;
+                        Some(0.0)
+                    }
                 }
             }
         }

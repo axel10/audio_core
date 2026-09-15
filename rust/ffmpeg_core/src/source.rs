@@ -13,6 +13,7 @@ use crate::{ensure_initialized, AudioProbe, Error, Result};
 // by eight (for example, 352.8 kHz for DSD64). It must be low-pass filtered
 // before downsampling; Rodio's output converter only discards samples.
 const DSD_OUTPUT_SAMPLE_RATE: u32 = 48_000;
+const PENDING_SAMPLES_THRESHOLD: usize = 16_384;
 
 fn is_dsd_codec(codec_id: ffmpeg::codec::Id) -> bool {
     matches!(
@@ -376,7 +377,7 @@ impl AudioSource {
             return Ok(false);
         }
 
-        while self.pending_samples.len() < 4096 {
+        while self.pending_samples.len() < PENDING_SAMPLES_THRESHOLD {
             let mut packet = ffmpeg::Packet::empty();
             match packet.read(&mut self.input) {
                 Ok(()) => {
