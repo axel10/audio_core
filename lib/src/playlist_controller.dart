@@ -248,6 +248,56 @@ class PlaylistController extends ChangeNotifier {
     await _reconcile(oldTrack: oldTrack, fadeSetting: fadeSetting);
   }
 
+  /// 在指定播放列表（默认当前活跃列表）的指定位置插入单曲并立即播放。
+  ///
+  /// 若 [index] 为 null 或超出范围，则自动追加到末尾。
+  Future<void> insertAndPlayTrack(
+    AudioTrack track, {
+    int? index,
+    String? playlistId,
+    FadeSettings? fadeSetting,
+  }) async {
+    await _ensureDefaultPlaylist();
+    final targetPlaylistId =
+        playlistId ?? _activePlaylistId ?? _defaultPlaylistId;
+    final playlist = playlistById(targetPlaylistId);
+    if (playlist == null) return;
+
+    final oldTrack = currentTrack;
+    final isSamePlaylist = _activePlaylistId == targetPlaylistId;
+
+    if (!isSamePlaylist) {
+      _activePlaylistId = targetPlaylistId;
+      _activePlaylistTracks
+        ..clear()
+        ..addAll(playlist.items);
+    }
+
+    final safeInsertIndex = (index == null ||
+            index < 0 ||
+            index > _activePlaylistTracks.length)
+        ? _activePlaylistTracks.length
+        : index;
+
+    _activePlaylistTracks.insert(safeInsertIndex, track);
+    _currentIndex = safeInsertIndex;
+
+    final idx = _playlists.indexWhere((p) => p.id == targetPlaylistId);
+    if (idx >= 0) {
+      _playlists[idx] = _playlists[idx].copyWith(
+        items: List.from(_activePlaylistTracks),
+      );
+    }
+
+    await _reconcile(
+      forceLoad: true,
+      autoPlay: true,
+      oldTrack: oldTrack,
+      reason: PlaybackReason.user,
+      fadeSetting: fadeSetting,
+    );
+  }
+
   Future<void> replaceTrack(
     AudioTrack track, {
     FadeSettings? fadeSetting,

@@ -572,6 +572,40 @@ class AudioCoreController extends ChangeNotifier
     );
   }
 
+  /// 在指定播放列表（默认当前活跃列表）的指定位置插入单曲并立即播放。
+  ///
+  /// 若 [index] 为 null 或超出范围，则自动追加到末尾。
+  Future<void> insertAndPlayTrack(
+    AudioTrack track, {
+    int? index,
+    String? playlistId,
+    FadeSettings? fadeSetting,
+  }) async {
+    if (!isInitialized) {
+      await initialize();
+    }
+    if (!isInitialized) return;
+
+    if (Platform.isIOS || Platform.isMacOS) {
+      final uri = Uri.tryParse(track.uri);
+      final isRemote = uri != null &&
+          (uri.scheme == 'http' ||
+              uri.scheme == 'https' ||
+              uri.scheme == 'webdav');
+      if (!isRemote) {
+        await registerPersistentAccess(path: track.uri);
+        await beginScopedAccess(path: track.uri);
+      }
+    }
+
+    await playlist.insertAndPlayTrack(
+      track,
+      index: index,
+      playlistId: playlistId,
+      fadeSetting: fadeSetting,
+    );
+  }
+
   /// Plays one or more local file paths by merging them into the queue.
   ///
   /// Incoming paths are deduplicated against each other and the current queue.
