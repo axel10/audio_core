@@ -135,6 +135,8 @@ class AudioCoreController extends ChangeNotifier
   Timer? _renderTick;
   Timer? _positionTick;
   static const Duration _positionTickInterval = Duration(milliseconds: 250);
+  static const Duration _backgroundPositionTickInterval = Duration(seconds: 10);
+  bool _isBackgroundThrottled = false;
   StreamSubscription<AudioStatus>? _playbackStateSubscription;
 
   bool get isSupported =>
@@ -922,10 +924,23 @@ class AudioCoreController extends ChangeNotifier
     }
   }
 
+  void setBackgroundThrottled(bool throttled) {
+    if (_isBackgroundThrottled == throttled) return;
+    _isBackgroundThrottled = throttled;
+    _stopPositionTick();
+    if (!throttled) {
+      _advanceLocalPosition();
+    }
+    _syncTicks();
+  }
+
   void _startPositionTick() {
     if (_positionTick != null) return;
-    _positionTick = Timer.periodic(_positionTickInterval, (_) {
-      _advanceLocalPosition(_positionTickInterval);
+    final interval = _isBackgroundThrottled
+        ? _backgroundPositionTickInterval
+        : _positionTickInterval;
+    _positionTick = Timer.periodic(interval, (_) {
+      _advanceLocalPosition(interval);
     });
   }
 
