@@ -49,6 +49,7 @@ impl Default for EqualizerConfig {
 impl EqualizerConfig {
     pub fn sanitized(mut self) -> Self {
         self.band_count = self.band_count.clamp(0, MAX_EQ_BANDS as i32);
+        self.bass_boost_db = self.bass_boost_db.clamp(0.0, 12.0);
         self.bass_boost_frequency_hz = self.bass_boost_frequency_hz.clamp(20.0, 240.0);
         self.bass_boost_q = self.bass_boost_q.clamp(0.1, 2.0);
 
