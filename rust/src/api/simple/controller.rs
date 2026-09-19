@@ -956,15 +956,17 @@ impl PlayerController {
         } else {
             Box::new(eq_source)
         };
-        let speed_source = SpeedSource::new(audio_source, Arc::clone(&self.playback_speed));
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
+        let prefetched_source: Box<dyn Source<Item = f32> + Send> = Box::new(PrefetchSource::new(audio_source));
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios")))]
+        let prefetched_source: Box<dyn Source<Item = f32> + Send> = audio_source;
+
+        let speed_source = SpeedSource::new(prefetched_source, Arc::clone(&self.playback_speed));
         let fft_source = FftSource::new(
             speed_source,
             Arc::clone(&latest_fft),
             Arc::clone(&self.last_fft_request_time),
         );
-        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
-        let playback_source = PrefetchSource::new(fft_source);
-        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios")))]
         let playback_source = fft_source;
 
         let end_path = path.to_string();
