@@ -194,6 +194,38 @@ class AudioStreamCacheManager {
     }
   }
 
+  /// Safely parses a URL into a Uri, encoding unencoded path segments without double-encoding.
+  static Uri safeParseUri(String url) {
+    try {
+      final parsed = Uri.parse(url);
+      if (parsed.hasScheme && parsed.hasAuthority) {
+        return parsed;
+      }
+    } catch (_) {}
+    try {
+      final schemeEnd = url.indexOf('://');
+      if (schemeEnd > 0) {
+        final scheme = url.substring(0, schemeEnd);
+        final rest = url.substring(schemeEnd + 3);
+        final pathStart = rest.indexOf('/');
+        if (pathStart >= 0) {
+          final hostPart = rest.substring(0, pathStart);
+          final rawPath = rest.substring(pathStart);
+          final segments = rawPath.split('/').map((seg) {
+            if (seg.isEmpty) return seg;
+            try {
+              return Uri.encodeComponent(Uri.decodeComponent(seg));
+            } catch (_) {
+              return Uri.encodeComponent(seg);
+            }
+          }).join('/');
+          return Uri.parse('$scheme://$hostPart$segments');
+        }
+      }
+    } catch (_) {}
+    return Uri.parse(Uri.encodeFull(url));
+  }
+
   Future<File> _downloadTrack({
     required String cacheKey,
     required String remoteUrl,
@@ -218,13 +250,8 @@ class AudioStreamCacheManager {
       ..connectionTimeout = const Duration(seconds: 15)
       ..badCertificateCallback = ((cert, host, port) => true);
     try {
-      final safeUrl =
-          remoteUrl.contains(' ') ||
-              remoteUrl.contains('[') ||
-              remoteUrl.contains(']')
-          ? Uri.encodeFull(remoteUrl)
-          : remoteUrl;
-      final req = await client.getUrl(Uri.parse(safeUrl));
+      final safeUri = safeParseUri(remoteUrl);
+      final req = await client.getUrl(safeUri);
       headers?.forEach((k, v) => req.headers.set(k, v));
       final resp = await req.close();
       if (resp.statusCode >= 200 && resp.statusCode < 400) {
@@ -249,12 +276,15 @@ class AudioStreamCacheManager {
       }
       throw StateError('Download failed with status ${resp.statusCode}');
     } catch (e) {
-      try {
-        if (await tmpFile.exists()) await tmpFile.delete();
-      } catch (_) {}
+      debugPrint('[AudioStreamCacheManager] Failed to download track ($remoteUrl): $e');
       rethrow;
     } finally {
       client.close();
+      if (await tmpFile.exists()) {
+        try {
+          await tmpFile.delete();
+        } catch (_) {}
+      }
     }
   }
 

@@ -25,10 +25,28 @@ class AudioStreamCacheProxy {
     try {
       final parsed = Uri.parse(url);
       if (parsed.hasScheme && parsed.hasAuthority) {
-        if (url.contains(' ') || url.contains('[') || url.contains(']')) {
-          return Uri.parse(Uri.encodeFull(url));
-        }
         return parsed;
+      }
+    } catch (_) {}
+    try {
+      final schemeEnd = url.indexOf('://');
+      if (schemeEnd > 0) {
+        final scheme = url.substring(0, schemeEnd);
+        final rest = url.substring(schemeEnd + 3);
+        final pathStart = rest.indexOf('/');
+        if (pathStart >= 0) {
+          final hostPart = rest.substring(0, pathStart);
+          final rawPath = rest.substring(pathStart);
+          final segments = rawPath.split('/').map((seg) {
+            if (seg.isEmpty) return seg;
+            try {
+              return Uri.encodeComponent(Uri.decodeComponent(seg));
+            } catch (_) {
+              return Uri.encodeComponent(seg);
+            }
+          }).join('/');
+          return Uri.parse('$scheme://$hostPart$segments');
+        }
       }
     } catch (_) {}
     return Uri.parse(Uri.encodeFull(url));
