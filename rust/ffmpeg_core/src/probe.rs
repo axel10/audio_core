@@ -9,6 +9,7 @@ pub struct AudioProbe {
     pub sample_rate: u32,
     pub total_duration: Option<Duration>,
     pub seekable: bool,
+    pub is_dsd: bool,
 }
 
 pub fn probe(path: impl AsRef<Path>) -> Result<AudioProbe> {

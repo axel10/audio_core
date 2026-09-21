@@ -473,7 +473,7 @@ pub(crate) mod wasapi_impl {
                                     );
                                     for s in slice.iter_mut() {
                                         let sample = mixer_source.next().unwrap_or(0.0).clamp(-1.0, 1.0);
-                                        *s = (sample * 2147483647.0) as i32;
+                                        *s = (sample * 2147483648.0).round().clamp(-2147483648.0, 2147483647.0) as i32;
                                     }
                                 }
                                 SampleType::Int24In32 => {
@@ -483,7 +483,7 @@ pub(crate) mod wasapi_impl {
                                     );
                                     for s in slice.iter_mut() {
                                         let sample = mixer_source.next().unwrap_or(0.0).clamp(-1.0, 1.0);
-                                        let val24 = (sample * 8388607.0) as i32;
+                                        let val24 = (sample * 8388608.0).round().clamp(-8388608.0, 8388607.0) as i32;
                                         *s = val24 << 8;
                                     }
                                 }
@@ -494,7 +494,7 @@ pub(crate) mod wasapi_impl {
                                     );
                                     for chunk in slice.chunks_exact_mut(3) {
                                         let sample = mixer_source.next().unwrap_or(0.0).clamp(-1.0, 1.0);
-                                        let val24 = (sample * 8388607.0) as i32;
+                                        let val24 = (sample * 8388608.0).round().clamp(-8388608.0, 8388607.0) as i32;
                                         let bytes = val24.to_le_bytes();
                                         chunk[0] = bytes[0];
                                         chunk[1] = bytes[1];

@@ -12,7 +12,10 @@ use crate::{ensure_initialized, AudioProbe, Error, Result};
 // DSD decoders expose a PCM-equivalent stream at the DSD clock rate divided
 // by eight (for example, 352.8 kHz for DSD64). It must be low-pass filtered
 // before downsampling; Rodio's output converter only discards samples.
-const DSD_OUTPUT_SAMPLE_RATE: u32 = 48_000;
+// Target 176.4 kHz (or 192 kHz for 48k-family DSD), providing clean power-of-2
+// integer decimation with FFmpeg polyphase filtering without 48kHz fractional artifacts.
+pub const DSD_OUTPUT_SAMPLE_RATE_44K: u32 = 176_400;
+pub const DSD_OUTPUT_SAMPLE_RATE_48K: u32 = 192_000;
 const PENDING_SAMPLES_THRESHOLD: usize = 16_384;
 
 fn is_dsd_codec(codec_id: ffmpeg::codec::Id) -> bool {
@@ -157,11 +160,16 @@ impl AudioSource {
             return Err(Error::InvalidChannelCount);
         }
 
-        let resample_to_fixed_rate = is_dsd_codec(decoder.id());
+        let is_dsd = is_dsd_codec(decoder.id());
+        let resample_to_fixed_rate = is_dsd;
         let target_format = ffmpeg::format::Sample::F32(SampleType::Packed);
         let target_layout = source_layout;
         let target_rate = if resample_to_fixed_rate {
-            DSD_OUTPUT_SAMPLE_RATE
+            if source_rate % 48_000 == 0 && source_rate % 44_100 != 0 {
+                DSD_OUTPUT_SAMPLE_RATE_48K
+            } else {
+                DSD_OUTPUT_SAMPLE_RATE_44K
+            }
         } else {
             source_rate
         };
@@ -187,6 +195,7 @@ impl AudioSource {
             sample_rate: target_rate,
             total_duration,
             seekable: true,
+            is_dsd,
         };
 
         Ok(Self {
@@ -209,6 +218,10 @@ impl AudioSource {
 
     pub fn probe(&self) -> &AudioProbe {
         &self.probe
+    }
+
+    pub fn is_dsd(&self) -> bool {
+        self.probe.is_dsd
     }
 
     pub fn channels(&self) -> u16 {
