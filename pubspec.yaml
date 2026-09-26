@@ -8,7 +8,6 @@ environment:
   flutter: '>=3.7.0'
 
 dependencies:
-  desktop_drop: ^0.7.0
   flutter:
     sdk: flutter
   file_picker: ^11.0.2
