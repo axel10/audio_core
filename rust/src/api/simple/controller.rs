@@ -516,7 +516,7 @@ impl PrefetchSource {
                             }
                             preroll_notified = true;
                         }
-                        thread::sleep(Duration::from_millis(10));
+                        thread::sleep(Duration::from_millis(50));
                         continue;
                     }
 
@@ -1005,6 +1005,9 @@ impl PlayerController {
             player.play();
         } else {
             player.pause();
+            if let Some(sink) = self.sink.as_ref() {
+                sink.pause();
+            }
             #[cfg(target_os = "windows")]
             if self.output_mode == AudioOutputMode::WasapiExclusive && self.release_on_pause {
                 info!("[WasapiExclusive] Releasing exclusive sink after paused deck setup");
@@ -1110,6 +1113,9 @@ impl PlayerController {
     fn mark_track_ended(&mut self, path: &str) {
         if self.public_path() == Some(path) {
             self.pending_playback_state = Some("ENDED".to_string());
+            if let Some(sink) = self.sink.as_ref() {
+                sink.pause();
+            }
             super::notify_playback_state_changed();
         }
     }
@@ -1308,6 +1314,8 @@ impl PlayerController {
                             self.last_error = Some(format!("playback restore failed: {message}"));
                             super::notify_playback_state_changed();
                         }
+                    } else if let Some(sink) = self.sink.as_ref() {
+                        sink.pause();
                     }
                 }
                 Err(e) => {
@@ -2006,14 +2014,23 @@ pub fn init_app() {
 
     if let Ok(mut c) = controller().lock() {
         #[cfg(target_os = "windows")]
-        if c.output_mode == AudioOutputMode::WasapiExclusive && c.release_on_pause {
+        let defer_sink = c.output_mode == AudioOutputMode::WasapiExclusive && c.release_on_pause;
+        #[cfg(not(target_os = "windows"))]
+        let defer_sink = false;
+
+        if defer_sink {
             info!("[WasapiExclusive] init_app: deferring exclusive sink opening until playback");
         } else {
             match c.ensure_audio_output() {
-                Ok(()) => info!(
-                    "[AudioDeviceMonitor] initial audio output ensured, sink={}",
-                    c.sink.is_some()
-                ),
+                Ok(()) => {
+                    info!(
+                        "[AudioDeviceMonitor] initial audio output ensured, sink={}",
+                        c.sink.is_some()
+                    );
+                    if let Some(sink) = c.sink.as_ref() {
+                        sink.pause();
+                    }
+                }
                 Err(message) => {
                     error!("[AudioDeviceMonitor] initial audio output failed: {}", message);
                     c.last_error = Some(format!("audio output initialization failed: {message}"));
@@ -2374,6 +2391,11 @@ pub fn set_audio_output_mode(
         if let Err(e) = c.ensure_audio_output() {
             error!("[AudioOutput] Failed to open new audio output sink: {e}");
             return Err(e);
+        }
+        if !was_playing && path.is_none() {
+            if let Some(sink) = c.sink.as_ref() {
+                sink.pause();
+            }
         }
     }
 
