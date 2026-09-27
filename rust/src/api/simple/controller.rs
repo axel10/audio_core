@@ -945,17 +945,24 @@ impl PlayerController {
             output_channels,
             output_sample_rate
         );
-        let normalized_source = UniformSourceIterator::new(
-            decoded_source,
-            output_channels,
-            output_sample_rate,
-        );
+        let from_channels = decoded_source.channels();
+        let from_sample_rate = decoded_source.sample_rate();
+        let normalized_source: Box<dyn Source<Item = f32> + Send> =
+            if from_channels == output_channels && from_sample_rate == output_sample_rate {
+                decoded_source
+            } else {
+                Box::new(UniformSourceIterator::new(
+                    decoded_source,
+                    output_channels,
+                    output_sample_rate,
+                ))
+            };
         let is_bit_perfect = self.output_mode == AudioOutputMode::WasapiExclusive && self.bit_perfect;
         let audio_source: Box<dyn Source<Item = f32> + Send> = if is_bit_perfect {
             if clamped_offset > Duration::ZERO && !seek_success {
                 Box::new(normalized_source.skip_duration(clamped_offset))
             } else {
-                Box::new(normalized_source)
+                normalized_source
             }
         } else {
             let eq_source = EqSource::new(normalized_source, Arc::clone(&self.equalizer));

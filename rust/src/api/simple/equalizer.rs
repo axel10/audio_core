@@ -394,17 +394,23 @@ where
         }
         self.sample_counter = self.sample_counter.wrapping_add(1);
 
-        let channel = min(self.channel_index, self.chains.len().saturating_sub(1));
+        let channel = self.channel_index;
+        self.channel_index += 1;
+        if self.channel_index >= self.channels {
+            self.channel_index = 0;
+        }
+
+        if !self.smoothed_config.enabled {
+            return sample;
+        }
+
+        let channel = min(channel, self.chains.len().saturating_sub(1));
         let output = self
             .chains
             .get_mut(channel)
             .map(|chain| chain.process_sample(sample))
             .unwrap_or(sample);
 
-        self.channel_index += 1;
-        if self.channel_index >= self.channels {
-            self.channel_index = 0;
-        }
         output
     }
 }

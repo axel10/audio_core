@@ -1891,7 +1891,7 @@ dependencies = [
 [[package]]
 name = "rodio"
 version = "0.22.2"
-source = "git+https://github.com/axel10/rodio#7d097370aa8054517e2ee3f5f4167f9c6ccd37d4"
+source = "git+https://github.com/axel10/rodio#6ffa69fbee0c847b5a73e4e8e5dde694465f6a34"
 dependencies = [
  "atomic_float",
  "cpal",
