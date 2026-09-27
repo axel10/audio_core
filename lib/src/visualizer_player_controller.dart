@@ -484,6 +484,18 @@ class AudioCoreController extends ChangeNotifier
       _stopAfterCurrentTrackPath = null;
     }
 
+    if (Platform.isIOS || Platform.isMacOS) {
+      final uri = Uri.tryParse(track.uri);
+      final isRemote = uri != null &&
+          (uri.scheme == 'http' ||
+              uri.scheme == 'https' ||
+              uri.scheme == 'webdav');
+      if (!isRemote) {
+        await registerPersistentAccess(path: track.uri);
+        await beginScopedAccess(path: track.uri);
+      }
+    }
+
     await player.performTransition(
       uri: track.uri,
       autoPlay: autoPlay,

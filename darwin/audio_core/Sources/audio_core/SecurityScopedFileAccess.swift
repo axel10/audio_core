@@ -13,37 +13,36 @@ final class SecurityScopedBookmarkStore {
     }
   }
 
-  func resolveURL(for path: String) throws -> URL {
+  /// Resolves the URL for a path.
+  /// 1. Exact match for single-file bookmark (e.g. externally opened file).
+  /// 2. If not matched, traverses upwards to find any ancestor folder with a stored bookmark.
+  /// Returns a tuple of (targetURL, resolvedParentScopeURL?).
+  func resolveURL(for path: String) throws -> (url: URL, parentScopeURL: URL?) {
     let candidateURL = Self.url(from: path)
     let key = Self.bookmarkKey(for: candidateURL)
 
     return try stateQueue.sync {
-      guard let bookmarkData = bookmarks[key] else {
-        return candidateURL
+      // 1. Exact match
+      if let bookmarkData = bookmarks[key] {
+        let resolved = try resolveBookmarkDataLocked(bookmarkData)
+        return (resolved, nil)
       }
 
-      var isStale = false
-      #if os(macOS)
-      let resolvedURL = try URL(
-        resolvingBookmarkData: bookmarkData,
-        options: [.withSecurityScope],
-        relativeTo: nil,
-        bookmarkDataIsStale: &isStale
-      )
-      #else
-      let resolvedURL = try URL(
-        resolvingBookmarkData: bookmarkData,
-        options: [],
-        relativeTo: nil,
-        bookmarkDataIsStale: &isStale
-      )
-      #endif
-
-      if isStale {
-        _ = rememberLocked(url: resolvedURL)
+      // 2. Upward traversal for ancestor directories
+      var current = candidateURL.deletingLastPathComponent()
+      while current.path != "/" && !current.path.isEmpty && current.pathComponents.count > 1 {
+        let parentKey = Self.bookmarkKey(for: current)
+        if let parentBookmarkData = bookmarks[parentKey] {
+          if let resolvedParent = try? resolveBookmarkDataLocked(parentBookmarkData) {
+            return (candidateURL, resolvedParent)
+          }
+        }
+        let next = current.deletingLastPathComponent()
+        if next.path == current.path { break }
+        current = next
       }
 
-      return resolvedURL
+      return (candidateURL, nil)
     }
   }
 
@@ -52,26 +51,7 @@ final class SecurityScopedBookmarkStore {
     guard url.isFileURL else { return false }
 
     return stateQueue.sync {
-      do {
-      #if os(macOS)
-      let bookmarkData = try url.bookmarkData(
-        options: [.withSecurityScope],
-        includingResourceValuesForKeys: nil,
-        relativeTo: nil
-      )
-      #else
-      let bookmarkData = try url.bookmarkData(
-        options: [],
-        includingResourceValuesForKeys: nil,
-        relativeTo: nil
-      )
-      #endif
-        bookmarks[Self.bookmarkKey(for: url)] = bookmarkData
-        UserDefaults.standard.set(bookmarks, forKey: storageKey)
-        return true
-      } catch {
-        return false
-      }
+      rememberLocked(url: url)
     }
   }
 
@@ -79,6 +59,23 @@ final class SecurityScopedBookmarkStore {
     let url = Self.url(from: path)
     return stateQueue.sync {
       bookmarks[Self.bookmarkKey(for: url)] != nil
+    }
+  }
+
+  func hasParentBookmark(for path: String) -> Bool {
+    let candidateURL = Self.url(from: path)
+    return stateQueue.sync {
+      var current = candidateURL.deletingLastPathComponent()
+      while current.path != "/" && !current.path.isEmpty && current.pathComponents.count > 1 {
+        let parentKey = Self.bookmarkKey(for: current)
+        if bookmarks[parentKey] != nil {
+          return true
+        }
+        let next = current.deletingLastPathComponent()
+        if next.path == current.path { break }
+        current = next
+      }
+      return false
     }
   }
 
@@ -94,6 +91,31 @@ final class SecurityScopedBookmarkStore {
       bookmarks.removeValue(forKey: key)
       UserDefaults.standard.set(bookmarks, forKey: storageKey)
     }
+  }
+
+  private func resolveBookmarkDataLocked(_ bookmarkData: Data) throws -> URL {
+    var isStale = false
+    #if os(macOS)
+    let resolvedURL = try URL(
+      resolvingBookmarkData: bookmarkData,
+      options: [.withSecurityScope],
+      relativeTo: nil,
+      bookmarkDataIsStale: &isStale
+    )
+    #else
+    let resolvedURL = try URL(
+      resolvingBookmarkData: bookmarkData,
+      options: [],
+      relativeTo: nil,
+      bookmarkDataIsStale: &isStale
+    )
+    #endif
+
+    if isStale {
+      _ = rememberLocked(url: resolvedURL)
+    }
+
+    return resolvedURL
   }
 
   private func rememberLocked(url: URL) -> Bool {
@@ -142,14 +164,25 @@ final class SecurityScopedFileAccessCoordinator {
   private let stateQueue = DispatchQueue(label: "audio_core.security_scoped_file_access")
 
   func resolveURL(for path: String) throws -> URL {
-    try bookmarkStore.resolveURL(for: path)
+    let (url, _) = try bookmarkStore.resolveURL(for: path)
+    return url
   }
 
   func acquireAccess(for path: String) throws -> URL {
-    let url = try resolveURL(for: path)
-    let key = Self.key(for: url)
+    let (url, parentScopeURL) = try bookmarkStore.resolveURL(for: path)
 
     stateQueue.sync {
+      if let parentURL = parentScopeURL {
+        let parentKey = Self.key(for: parentURL)
+        if activeAccessCounts[parentKey] == nil {
+          activeAccessCounts[parentKey] = 0
+          activeAccessURLs[parentKey] = parentURL
+          startedSecurityScope[parentKey] = parentURL.startAccessingSecurityScopedResource()
+        }
+        activeAccessCounts[parentKey, default: 0] += 1
+      }
+
+      let key = Self.key(for: url)
       if activeAccessCounts[key] == nil {
         activeAccessCounts[key] = 0
         activeAccessURLs[key] = url
@@ -166,7 +199,16 @@ final class SecurityScopedFileAccessCoordinator {
   @discardableResult
   func registerPersistentAccess(for path: String) -> Bool {
     do {
-      let url = try resolveURL(for: path)
+      let (url, parentScopeURL) = try bookmarkStore.resolveURL(for: path)
+      if let parentURL = parentScopeURL {
+        let parentStarted = parentURL.startAccessingSecurityScopedResource()
+        defer {
+          if parentStarted {
+            parentURL.stopAccessingSecurityScopedResource()
+          }
+        }
+        return bookmarkStore.remember(url: url)
+      }
       return bookmarkStore.remember(url: url)
     } catch {
       return false
@@ -182,7 +224,7 @@ final class SecurityScopedFileAccessCoordinator {
   }
 
   func hasPersistentAccess(for path: String) -> Bool {
-    bookmarkStore.hasBookmark(for: path)
+    bookmarkStore.hasBookmark(for: path) || bookmarkStore.hasParentBookmark(for: path)
   }
 
   func listPersistentAccessPaths() -> [String] {

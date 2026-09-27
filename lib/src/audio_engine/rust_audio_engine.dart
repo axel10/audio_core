@@ -72,6 +72,7 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   Future<void> load(String path) async {
     try {
       if (_isApple && path.isNotEmpty) {
+        await registerPersistentAccess(path);
         await beginScopedAccess(path);
       }
       await rust.loadAudioFile(path: path);
@@ -89,6 +90,7 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   }) async {
     try {
       if (_isApple && path.isNotEmpty) {
+        await registerPersistentAccess(path);
         await beginScopedAccess(path);
       }
       await rust.crossfadeToAudioFile(
@@ -113,6 +115,7 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   }) async {
     try {
       if (_isApple && path.isNotEmpty) {
+        await registerPersistentAccess(path);
         await beginScopedAccess(path);
       }
       final resolvedTargetVolume = (targetVolume ?? _currentVolume)
