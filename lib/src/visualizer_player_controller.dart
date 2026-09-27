@@ -106,6 +106,36 @@ class AudioCoreController extends ChangeNotifier
     equalizer = EqualizerController(parent: this);
   }
 
+  @visibleForTesting
+  AudioCoreController.forTesting({
+    required AudioEngine engine,
+    int fftSize = 1024,
+    double analysisFrequencyHz = 30.0,
+    FadeSettings fadeSettings = const FadeSettings(),
+    VisualizerOptimizationOptions visualOptions =
+        const VisualizerOptimizationOptions(),
+    AudioStreamCacheManager? streamCacheManager,
+  })  : fftSize = fftSize,
+        analysisFrequencyHz = analysisFrequencyHz,
+        _initialFadeSettings = fadeSettings {
+    if (streamCacheManager != null) {
+      _streamCacheProxy = AudioStreamCacheProxy(cacheManager: streamCacheManager);
+    }
+    _engine = engine;
+    player = PlayerController(parent: this);
+    playlist = PlaylistController(parent: this);
+    visualizer = VisualizerController(
+      fftSize: fftSize,
+      visualOptions: visualOptions,
+      getLatestFft: () => _latestFftCache,
+      sourceAlreadyGrouped: _engine.fftDataIsPreGrouped,
+      parent: this,
+    );
+    visualizer.addListener(_handleVisualizerChanges);
+    player.addListener(_syncTicks);
+    equalizer = EqualizerController(parent: this);
+  }
+
   static const int maxEqualizerBands = EqualizerController.maxEqualizerBands;
   static const double equalizerMinFrequencyHz =
       EqualizerController.minFrequencyHz;
@@ -149,7 +179,8 @@ class AudioCoreController extends ChangeNotifier
   bool get isTransitioning => _isTransitioning;
   EqualizerConfig get equalizerConfig => equalizer.config;
   bool get _usesRustPlaybackBackend =>
-      Platform.isLinux || Platform.isWindows || Platform.isMacOS || Platform.isIOS;
+      _engine is RustAudioEngine &&
+      (Platform.isLinux || Platform.isWindows || Platform.isMacOS || Platform.isIOS);
 
   /// Returns the next track in the current playlist sequence.
   AudioTrack? get nextTrack => playlist.nextTrack;
@@ -203,7 +234,7 @@ class AudioCoreController extends ChangeNotifier
     }
     debugPrint('AudioCoreController: isSupported = true');
 
-    if (!_rustLibInitialized) {
+    if (_usesRustPlaybackBackend && !_rustLibInitialized) {
       try {
         debugPrint('AudioCoreController: Initializing RustLib');
         await RustLib.init();
@@ -234,14 +265,16 @@ class AudioCoreController extends ChangeNotifier
       return;
     }
 
-    try {
-      debugPrint('AudioCoreController: Initializing Equalizer');
-      await equalizer.initialize();
-      debugPrint('AudioCoreController: Equalizer initialized');
-    } catch (e) {
-      debugPrint('AudioCoreController: Equalizer init failed: $e');
-      player.setError('Equalizer sync failed: $e');
-      return;
+    if (_usesRustPlaybackBackend) {
+      try {
+        debugPrint('AudioCoreController: Initializing Equalizer');
+        await equalizer.initialize();
+        debugPrint('AudioCoreController: Equalizer initialized');
+      } catch (e) {
+        debugPrint('AudioCoreController: Equalizer init failed: $e');
+        player.setError('Equalizer sync failed: $e');
+        return;
+      }
     }
 
     // Initialize Audio Engine

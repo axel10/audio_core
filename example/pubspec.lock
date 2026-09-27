@@ -215,7 +215,7 @@ packages:
       path: "../flutter_taglib"
       relative: true
     source: path
-    version: "1.5.1"
+    version: "1.5.2"
   flutter_test:
     dependency: "direct dev"
     description: flutter
