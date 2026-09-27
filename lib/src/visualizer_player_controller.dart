@@ -157,6 +157,25 @@ class AudioCoreController extends ChangeNotifier
   List<double> _latestFftCache = const [];
 
   static bool _rustLibInitialized = false;
+
+  /// Ensures that flutter_rust_bridge RustLib is initialized.
+  /// Safe to call multiple times across all platforms.
+  static Future<void> ensureRustLibInitialized() async {
+    if (_rustLibInitialized) return;
+    try {
+      debugPrint('AudioCoreController: Initializing RustLib');
+      await RustLib.init();
+      _rustLibInitialized = true;
+    } catch (e) {
+      if (!e.toString().contains(
+        'Should not initialize flutter_rust_bridge twice',
+      )) {
+        debugPrint('AudioCoreController: RustLib init failed: $e');
+        rethrow;
+      }
+      _rustLibInitialized = true;
+    }
+  }
   bool _initialized = false;
   bool _isTransitioning = false;
   String? _lastEndedAutoAdvancePath;
@@ -234,20 +253,12 @@ class AudioCoreController extends ChangeNotifier
     }
     debugPrint('AudioCoreController: isSupported = true');
 
-    if (_usesRustPlaybackBackend && !_rustLibInitialized) {
+    if (!_rustLibInitialized) {
       try {
-        debugPrint('AudioCoreController: Initializing RustLib');
-        await RustLib.init();
-        _rustLibInitialized = true;
+        await ensureRustLibInitialized();
       } catch (e) {
-        if (!e.toString().contains(
-          'Should not initialize flutter_rust_bridge twice',
-        )) {
-          debugPrint('AudioCoreController: RustLib init failed: $e');
-          player.setError('Rust bridge init failed: $e');
-          return;
-        }
-        _rustLibInitialized = true;
+        player.setError('Rust bridge init failed: $e');
+        return;
       }
     }
 

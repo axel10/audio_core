@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import '../rust/api/simple_api.dart' as rust;
 import '../track_artwork.dart';
+import '../visualizer_player_controller.dart';
 
 mixin TrackArtworkSupport {
   String normalizeArtworkPath(String path);
@@ -12,6 +13,7 @@ mixin TrackArtworkSupport {
     required bool saveLargeArtwork,
     TrackArtworkOptions options = const TrackArtworkOptions(),
   }) async {
+    await AudioCoreController.ensureRustLibInitialized();
     final result = await rust.generateTrackArtwork(
       path: normalizeArtworkPath(path),
       artworkBytes: artworkBytes,
