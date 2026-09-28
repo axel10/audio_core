@@ -257,8 +257,12 @@ class AudioCoreController extends ChangeNotifier
       try {
         await ensureRustLibInitialized();
       } catch (e) {
-        player.setError('Rust bridge init failed: $e');
-        return;
+        if (_usesRustPlaybackBackend) {
+          player.setError('Rust bridge init failed: $e');
+          return;
+        } else {
+          debugPrint('AudioCoreController: Optional RustLib init skipped: $e');
+        }
       }
     }
 
