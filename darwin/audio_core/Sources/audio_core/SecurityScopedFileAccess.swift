@@ -163,12 +163,42 @@ final class SecurityScopedFileAccessCoordinator {
   private var startedSecurityScope: [String: Bool] = [:]
   private let stateQueue = DispatchQueue(label: "audio_core.security_scoped_file_access")
 
+  private static func isSandboxInternalPath(_ path: String) -> Bool {
+    #if os(iOS)
+    let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+    let home = NSHomeDirectory()
+    let filePath = trimmed.hasPrefix("file://")
+      ? (URL(string: trimmed)?.standardizedFileURL.resolvingSymlinksInPath().path ?? trimmed)
+      : URL(fileURLWithPath: trimmed).standardizedFileURL.resolvingSymlinksInPath().path
+    let homePath = URL(fileURLWithPath: home).standardizedFileURL.resolvingSymlinksInPath().path
+    if filePath.hasPrefix(homePath) || filePath.contains("/Containers/Shared/AppGroup/") {
+      return true
+    }
+    #endif
+    return false
+  }
+
   func resolveURL(for path: String) throws -> URL {
+    if Self.isSandboxInternalPath(path) {
+      let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+      if trimmed.hasPrefix("file://"), let u = URL(string: trimmed) {
+        return u
+      }
+      return URL(fileURLWithPath: trimmed)
+    }
     let (url, _) = try bookmarkStore.resolveURL(for: path)
     return url
   }
 
   func acquireAccess(for path: String) throws -> URL {
+    if Self.isSandboxInternalPath(path) {
+      let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+      if trimmed.hasPrefix("file://"), let u = URL(string: trimmed) {
+        return u
+      }
+      return URL(fileURLWithPath: trimmed)
+    }
+
     let (url, parentScopeURL) = try bookmarkStore.resolveURL(for: path)
 
     stateQueue.sync {
@@ -198,6 +228,10 @@ final class SecurityScopedFileAccessCoordinator {
 
   @discardableResult
   func registerPersistentAccess(for path: String) -> Bool {
+    if Self.isSandboxInternalPath(path) {
+      return true
+    }
+
     do {
       let (url, parentScopeURL) = try bookmarkStore.resolveURL(for: path)
       if let parentURL = parentScopeURL {
@@ -224,7 +258,10 @@ final class SecurityScopedFileAccessCoordinator {
   }
 
   func hasPersistentAccess(for path: String) -> Bool {
-    bookmarkStore.hasBookmark(for: path) || bookmarkStore.hasParentBookmark(for: path)
+    if Self.isSandboxInternalPath(path) {
+      return true
+    }
+    return bookmarkStore.hasBookmark(for: path) || bookmarkStore.hasParentBookmark(for: path)
   }
 
   func listPersistentAccessPaths() -> [String] {
@@ -232,6 +269,9 @@ final class SecurityScopedFileAccessCoordinator {
   }
 
   func releaseAccess(for path: String) {
+    if Self.isSandboxInternalPath(path) {
+      return
+    }
     let key = Self.key(forPath: path)
     stateQueue.sync {
       releaseAccessLocked(forKey: key)

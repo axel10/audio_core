@@ -760,6 +760,7 @@ name = "ffmpeg_core"
 version = "0.1.0"
 dependencies = [
  "ffmpeg-next",
+ "log",
 ]
 
 [[package]]

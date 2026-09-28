@@ -2,7 +2,7 @@ use super::equalizer::{EqSource, EqualizerConfig, EqualizerShared};
 use super::fft::{clear_fft_buffer, FftSource, RAW_FFT_BINS};
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
 use ffmpeg_core::AudioSource as CoreAudioSource;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{
     Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source,
@@ -767,7 +767,7 @@ impl PlayerController {
         {
             Ok(sink) => sink,
             Err(preferred_error) => {
-                eprintln!(
+                info!(
                     "[AudioTrace][Output] preferred sample_rate={} rejected: {}; falling back to device default",
                     PLAYBACK_SAMPLE_RATE, preferred_error
                 );
@@ -778,7 +778,7 @@ impl PlayerController {
                 builder
                     .open_sink_or_fallback()
                     .or_else(|_| {
-                        eprintln!(
+                        info!(
                             "[AudioTrace][Output] default device fallback failed, trying open_default_sink"
                         );
                         DeviceSinkBuilder::open_default_sink()
@@ -786,7 +786,7 @@ impl PlayerController {
                     .map_err(|e| format!("open default audio device failed: {e}"))?
             }
         };
-        eprintln!(
+        info!(
             "[AudioTrace][Output] device={} channels={} sample_rate={} buffer_size={:?}",
             device_name,
             sink.config().channel_count(),
@@ -923,7 +923,7 @@ impl PlayerController {
             player.set_volume((self.volume * gain).clamp(0.0, 1.0));
         }
 
-        eprintln!(
+        info!(
             "[AudioTrace][Decode] path={} engine={} channels={} sample_rate={} duration_ms={}",
             path,
             decode_engine,
@@ -938,7 +938,7 @@ impl PlayerController {
             .config();
         let output_channels = output_config.channel_count();
         let output_sample_rate = output_config.sample_rate();
-        eprintln!(
+        info!(
             "[AudioTrace][Chain] normalize_source from_channels={} from_sample_rate={} to_channels={} to_sample_rate={}",
             decoded_source.channels(),
             decoded_source.sample_rate(),
@@ -998,7 +998,7 @@ impl PlayerController {
                 }
             },
         );
-        eprintln!(
+        info!(
             "[AudioTrace][Chain] before_player channels={} sample_rate={} speed={}",
             notifying_source.channels(),
             notifying_source.sample_rate(),
@@ -2193,14 +2193,14 @@ pub fn seek_audio_ms(position_ms: i64) -> Result<(), String> {
 
     let empty = current.player.empty();
     let was_playing = current.is_playing() && has_sink;
-    eprintln!(
+    info!(
         "[RustSeekLog] seek_audio_ms position_ms={} target_ms={} empty={} was_playing={}",
         position_ms, target_ms, empty, was_playing
     );
 
     if !was_playing || target < current.source_start_offset || !has_sink {
         let path = current.loaded_path.clone();
-        eprintln!(
+        info!(
             "[RustSeekLog] not playing ({}) or target before source_start_offset, falling back to replace_current_from_path path={} was_playing={}",
             !was_playing, path, was_playing
         );
@@ -2209,7 +2209,7 @@ pub fn seek_audio_ms(position_ms: i64) -> Result<(), String> {
 
     let relative_target = target - current.source_start_offset;
     let seek_result = current.player.try_seek(relative_target);
-    eprintln!(
+    debug!(
         "[RustSeekLog] try_seek result is_ok={}",
         seek_result.is_ok()
     );
@@ -2221,7 +2221,7 @@ pub fn seek_audio_ms(position_ms: i64) -> Result<(), String> {
     }
 
     let path = current.loaded_path.clone();
-    eprintln!(
+    info!(
         "[RustSeekLog] falling back to replace_current_from_path path={} was_playing={}",
         path, was_playing
     );
@@ -2548,7 +2548,7 @@ where
                 SpeedState::Bypassed(i) => (i.channels().get(), i.sample_rate().get()),
                 SpeedState::Stretched(wsola) => (wsola.channels().get(), wsola.sample_rate().get()),
             };
-            eprintln!(
+            info!(
                 "[AudioTrace][Speed] first_pull speed={} input_channels={} input_sample_rate={}",
                 speed,
                 channels,
@@ -2562,7 +2562,7 @@ where
             SpeedState::Stretched(wsola) => wsola.sample_rate().get(),
         };
         if input_sample_rate != self.last_input_sample_rate {
-            eprintln!(
+            debug!(
                 "[AudioTrace][Speed] input_sample_rate_changed {} -> {}",
                 self.last_input_sample_rate,
                 input_sample_rate

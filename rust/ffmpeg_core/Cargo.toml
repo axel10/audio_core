@@ -8,3 +8,4 @@ path = "src/lib.rs"
 
 [dependencies]
 ffmpeg-next = { git = "https://github.com/axel10/rust-ffmpeg", branch = "master", default-features = false, features = ["codec", "filter", "format", "software-resampling"] }
+log = "0.4"

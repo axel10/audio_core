@@ -6,6 +6,7 @@
 
 use crate::api::simple::{controller, PlaybackState};
 use chrono::Utc;
+use log::{error, info, warn};
 use serde::Serialize;
 use serde_json::json;
 use std::collections::VecDeque;
@@ -60,6 +61,15 @@ pub fn start() {
 }
 
 fn run() {
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        if std::env::var_os("VYNODY_AUDIO_STRESS").is_none()
+            && std::env::var_os("VYNODY_AUDIO_STRESS_DIR").is_none()
+        {
+            return;
+        }
+    }
+
     let requested_root = std::env::var_os("VYNODY_AUDIO_STRESS_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::temp_dir().join("vynody-audio-stress"));
@@ -69,7 +79,7 @@ fn run() {
     let root = match prepare_output_root(&requested_root, fallback_root.as_deref()) {
         Ok(root) => root,
         Err(error) => {
-            eprintln!(
+            error!(
                 "[AudioStress] cannot create output directory {:?}: {}",
                 requested_root, error
             );
@@ -82,7 +92,7 @@ fn run() {
         .append(true)
         .open(root.join("resource_samples.csv"))
         .map_err(|error| {
-            eprintln!(
+            warn!(
                 "[AudioStress] cannot open resource_samples.csv in {:?}: {}",
                 root, error
             );
@@ -95,7 +105,7 @@ fn run() {
             "timestamp_ms,path,position_ms,declared_duration_ms,is_playing,cpu_percent,rss_bytes"
         );
     }
-    eprintln!("[AudioStress] enabled; output={:?}", root);
+    info!("[AudioStress] enabled; output={:?}", root);
     write_summary(&root, &IncidentCounts::default());
 
     let mut previous = Instant::now();
@@ -362,7 +372,7 @@ impl IncidentCapture {
             let _ = serde_json::to_writer_pretty(&mut file, &initial);
             let _ = file.write_all(b"\n");
         }
-        eprintln!(
+        warn!(
             "[AudioStress][INCIDENT] reason={} path={} directory={:?}",
             reason,
             state.path.as_deref().unwrap_or(""),
@@ -461,7 +471,7 @@ fn prepare_output_root(
 
     if let Some(fallback) = fallback {
         create_dir_all(fallback).map_err(|error| error.to_string())?;
-        eprintln!(
+        info!(
             "[AudioStress] requested output {:?} is not writable (macOS sandbox?), falling back to {:?}",
             requested, fallback
         );
@@ -535,7 +545,7 @@ fn check_duration(
             incident_dir
         );
     }
-    eprintln!(
+    warn!(
         "[AudioStress][FAIL] path={} declared={}ms actual={}ms error={}ms snapshot={:?}",
         path.unwrap_or(""),
         declared_ms,
@@ -610,7 +620,7 @@ fn log_unexpected_jump(
             incident_dir
         );
     }
-    eprintln!(
+    warn!(
         "[AudioStress][FAIL] path={} type=jump prev_pos={} new_pos={} expected_delta={} actual_delta={} deviation={} snapshot={:?}",
         state.path.as_deref().unwrap_or(""),
         prev_position_ms,
@@ -677,7 +687,7 @@ fn log_playback_stall(
             incident_dir
         );
     }
-    eprintln!(
+    warn!(
         "[AudioStress][FAIL] path={} type=stall pos={} stall_duration_ms={} snapshot={:?}",
         state.path.as_deref().unwrap_or(""),
         state.position_ms,
