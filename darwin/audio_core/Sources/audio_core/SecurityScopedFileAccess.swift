@@ -163,46 +163,52 @@ final class SecurityScopedFileAccessCoordinator {
   private var startedSecurityScope: [String: Bool] = [:]
   private let stateQueue = DispatchQueue(label: "audio_core.security_scoped_file_access")
 
-  private static func isSandboxInternalPath(_ path: String) -> Bool {
+  static func resolveSandboxInternalPath(_ path: String) -> String? {
     #if os(iOS)
     let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
-    let home = NSHomeDirectory()
-    let filePath = trimmed.hasPrefix("file://")
+    let rawPath = trimmed.hasPrefix("file://")
       ? (URL(string: trimmed)?.standardizedFileURL.resolvingSymlinksInPath().path ?? trimmed)
       : URL(fileURLWithPath: trimmed).standardizedFileURL.resolvingSymlinksInPath().path
+
+    let home = NSHomeDirectory()
     let homePath = URL(fileURLWithPath: home).standardizedFileURL.resolvingSymlinksInPath().path
-    if filePath.hasPrefix(homePath) {
-      return true
+    if rawPath.hasPrefix(homePath) {
+      return rawPath
     }
     if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.app.vynody.player") {
       let appGroupPath = appGroupURL.standardizedFileURL.resolvingSymlinksInPath().path
-      if filePath.hasPrefix(appGroupPath) {
-        return true
+      if rawPath.hasPrefix(appGroupPath) {
+        return rawPath
+      }
+    }
+
+    // Match any legacy / stale sandbox container UUID for Documents / Library / tmp
+    if let range = rawPath.range(of: #"/Containers/Data/Application/[^/]+/(Documents|Library|tmp)($|/.*)"#, options: .regularExpression) {
+      let match = String(rawPath[range])
+      if let subRange = match.range(of: #"/(Documents|Library|tmp)($|/.*)"#, options: .regularExpression) {
+        let subPath = String(match[subRange])
+        return homePath + subPath
       }
     }
     #endif
-    return false
+    return nil
+  }
+
+  private static func isSandboxInternalPath(_ path: String) -> Bool {
+    resolveSandboxInternalPath(path) != nil
   }
 
   func resolveURL(for path: String) throws -> URL {
-    if Self.isSandboxInternalPath(path) {
-      let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
-      if trimmed.hasPrefix("file://"), let u = URL(string: trimmed) {
-        return u
-      }
-      return URL(fileURLWithPath: trimmed)
+    if let resolved = Self.resolveSandboxInternalPath(path) {
+      return URL(fileURLWithPath: resolved)
     }
     let (url, _) = try bookmarkStore.resolveURL(for: path)
     return url
   }
 
   func acquireAccess(for path: String) throws -> URL {
-    if Self.isSandboxInternalPath(path) {
-      let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
-      if trimmed.hasPrefix("file://"), let u = URL(string: trimmed) {
-        return u
-      }
-      return URL(fileURLWithPath: trimmed)
+    if let resolved = Self.resolveSandboxInternalPath(path) {
+      return URL(fileURLWithPath: resolved)
     }
 
     let (url, parentScopeURL) = try bookmarkStore.resolveURL(for: path)
