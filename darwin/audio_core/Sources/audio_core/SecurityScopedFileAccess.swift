@@ -171,8 +171,14 @@ final class SecurityScopedFileAccessCoordinator {
       ? (URL(string: trimmed)?.standardizedFileURL.resolvingSymlinksInPath().path ?? trimmed)
       : URL(fileURLWithPath: trimmed).standardizedFileURL.resolvingSymlinksInPath().path
     let homePath = URL(fileURLWithPath: home).standardizedFileURL.resolvingSymlinksInPath().path
-    if filePath.hasPrefix(homePath) || filePath.contains("/Containers/Shared/AppGroup/") {
+    if filePath.hasPrefix(homePath) {
       return true
+    }
+    if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.app.vynody.player") {
+      let appGroupPath = appGroupURL.standardizedFileURL.resolvingSymlinksInPath().path
+      if filePath.hasPrefix(appGroupPath) {
+        return true
+      }
     }
     #endif
     return false
