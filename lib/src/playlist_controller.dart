@@ -248,6 +248,33 @@ class PlaylistController extends ChangeNotifier {
     await _reconcile(oldTrack: oldTrack, fadeSetting: fadeSetting);
   }
 
+  Future<void> insertTracks(
+    int index,
+    List<AudioTrack> tracks, {
+    FadeSettings? fadeSetting,
+    bool reconcile = true,
+  }) async {
+    if (tracks.isEmpty) return;
+    final oldTrack = currentTrack;
+    final safeIndex = index.clamp(0, _activePlaylistTracks.length);
+    _activePlaylistTracks.insertAll(safeIndex, tracks);
+
+    if (oldTrack == null && _activePlaylistTracks.isNotEmpty) {
+      _currentIndex = 0;
+    } else if (_currentIndex != null && safeIndex <= _currentIndex!) {
+      _currentIndex = _currentIndex! + tracks.length;
+    }
+
+    if (reconcile) {
+      await _reconcile(oldTrack: oldTrack, fadeSetting: fadeSetting);
+    } else {
+      await _syncActivePlaylistData();
+      _rebuildPlayOrder();
+      _reconcileRandom();
+      notifyListeners();
+    }
+  }
+
   /// 在指定播放列表（默认当前活跃列表）的指定位置插入单曲并立即播放。
   ///
   /// 若 [index] 为 null 或超出范围，则自动追加到末尾。
