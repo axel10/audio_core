@@ -948,29 +948,28 @@ impl PlayerController {
         let normalized_source: Box<dyn Source<Item = f32> + Send> =
             normalize_audio_source(decoded_source, output_channels, output_sample_rate);
         let is_bit_perfect = self.output_mode == AudioOutputMode::WasapiExclusive && self.bit_perfect;
-        let audio_source: Box<dyn Source<Item = f32> + Send> = if is_bit_perfect {
+        let pre_seek_source: Box<dyn Source<Item = f32> + Send> =
             if clamped_offset > Duration::ZERO && !seek_success {
                 Box::new(normalized_source.skip_duration(clamped_offset))
             } else {
                 normalized_source
-            }
-        } else {
-            let eq_source = EqSource::new(normalized_source, Arc::clone(&self.equalizer));
-            if clamped_offset > Duration::ZERO && !seek_success {
-                Box::new(eq_source.skip_duration(clamped_offset))
-            } else {
-                Box::new(eq_source)
-            }
-        };
-        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
-        let prefetched_source: Box<dyn Source<Item = f32> + Send> = Box::new(PrefetchSource::new(audio_source));
-        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios")))]
-        let prefetched_source: Box<dyn Source<Item = f32> + Send> = audio_source;
+            };
 
-        let speed_source: Box<dyn Source<Item = f32> + Send> = if is_bit_perfect {
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
+        let prefetched_source: Box<dyn Source<Item = f32> + Send> = Box::new(PrefetchSource::new(pre_seek_source));
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios")))]
+        let prefetched_source: Box<dyn Source<Item = f32> + Send> = pre_seek_source;
+
+        let post_prefetch_source: Box<dyn Source<Item = f32> + Send> = if is_bit_perfect {
             prefetched_source
         } else {
-            Box::new(SpeedSource::new(prefetched_source, Arc::clone(&self.playback_speed)))
+            Box::new(EqSource::new(prefetched_source, Arc::clone(&self.equalizer)))
+        };
+
+        let speed_source: Box<dyn Source<Item = f32> + Send> = if is_bit_perfect {
+            post_prefetch_source
+        } else {
+            Box::new(SpeedSource::new(post_prefetch_source, Arc::clone(&self.playback_speed)))
         };
         let fft_source = FftSource::new(
             speed_source,
