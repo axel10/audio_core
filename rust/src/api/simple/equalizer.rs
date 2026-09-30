@@ -169,10 +169,59 @@ impl EqualizerShared {
     }
 }
 
+fn calculate_max_boost_db(config: &EqualizerConfig, band_count: usize) -> f32 {
+    let mut max_boost_db = 0.0_f32;
+    let bass_boost_db = config.bass_boost_db.max(0.0);
+    let bass_freq = config.bass_boost_frequency_hz;
+
+    // Check each band's effective boost including Bass Boost contribution
+    for i in 0..band_count {
+        let band_gain = config.band_gains_db.get(i).copied().unwrap_or(0.0);
+        let center_freq = band_center_frequency(i, band_count);
+
+        // Low-shelf bass boost affects frequencies up to around 2.5x of its corner frequency
+        let bass_boost_factor = if center_freq <= bass_freq {
+            1.0
+        } else if center_freq < bass_freq * 2.5 {
+            let ratio = (center_freq - bass_freq) / (bass_freq * 1.5);
+            (1.0 - ratio).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
+        // Cascaded boost in dB when both low-shelf bass boost and low-band EQ are boosted
+        let cascaded_boost = band_gain.max(0.0) + (bass_boost_db * bass_boost_factor);
+        if cascaded_boost > max_boost_db {
+            max_boost_db = cascaded_boost;
+        }
+
+        // Account for adjacent band overlap (constant-Q band overlap peak)
+        if i + 1 < band_count {
+            let next_gain = config.band_gains_db.get(i + 1).copied().unwrap_or(0.0);
+            if band_gain > 0.0 && next_gain > 0.0 {
+                let overlap_boost = band_gain.max(next_gain) + (band_gain.min(next_gain) * 0.25);
+                if overlap_boost > max_boost_db {
+                    max_boost_db = overlap_boost;
+                }
+            }
+        }
+    }
+
+    if bass_boost_db > max_boost_db {
+        max_boost_db = bass_boost_db;
+    }
+
+    // Add a subtle 0.5 dB safety headroom only when active boost is applied
+    if max_boost_db > 0.0 {
+        max_boost_db + 0.5
+    } else {
+        0.0
+    }
+}
+
 #[derive(Clone)]
 struct EqualizerChain {
     eq_unit: Box<dyn AudioUnit>,
-    protection_unit: Box<dyn AudioUnit>,
     sample_rate: u32,
     current_enabled: bool,
     current_band_count: usize,
@@ -192,22 +241,8 @@ impl EqualizerChain {
     }
 
     fn identity(sample_rate: u32) -> Self {
-        let mut protection = Box::new(shape(ShapeFn(|x| {
-            let abs = x.abs();
-            if abs <= 0.95 {
-                return x;
-            }
-            let sign = x.signum();
-            let normalized = ((abs - 0.95) / 0.05).clamp(0.0, 1.0);
-            let eased = normalized * normalized * (3.0 - 2.0 * normalized);
-            let limited = 0.95 + 0.05 * eased;
-            sign * limited.min(1.0)
-        })));
-        protection.set_sample_rate(sample_rate as f64);
-
         Self {
             eq_unit: Box::new(pass()),
-            protection_unit: protection,
             sample_rate,
             current_enabled: false,
             current_band_count: 0,
@@ -222,60 +257,46 @@ impl EqualizerChain {
 
     fn reset(&mut self) {
         self.eq_unit.reset();
-        self.protection_unit.reset();
     }
 
     fn update_from_config(&mut self, config: &EqualizerConfig, sample_rate: u32) {
         let config = config.clone().sanitized();
         let band_count = config.band_count as usize;
 
-        // Auto gain compensation: Calculate the maximum boost to create headroom
-        let mut max_boost_db = 0.0_f32;
-        if config.bass_boost_db > 0.0 {
-            max_boost_db = config.bass_boost_db;
-        }
-        for i in 0..band_count {
-            if let Some(&gain) = config.band_gains_db.get(i) {
-                if gain > max_boost_db {
-                    max_boost_db = gain;
-                }
-            }
-        }
-
+        // Auto gain compensation: Calculate the combined boost to ensure adequate headroom
+        let max_boost_db = calculate_max_boost_db(&config, band_count);
         let actual_preamp_db = config.preamp_db - max_boost_db;
         let preamp_gain = db_amp(actual_preamp_db);
+
+        // Nyquist limit protection: Keep filter centers below 0.45 * Fs to prevent tan() divergence
+        let max_safe_freq = (sample_rate as f32 * 0.45).min(20_000.0);
 
         // Update the shared values first
         self.preamp_gain.set_value(preamp_gain);
         self.bass_boost_freq
-            .set_value(config.bass_boost_frequency_hz);
+            .set_value(config.bass_boost_frequency_hz.clamp(20.0, max_safe_freq));
         self.bass_boost_q.set_value(config.bass_boost_q);
         self.bass_boost_gain.set_value(db_amp(config.bass_boost_db));
+
         for i in 0..band_count {
-            self.band_freqs[i].set_value(band_center_frequency(i, band_count));
-            self.band_gains[i].set_value(db_amp(config.band_gains_db[i]));
+            let center_freq = band_center_frequency(i, band_count);
+            if center_freq >= max_safe_freq {
+                // If band is near or above Nyquist limit, clamp center frequency and set gain to 1.0 (pass-through)
+                self.band_freqs[i].set_value(max_safe_freq);
+                self.band_gains[i].set_value(1.0);
+            } else {
+                self.band_freqs[i].set_value(center_freq);
+                self.band_gains[i].set_value(db_amp(config.band_gains_db[i]));
+            }
         }
 
-        // Update protection unit if sample rate changed
-        if self.sample_rate != sample_rate {
-            let mut protection = Box::new(shape(ShapeFn(|x| {
-                let abs = x.abs();
-                if abs <= 0.95 {
-                    return x;
-                }
-                let sign = x.signum();
-                let normalized = ((abs - 0.95) / 0.05).clamp(0.0, 1.0);
-                let eased = normalized * normalized * (3.0 - 2.0 * normalized);
-                let limited = 0.95 + 0.05 * eased;
-                sign * limited.min(1.0)
-            })));
-            protection.set_sample_rate(sample_rate as f64);
-            self.protection_unit = protection;
-            self.sample_rate = sample_rate;
-        }
+        let sample_rate_changed = self.sample_rate != sample_rate;
+        self.sample_rate = sample_rate;
 
-        let structure_changed =
-            !self.current_enabled || self.current_band_count != band_count || !config.enabled;
+        let structure_changed = !self.current_enabled
+            || self.current_band_count != band_count
+            || !config.enabled
+            || sample_rate_changed;
 
         if structure_changed {
             if !config.enabled {
@@ -317,11 +338,11 @@ impl EqualizerChain {
     }
 
     fn process_sample(&mut self, sample: f32) -> f32 {
-        let mut temp = [0.0];
-        self.eq_unit.tick(&[sample], &mut temp);
         let mut out = [0.0];
-        self.protection_unit.tick(&temp, &mut out);
-        out[0]
+        self.eq_unit.tick(&[sample], &mut out);
+        // Bit-transparent pass-through for normal range [-1.0, 1.0].
+        // Clamp strictly at +/- 1.0 only to prevent DAC integer overflow.
+        out[0].clamp(-1.0, 1.0)
     }
 }
 
@@ -339,6 +360,7 @@ where
     sample_rate: u32,
     channel_index: usize,
     sample_counter: usize,
+    fade_weight: f32,
 }
 
 impl<S> EqSource<S>
@@ -353,6 +375,8 @@ where
             .map(|_| EqualizerChain::from_config(&config, sample_rate))
             .collect::<Vec<_>>();
 
+        let initial_fade = if config.enabled { 1.0 } else { 0.0 };
+
         Self {
             inner,
             shared,
@@ -364,6 +388,7 @@ where
             sample_rate,
             channel_index: 0,
             sample_counter: 0,
+            fade_weight: initial_fade,
         }
     }
 
@@ -398,20 +423,40 @@ where
         self.channel_index += 1;
         if self.channel_index >= self.channels {
             self.channel_index = 0;
+
+            // Frame-synchronized crossfade weight update to prevent channel phase/level skew
+            let target_weight = if self.smoothed_config.enabled { 1.0 } else { 0.0 };
+            if (self.fade_weight - target_weight).abs() > 1e-4 {
+                // ~8ms smooth transition duration
+                let step = 1.0 / ((self.sample_rate as f32) * 0.008).max(64.0);
+                if self.fade_weight < target_weight {
+                    self.fade_weight = (self.fade_weight + step).min(1.0);
+                } else {
+                    self.fade_weight = (self.fade_weight - step).max(0.0);
+                }
+            } else {
+                self.fade_weight = target_weight;
+            }
         }
 
-        if !self.smoothed_config.enabled {
+        // Fast path: if fully bypassed and crossfade completed, pass through directly
+        if self.fade_weight == 0.0 && !self.smoothed_config.enabled {
             return sample;
         }
 
         let channel = min(channel, self.chains.len().saturating_sub(1));
-        let output = self
+        let eq_output = self
             .chains
             .get_mut(channel)
             .map(|chain| chain.process_sample(sample))
             .unwrap_or(sample);
 
-        output
+        if self.fade_weight >= 1.0 {
+            eq_output
+        } else {
+            // Smooth linear crossfade during enable/disable transition to eliminate click/pop
+            sample * (1.0 - self.fade_weight) + eq_output * self.fade_weight
+        }
     }
 }
 
@@ -487,4 +532,112 @@ fn band_q_factor(band_count: usize) -> f32 {
     let q = two_pow_bw.sqrt() / (two_pow_bw - 1.0);
     q.clamp(0.6, 5.0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_unity_gain_is_bit_transparent_and_no_soft_limiter_distortion() {
+        let mut config = EqualizerConfig::default();
+        config.enabled = true;
+        config.band_count = 10;
+        config.band_gains_db = vec![0.0; 10];
+
+        let mut chain = EqualizerChain::from_config(&config, 44100);
+
+        // Input signals near 0 dBFS (e.g. 0.98), which previous 0.95 soft limiter would distort
+        let samples = [0.0, 0.5, 0.96, 0.98, 0.999, -0.999];
+        for &s in &samples {
+            let out = chain.process_sample(s);
+            // In linear pass with 0 dB gain, the output should remain essentially identical (within f32 precision)
+            assert!((out - s).abs() < 1e-4, "Expected {}, got {}", s, out);
+        }
+    }
+
+    #[test]
+    fn test_auto_gain_compensation_cascades_bass_boost_and_low_bands() {
+        let mut config = EqualizerConfig::default();
+        config.enabled = true;
+        config.band_count = 31;
+        config.bass_boost_db = 6.0;
+        config.bass_boost_frequency_hz = 80.0;
+        // 80Hz band (index 6 in ISO_31) boosted by 4 dB
+        config.band_gains_db[6] = 4.0;
+
+        let max_boost = calculate_max_boost_db(&config, 31);
+        // Cascaded boost: 4.0 + 6.0 = 10.0 dB + 0.5 safety headroom = 10.5 dB
+        assert!(max_boost >= 10.0, "Expected at least 10 dB boost headroom, got {}", max_boost);
+    }
+
+    #[test]
+    fn test_nyquist_frequency_protection_for_low_sample_rate() {
+        let mut config = EqualizerConfig::default();
+        config.enabled = true;
+        config.band_count = 31;
+        // Boost 20kHz band
+        config.band_gains_db[30] = 6.0;
+
+        // Sample rate 32000 has Nyquist = 16000 Hz, safe limit = 14400 Hz
+        let mut chain = EqualizerChain::from_config(&config, 32000);
+        let sample = chain.process_sample(0.5);
+        assert!(!sample.is_nan(), "Sample should not be NaN");
+        assert!(!sample.is_infinite(), "Sample should not be infinite");
+    }
+
+    #[test]
+    fn test_crossfade_smoothing_transitions() {
+        struct MockSource {
+            samples: Vec<f32>,
+            idx: usize,
+        }
+        impl Iterator for MockSource {
+            type Item = f32;
+            fn next(&mut self) -> Option<Self::Item> {
+                if self.idx < self.samples.len() {
+                    let s = self.samples[self.idx];
+                    self.idx += 1;
+                    Some(s)
+                } else {
+                    None
+                }
+            }
+        }
+        impl Source for MockSource {
+            fn current_span_len(&self) -> Option<usize> { None }
+            fn channels(&self) -> rodio::ChannelCount { std::num::NonZero::new(2).unwrap() }
+            fn sample_rate(&self) -> rodio::SampleRate { std::num::NonZero::new(44100).unwrap() }
+            fn total_duration(&self) -> Option<Duration> { None }
+        }
+
+        let config = EqualizerConfig {
+            enabled: false,
+            ..Default::default()
+        };
+        let shared = EqualizerShared::new(config);
+        let src = MockSource {
+            samples: vec![0.5; 1000],
+            idx: 0,
+        };
+        let mut eq_source = EqSource::new(src, Arc::clone(&shared));
+
+        // Read a few samples while disabled
+        assert_eq!(eq_source.next(), Some(0.5));
+        assert_eq!(eq_source.fade_weight, 0.0);
+
+        // Enable EQ
+        let mut enabled_config = shared.current_config();
+        enabled_config.enabled = true;
+        shared.set_config(enabled_config);
+
+        // Process frames, fade_weight should smoothly ramp up towards 1.0 without jumping
+        let mut previous_weight = eq_source.fade_weight;
+        for _ in 0..200 {
+            let _ = eq_source.next();
+            assert!(eq_source.fade_weight >= previous_weight);
+            previous_weight = eq_source.fade_weight;
+        }
+    }
+}
+
 
