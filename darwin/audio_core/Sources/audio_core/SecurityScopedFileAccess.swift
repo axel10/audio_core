@@ -190,6 +190,15 @@ final class SecurityScopedFileAccessCoordinator {
         return homePath + subPath
       }
     }
+
+    // Match any path containing /(Documents|Library|tmp)($|/.*) that exists in current home sandbox
+    if let subRange = rawPath.range(of: #"/(Documents|Library|tmp)($|/.*)"#, options: .regularExpression) {
+      let subPath = String(rawPath[subRange])
+      let candidate = homePath + subPath
+      if FileManager.default.fileExists(atPath: candidate) {
+        return candidate
+      }
+    }
     #endif
     return nil
   }
