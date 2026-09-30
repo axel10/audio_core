@@ -1,12 +1,12 @@
 use super::equalizer::{EqSource, EqualizerConfig, EqualizerShared};
 use super::fft::{clear_fft_buffer, FftSource, RAW_FFT_BINS};
+use super::resampler::normalize_audio_source;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
 use ffmpeg_core::AudioSource as CoreAudioSource;
 use log::{debug, error, info, warn};
 use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{
     Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source,
-    source::UniformSourceIterator,
 };
 use std::fs::File;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -945,18 +945,8 @@ impl PlayerController {
             output_channels,
             output_sample_rate
         );
-        let from_channels = decoded_source.channels();
-        let from_sample_rate = decoded_source.sample_rate();
         let normalized_source: Box<dyn Source<Item = f32> + Send> =
-            if from_channels == output_channels && from_sample_rate == output_sample_rate {
-                decoded_source
-            } else {
-                Box::new(UniformSourceIterator::new(
-                    decoded_source,
-                    output_channels,
-                    output_sample_rate,
-                ))
-            };
+            normalize_audio_source(decoded_source, output_channels, output_sample_rate);
         let is_bit_perfect = self.output_mode == AudioOutputMode::WasapiExclusive && self.bit_perfect;
         let audio_source: Box<dyn Source<Item = f32> + Send> = if is_bit_perfect {
             if clamped_offset > Duration::ZERO && !seek_success {

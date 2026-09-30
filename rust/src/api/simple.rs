@@ -5,6 +5,8 @@ pub mod controller;
 pub mod equalizer;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
 pub mod fft;
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
+pub mod resampler;
 
 #[cfg(target_os = "windows")]
 pub(crate) mod wasapi_sink;

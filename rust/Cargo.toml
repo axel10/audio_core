@@ -36,6 +36,7 @@ cpal = { version = "0.18.1", features = ["realtime"] }
 rtrb = "0.3"
 env_logger = "0.11"
 libc = "0.2"
+rubato = { git="https://github.com/HEnquist/rubato/" }
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21.1"
