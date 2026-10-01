@@ -1090,7 +1090,12 @@ class AudioCoreController extends ChangeNotifier
     // );
 
     if (playlist.mode == PlaylistMode.singleLoop) {
-      await loadTrack(autoPlay: true, reason: PlaybackReason.autoNext);
+      try {
+        await loadTrack(autoPlay: true, reason: PlaybackReason.autoNext);
+      } catch (e) {
+        debugPrint('[AudioCoreController] singleLoop loadTrack failed: $e');
+        await _engine.pause();
+      }
       return;
     }
 
@@ -1099,8 +1104,13 @@ class AudioCoreController extends ChangeNotifier
       return;
     }
 
-    final success = await playlist.playNext(reason: PlaybackReason.autoNext);
-    if (!success) {
+    try {
+      final success = await playlist.playNext(reason: PlaybackReason.autoNext);
+      if (!success) {
+        await _engine.pause();
+      }
+    } catch (e) {
+      debugPrint('[AudioCoreController] autoTransition playNext failed: $e');
       await _engine.pause();
     }
   }

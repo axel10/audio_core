@@ -377,11 +377,6 @@ class PlaylistController extends ChangeNotifier {
   }) async {
     final oldTrack = currentTrack;
     final resolution = await _resolvePlayableAdjacentIndex(next: true, reason: reason);
-    // debugPrint(
-    //   '[PlaylistController] playNext reason=$reason '
-    //   'old=${oldTrack?.id} resolution=$resolution '
-    //   'mode=$_playlistMode random=${_randomManager.policy != null}',
-    // );
     if (resolution == null) return false;
     _currentIndex = resolution;
     await _reconcile(
@@ -390,7 +385,7 @@ class PlaylistController extends ChangeNotifier {
       reason: reason,
       fadeSetting: fadeSetting,
     );
-    return true;
+    return currentTrack != null;
   }
 
   Future<bool> playPrevious({
@@ -412,7 +407,7 @@ class PlaylistController extends ChangeNotifier {
       reason: reason,
       fadeSetting: fadeSetting,
     );
-    return true;
+    return currentTrack != null;
   }
 
   Future<void> moveTrack(
@@ -840,11 +835,51 @@ class PlaylistController extends ChangeNotifier {
     }
 
     if (shouldLoad && track != null) {
-      await _parent.loadTrack(
-        autoPlay: autoPlay,
-        reason: reason,
-        fadeSetting: fadeSetting,
-      );
+      var currentAttempts = 0;
+      final maxAttempts = _activePlaylistTracks.length;
+      var loadSuccess = false;
+
+      while (currentAttempts < maxAttempts && !loadSuccess) {
+        final currentToLoad = currentTrack;
+        if (currentToLoad == null) break;
+
+        try {
+          await _parent.loadTrack(
+            autoPlay: autoPlay,
+            reason: reason,
+            fadeSetting: fadeSetting,
+          );
+          loadSuccess = true;
+          break;
+        } catch (e) {
+          debugPrint(
+            '[PlaylistController] Failed to load track ${currentToLoad.uri}: $e. '
+            'Attempting to auto-skip to next track...',
+          );
+          currentAttempts++;
+
+          if (!autoPlay && reason == PlaybackReason.playlistChanged) {
+            break;
+          }
+
+          final nextResolution = await _resolvePlayableAdjacentIndex(
+            next: true,
+            reason: reason,
+          );
+          if (nextResolution == null) {
+            debugPrint('[PlaylistController] No next track available, stopping playback.');
+            break;
+          }
+          _currentIndex = nextResolution;
+        }
+      }
+
+      if (!loadSuccess) {
+        await _parent.clearPlayback();
+        _currentIndex = null;
+        notifyListeners();
+        return;
+      }
     } else if (oldTrack != null && track == null) {
       await _parent.clearPlayback();
     }

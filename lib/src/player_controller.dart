@@ -108,6 +108,13 @@ class PlayerController extends ChangeNotifier {
         autoPlay: autoPlay,
         position: position,
       );
+    } catch (e, st) {
+      debugPrint('[PlayerController] performTransition failed for uri=$uri: $e\n$st');
+      try {
+        await _parent.engine.pause();
+      } catch (_) {}
+      setError('Playback failed: $e');
+      rethrow;
     } finally {
       onStateChanged(false);
     }
@@ -563,7 +570,9 @@ class ImmediateTransition extends PlaybackTransition {
     Duration? position,
   }) async {
     await player.load(uri);
-    if (player.currentState == PlayerState.error) return;
+    if (player.currentState == PlayerState.error) {
+      throw Exception(player.error ?? 'ImmediateTransition load failed');
+    }
     if (position != null) await player.seek(position);
     if (autoPlay) await player.play(withFade: false, bypassGuard: true);
   }
