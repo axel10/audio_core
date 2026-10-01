@@ -169,56 +169,6 @@ impl EqualizerShared {
     }
 }
 
-fn calculate_max_boost_db(config: &EqualizerConfig, band_count: usize) -> f32 {
-    let mut max_boost_db = 0.0_f32;
-    let bass_boost_db = config.bass_boost_db.max(0.0);
-    let bass_freq = config.bass_boost_frequency_hz;
-
-    // Check each band's effective boost including Bass Boost contribution
-    for i in 0..band_count {
-        let band_gain = config.band_gains_db.get(i).copied().unwrap_or(0.0);
-        let center_freq = band_center_frequency(i, band_count);
-
-        // Low-shelf bass boost affects frequencies up to around 2.5x of its corner frequency
-        let bass_boost_factor = if center_freq <= bass_freq {
-            1.0
-        } else if center_freq < bass_freq * 2.5 {
-            let ratio = (center_freq - bass_freq) / (bass_freq * 1.5);
-            (1.0 - ratio).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-
-        // Cascaded boost in dB when both low-shelf bass boost and low-band EQ are boosted
-        let cascaded_boost = band_gain.max(0.0) + (bass_boost_db * bass_boost_factor);
-        if cascaded_boost > max_boost_db {
-            max_boost_db = cascaded_boost;
-        }
-
-        // Account for adjacent band overlap (constant-Q band overlap peak)
-        if i + 1 < band_count {
-            let next_gain = config.band_gains_db.get(i + 1).copied().unwrap_or(0.0);
-            if band_gain > 0.0 && next_gain > 0.0 {
-                let overlap_boost = band_gain.max(next_gain) + (band_gain.min(next_gain) * 0.25);
-                if overlap_boost > max_boost_db {
-                    max_boost_db = overlap_boost;
-                }
-            }
-        }
-    }
-
-    if bass_boost_db > max_boost_db {
-        max_boost_db = bass_boost_db;
-    }
-
-    // Add a subtle 0.5 dB safety headroom only when active boost is applied
-    if max_boost_db > 0.0 {
-        max_boost_db + 0.5
-    } else {
-        0.0
-    }
-}
-
 #[derive(Clone)]
 struct EqualizerChain {
     eq_unit: Box<dyn AudioUnit>,
@@ -231,6 +181,22 @@ struct EqualizerChain {
     bass_boost_gain: Shared,
     band_freqs: Vec<Shared>,
     band_gains: Vec<Shared>,
+}
+
+#[inline(always)]
+fn soft_limit(sample: f32) -> f32 {
+    // Exact linear bit-transparent pass-through in [-0.98, 0.98] (~ -0.17 dBFS)
+    // Smooth, continuous tanh soft saturation for extreme over-range peaks to prevent harsh digital clipping.
+    const THRESHOLD: f32 = 0.98;
+    const MARGIN: f32 = 1.0 - THRESHOLD; // 0.02
+
+    if sample > THRESHOLD {
+        THRESHOLD + MARGIN * ((sample - THRESHOLD) / MARGIN).tanh()
+    } else if sample < -THRESHOLD {
+        -THRESHOLD - MARGIN * ((-sample - THRESHOLD) / MARGIN).tanh()
+    } else {
+        sample
+    }
 }
 
 impl EqualizerChain {
@@ -263,10 +229,9 @@ impl EqualizerChain {
         let config = config.clone().sanitized();
         let band_count = config.band_count as usize;
 
-        // Auto gain compensation: Calculate the combined boost to ensure adequate headroom
-        let max_boost_db = calculate_max_boost_db(&config, band_count);
-        let actual_preamp_db = config.preamp_db - max_boost_db;
-        let preamp_gain = db_amp(actual_preamp_db);
+        // Standard EQ architecture (like JUCE / standard music players):
+        // EQ bands apply transparent gain boost directly without decreasing global preamp volume.
+        let preamp_gain = db_amp(config.preamp_db);
 
         // Nyquist limit protection: Keep filter centers below 0.45 * Fs to prevent tan() divergence
         let max_safe_freq = (sample_rate as f32 * 0.45).min(20_000.0);
@@ -340,9 +305,7 @@ impl EqualizerChain {
     fn process_sample(&mut self, sample: f32) -> f32 {
         let mut out = [0.0];
         self.eq_unit.tick(&[sample], &mut out);
-        // Bit-transparent pass-through for normal range [-1.0, 1.0].
-        // Clamp strictly at +/- 1.0 only to prevent DAC integer overflow.
-        out[0].clamp(-1.0, 1.0)
+        soft_limit(out[0])
     }
 }
 
@@ -546,28 +509,48 @@ mod tests {
 
         let mut chain = EqualizerChain::from_config(&config, 44100);
 
-        // Input signals near 0 dBFS (e.g. 0.98), which previous 0.95 soft limiter would distort
-        let samples = [0.0, 0.5, 0.96, 0.98, 0.999, -0.999];
+        // Input signals in linear pass-through range [-0.98, 0.98]
+        let samples = [0.0, 0.5, 0.90, 0.95, 0.98, -0.98];
         for &s in &samples {
             let out = chain.process_sample(s);
-            // In linear pass with 0 dB gain, the output should remain essentially identical (within f32 precision)
+            // In linear pass with 0 dB gain, the output should remain bit-identical (within f32 precision)
             assert!((out - s).abs() < 1e-4, "Expected {}, got {}", s, out);
         }
     }
 
     #[test]
-    fn test_auto_gain_compensation_cascades_bass_boost_and_low_bands() {
+    fn test_boosting_band_preserves_preamp_and_enhances_signal() {
         let mut config = EqualizerConfig::default();
         config.enabled = true;
         config.band_count = 31;
+        config.preamp_db = 0.0;
         config.bass_boost_db = 6.0;
         config.bass_boost_frequency_hz = 80.0;
         // 80Hz band (index 6 in ISO_31) boosted by 4 dB
         config.band_gains_db[6] = 4.0;
 
-        let max_boost = calculate_max_boost_db(&config, 31);
-        // Cascaded boost: 4.0 + 6.0 = 10.0 dB + 0.5 safety headroom = 10.5 dB
-        assert!(max_boost >= 10.0, "Expected at least 10 dB boost headroom, got {}", max_boost);
+        let mut chain = EqualizerChain::from_config(&config, 44100);
+        assert_eq!(chain.preamp_gain.value(), 1.0); // 0.0 dB preamp maintains 1.0x gain
+
+        let out = chain.process_sample(0.5);
+        assert!(!out.is_nan());
+        assert!(out.abs() <= 1.0);
+    }
+
+    #[test]
+    fn test_soft_limiter_handles_overload_smoothly() {
+        // Normal linear range [-0.98, 0.98]
+        assert_eq!(soft_limit(0.5), 0.5);
+        assert_eq!(soft_limit(-0.5), -0.5);
+        assert_eq!(soft_limit(0.98), 0.98);
+        assert_eq!(soft_limit(-0.98), -0.98);
+
+        // Over-range signals should smoothly compress and remain strictly within [-1.0, 1.0]
+        let limited_pos = soft_limit(2.0);
+        assert!(limited_pos > 0.98 && limited_pos <= 1.0, "Expected soft compression within (0.98, 1.0], got {}", limited_pos);
+
+        let limited_neg = soft_limit(-2.0);
+        assert!(limited_neg < -0.98 && limited_neg >= -1.0, "Expected soft compression within [-1.0, -0.98), got {}", limited_neg);
     }
 
     #[test]

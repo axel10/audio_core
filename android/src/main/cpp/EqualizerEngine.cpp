@@ -30,20 +30,8 @@ inline float32x4_t vdivq_f32_fast(float32x4_t num, float32x4_t den) {
 BiquadFilter::BiquadFilter() : b0(1.0), b1(0.0), b2(0.0), a1(0.0), a2(0.0) {}
 
 namespace {
-constexpr float kHeadroomSmoothing = 0.15f;
 constexpr float kLimiterThreshold = 0.95f;
 constexpr float kLimiterKneeWidth = 0.05f;
-
-float computeHeadroomLinear(const std::vector<EqualizerBand>& bands) {
-    float maxBoostDb = 0.0f;
-    for (const auto& band : bands) {
-        const float gainDb = band.targetGainDb.load(std::memory_order_relaxed);
-        if (gainDb > maxBoostDb) {
-            maxBoostDb = gainDb;
-        }
-    }
-    return std::pow(10.0f, -maxBoostDb / 20.0f);
-}
 } // namespace
 
 void BiquadFilter::prepare(int channels) {
@@ -275,17 +263,9 @@ void EqualizerEngine::process(float* buffer, int numSamples, int channels) {
         }
     }
 
-    float desiredHeadroomLinear = computeHeadroomLinear(mBands);
-    if (std::abs(desiredHeadroomLinear - mCurrentHeadroomLinear) > 0.001f) {
-        mCurrentHeadroomLinear +=
-            kHeadroomSmoothing * (desiredHeadroomLinear - mCurrentHeadroomLinear);
-    } else {
-        mCurrentHeadroomLinear = desiredHeadroomLinear;
-    }
-
-    // Rust 侧的策略是：当有正增益时先把前级整体降下来，再让 EQ 去抬频段，
-    // 这样能保留 headroom 而不是靠每个 buffer 动态抽吸。
-    float totalGain = mCurrentPreAmpLinear * mCurrentHeadroomLinear;
+    // Direct Pre-Amp gain (matches JUCE and modern music players)
+    // Boosting individual EQ bands will not decrease global volume.
+    float totalGain = mCurrentPreAmpLinear;
 
     // 2. 应用 Pre-Amp 增益 
     if (totalGain != 1.0f) {
