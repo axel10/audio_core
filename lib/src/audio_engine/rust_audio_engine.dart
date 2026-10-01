@@ -321,6 +321,14 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
+  Future<String?> pickAuthorizedDirectory() async {
+    if (_isApple) {
+      return await _amberInvokeMethod<String>('pickAndAuthorizeDirectory');
+    }
+    return null;
+  }
+
+  @override
   Future<bool> registerPersistentAccess(String path) async {
     if (_isApple) {
       final success = await _amberInvokeMethod<bool>(

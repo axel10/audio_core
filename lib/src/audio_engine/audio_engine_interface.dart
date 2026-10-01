@@ -117,6 +117,7 @@ abstract class AudioEngine {
   Future<void> finishFileWrite();
 
   // Apple security-scoped access persistence
+  Future<String?> pickAuthorizedDirectory();
   Future<bool> registerPersistentAccess(String path);
   Future<void> forgetPersistentAccess(String path);
   Future<bool> hasPersistentAccess(String path);

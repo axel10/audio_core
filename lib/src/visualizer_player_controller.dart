@@ -1217,6 +1217,11 @@ class AudioCoreController extends ChangeNotifier
     return _engine.getAudioPcm(path: path, sampleStride: sampleStride);
   }
 
+  /// Picks a directory using native security-scoped document picker on iOS/macOS.
+  Future<String?> pickAuthorizedDirectory() async {
+    return _engine.pickAuthorizedDirectory();
+  }
+
   /// Registers a persistent Apple security-scoped bookmark for [path].
   ///
   /// On Apple platforms, this lets the app keep using an external file after

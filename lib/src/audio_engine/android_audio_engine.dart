@@ -484,6 +484,9 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
+  Future<String?> pickAuthorizedDirectory() async => null;
+
+  @override
   Future<bool> registerPersistentAccess(String path) async => false;
 
   @override

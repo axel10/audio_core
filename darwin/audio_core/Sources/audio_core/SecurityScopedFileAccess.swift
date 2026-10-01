@@ -23,7 +23,9 @@ final class SecurityScopedBookmarkStore {
 
     return try stateQueue.sync {
       // 1. Exact match
-      if let bookmarkData = bookmarks[key] {
+      let directKey = candidateURL.path
+      let stdKey = candidateURL.standardizedFileURL.path
+      if let bookmarkData = bookmarks[key] ?? bookmarks[directKey] ?? bookmarks[stdKey] {
         let resolved = try resolveBookmarkDataLocked(bookmarkData)
         return (resolved, nil)
       }
@@ -32,7 +34,9 @@ final class SecurityScopedBookmarkStore {
       var current = candidateURL.deletingLastPathComponent()
       while current.path != "/" && !current.path.isEmpty && current.pathComponents.count > 1 {
         let parentKey = Self.bookmarkKey(for: current)
-        if let parentBookmarkData = bookmarks[parentKey] {
+        let parentDirectKey = current.path
+        let parentStdKey = current.standardizedFileURL.path
+        if let parentBookmarkData = bookmarks[parentKey] ?? bookmarks[parentDirectKey] ?? bookmarks[parentStdKey] {
           if let resolvedParent = try? resolveBookmarkDataLocked(parentBookmarkData) {
             return (candidateURL, resolvedParent)
           }
@@ -57,8 +61,11 @@ final class SecurityScopedBookmarkStore {
 
   func hasBookmark(for path: String) -> Bool {
     let url = Self.url(from: path)
+    let key = Self.bookmarkKey(for: url)
+    let directKey = url.path
+    let stdKey = url.standardizedFileURL.path
     return stateQueue.sync {
-      bookmarks[Self.bookmarkKey(for: url)] != nil
+      bookmarks[key] != nil || bookmarks[directKey] != nil || bookmarks[stdKey] != nil
     }
   }
 
@@ -68,7 +75,9 @@ final class SecurityScopedBookmarkStore {
       var current = candidateURL.deletingLastPathComponent()
       while current.path != "/" && !current.path.isEmpty && current.pathComponents.count > 1 {
         let parentKey = Self.bookmarkKey(for: current)
-        if bookmarks[parentKey] != nil {
+        let parentDirectKey = current.path
+        let parentStdKey = current.standardizedFileURL.path
+        if bookmarks[parentKey] != nil || bookmarks[parentDirectKey] != nil || bookmarks[parentStdKey] != nil {
           return true
         }
         let next = current.deletingLastPathComponent()
@@ -86,9 +95,14 @@ final class SecurityScopedBookmarkStore {
   }
 
   func forget(path: String) {
-    let key = Self.bookmarkKey(for: Self.url(from: path))
+    let url = Self.url(from: path)
+    let key = Self.bookmarkKey(for: url)
+    let directKey = url.path
+    let stdKey = url.standardizedFileURL.path
     stateQueue.sync {
       bookmarks.removeValue(forKey: key)
+      bookmarks.removeValue(forKey: directKey)
+      bookmarks.removeValue(forKey: stdKey)
       UserDefaults.standard.set(bookmarks, forKey: storageKey)
     }
   }
@@ -105,7 +119,7 @@ final class SecurityScopedBookmarkStore {
     #else
     let resolvedURL = try URL(
       resolvingBookmarkData: bookmarkData,
-      options: [],
+      options: [.withoutUI],
       relativeTo: nil,
       bookmarkDataIsStale: &isStale
     )
@@ -135,7 +149,12 @@ final class SecurityScopedBookmarkStore {
         relativeTo: nil
       )
       #endif
-      bookmarks[Self.bookmarkKey(for: url)] = bookmarkData
+      let key1 = Self.bookmarkKey(for: url)
+      let key2 = url.standardizedFileURL.path
+      let key3 = url.path
+      bookmarks[key1] = bookmarkData
+      bookmarks[key2] = bookmarkData
+      bookmarks[key3] = bookmarkData
       UserDefaults.standard.set(bookmarks, forKey: storageKey)
       return true
     } catch {
@@ -163,6 +182,28 @@ final class SecurityScopedFileAccessCoordinator {
   private var startedSecurityScope: [String: Bool] = [:]
   private let stateQueue = DispatchQueue(label: "audio_core.security_scoped_file_access")
 
+  static func isCurrentSandboxPath(_ path: String) -> Bool {
+    #if os(iOS)
+    let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+    let rawPath = trimmed.hasPrefix("file://")
+      ? (URL(string: trimmed)?.standardizedFileURL.resolvingSymlinksInPath().path ?? trimmed)
+      : URL(fileURLWithPath: trimmed).standardizedFileURL.resolvingSymlinksInPath().path
+
+    let home = NSHomeDirectory()
+    let homePath = URL(fileURLWithPath: home).standardizedFileURL.resolvingSymlinksInPath().path
+    if rawPath.hasPrefix(homePath) {
+      return true
+    }
+    if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.app.vynody.player") {
+      let appGroupPath = appGroupURL.standardizedFileURL.resolvingSymlinksInPath().path
+      if rawPath.hasPrefix(appGroupPath) {
+        return true
+      }
+    }
+    #endif
+    return false
+  }
+
   static func resolveSandboxInternalPath(_ path: String) -> String? {
     #if os(iOS)
     let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -182,21 +223,18 @@ final class SecurityScopedFileAccessCoordinator {
       }
     }
 
-    // Match any legacy / stale sandbox container UUID for Documents / Library / tmp
-    if let range = rawPath.range(of: #"/Containers/Data/Application/[^/]+/(Documents|Library|tmp)($|/.*)"#, options: .regularExpression) {
-      let match = String(rawPath[range])
-      if let subRange = match.range(of: #"/(Documents|Library|tmp)($|/.*)"#, options: .regularExpression) {
-        let subPath = String(match[subRange])
-        return homePath + subPath
-      }
-    }
-
-    // Match any path containing /(Documents|Library|tmp)($|/.*) that exists in current home sandbox
-    if let subRange = rawPath.range(of: #"/(Documents|Library|tmp)($|/.*)"#, options: .regularExpression) {
-      let subPath = String(rawPath[subRange])
-      let candidate = homePath + subPath
-      if FileManager.default.fileExists(atPath: candidate) {
-        return candidate
+    // Match any legacy / stale sandbox container UUID for Documents / Library / tmp that exists in current home sandbox
+    // ONLY if the rawPath does not exist on disk and candidate exists in current home sandbox.
+    if !FileManager.default.fileExists(atPath: rawPath) {
+      if let range = rawPath.range(of: #"/Containers/Data/Application/[^/]+/(Documents|Library|tmp)($|/.*)"#, options: .regularExpression) {
+        let match = String(rawPath[range])
+        if let subRange = match.range(of: #"/(Documents|Library|tmp)($|/.*)"#, options: .regularExpression) {
+          let subPath = String(match[subRange])
+          let candidate = homePath + subPath
+          if FileManager.default.fileExists(atPath: candidate) {
+            return candidate
+          }
+        }
       }
     }
     #endif
@@ -249,7 +287,7 @@ final class SecurityScopedFileAccessCoordinator {
 
   @discardableResult
   func registerPersistentAccess(for path: String) -> Bool {
-    if Self.isSandboxInternalPath(path) {
+    if Self.isCurrentSandboxPath(path) {
       return true
     }
 
@@ -270,6 +308,39 @@ final class SecurityScopedFileAccessCoordinator {
     }
   }
 
+  @discardableResult
+  func registerPersistentAccess(for url: URL) -> Bool {
+    guard url.isFileURL else { return false }
+    let standardized = url.standardizedFileURL.resolvingSymlinksInPath()
+    let path = standardized.path
+    if Self.isCurrentSandboxPath(path) {
+      return true
+    }
+    return bookmarkStore.remember(url: standardized)
+  }
+
+  func acquireAccess(for url: URL) -> URL {
+    guard url.isFileURL else { return url }
+    let standardized = url.standardizedFileURL.resolvingSymlinksInPath()
+    let path = standardized.path
+    if let resolved = Self.resolveSandboxInternalPath(path) {
+      return URL(fileURLWithPath: resolved)
+    }
+
+    let key = Self.key(for: standardized)
+    stateQueue.sync {
+      if activeAccessCounts[key] == nil {
+        activeAccessCounts[key] = 0
+        activeAccessURLs[key] = standardized
+        startedSecurityScope[key] = standardized.startAccessingSecurityScopedResource()
+      }
+      activeAccessCounts[key, default: 0] += 1
+    }
+
+    _ = bookmarkStore.remember(url: standardized)
+    return standardized
+  }
+
   func forgetPersistentAccess(for path: String) {
     let key = Self.key(forPath: path)
     stateQueue.sync {
@@ -279,7 +350,7 @@ final class SecurityScopedFileAccessCoordinator {
   }
 
   func hasPersistentAccess(for path: String) -> Bool {
-    if Self.isSandboxInternalPath(path) {
+    if Self.isCurrentSandboxPath(path) {
       return true
     }
     return bookmarkStore.hasBookmark(for: path) || bookmarkStore.hasParentBookmark(for: path)
@@ -290,7 +361,7 @@ final class SecurityScopedFileAccessCoordinator {
   }
 
   func releaseAccess(for path: String) {
-    if Self.isSandboxInternalPath(path) {
+    if Self.isCurrentSandboxPath(path) {
       return
     }
     let key = Self.key(forPath: path)
