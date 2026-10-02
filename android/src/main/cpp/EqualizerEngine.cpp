@@ -136,7 +136,6 @@ void EqualizerEngine::init(int numBands, float sampleRate, int channels) {
     std::lock_guard<std::mutex> lock(mMutex);
     mSampleRate = sampleRate;
     mCurrentPreAmpLinear = mTargetPreAmpLinear.load(std::memory_order_relaxed);
-    mCurrentHeadroomLinear = 1.0f;
     mBands.clear();
     
     if (numBands < 1) return;
