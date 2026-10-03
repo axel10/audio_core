@@ -1109,9 +1109,6 @@ impl PlayerController {
     fn mark_track_ended(&mut self, path: &str) {
         if self.public_path() == Some(path) {
             self.pending_playback_state = Some("ENDED".to_string());
-            if let Some(sink) = self.sink.as_ref() {
-                sink.pause();
-            }
             super::notify_playback_state_changed();
         }
     }
