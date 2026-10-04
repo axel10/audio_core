@@ -569,6 +569,7 @@ Future<AudioDetails> getAudioDetailsWithFlutterTaglib({
         bitrate: info.bitrate * 1000,
         sampleRate: info.sampleRate,
         channels: info.channels,
+        bitDepth: info.bitDepth,
         bitrateMode: info.bitrateMode,
         fileSize: fileSize,
       );

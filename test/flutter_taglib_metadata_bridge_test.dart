@@ -44,5 +44,19 @@ void main() {
       expect(file.properties.containsKey(taglib.TagProperties.date), isFalse);
       file.close();
     });
+
+    test('getAudioDetailsWithFlutterTaglib extracts bitDepth correctly', () async {
+      final flacDetails = await getAudioDetailsWithFlutterTaglib(
+        path: 'flutter_taglib/test/assets/01 TempleOS Hymn Risen (Remix).flac',
+      );
+      expect(flacDetails.bitDepth, equals(16));
+      expect(flacDetails.formatName, equals('flac'));
+
+      final mp3Details = await getAudioDetailsWithFlutterTaglib(
+        path: 'flutter_taglib/test/assets/01 TempleOS Hymn Risen (Remix).mp3',
+      );
+      expect(mp3Details.bitDepth, isNull);
+      expect(mp3Details.formatName, equals('mp3'));
+    });
   });
 }
