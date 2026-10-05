@@ -197,6 +197,18 @@ class AudioCoreController extends ChangeNotifier
   bool get isInitialized => _initialized;
   bool get isTransitioning => _isTransitioning;
   EqualizerConfig get equalizerConfig => equalizer.config;
+
+  /// When true, [AudioCoreController] manages track transitions internally via [playlist].
+  /// When false (default), [AudioCoreController] purely plays audio and notifies [onTrackEnded]
+  /// allowing external controllers (like Vynody's AudioService) to be the single source of truth.
+  bool manageQueueInternally = false;
+
+  final StreamController<String?> _onTrackEndedController =
+      StreamController<String?>.broadcast();
+
+  /// Emits the path of the track that just finished playing.
+  Stream<String?> get onTrackEnded => _onTrackEndedController.stream;
+
   bool get _usesRustPlaybackBackend =>
       _engine is RustAudioEngine &&
       (Platform.isLinux || Platform.isWindows || Platform.isMacOS || Platform.isIOS);
@@ -362,7 +374,10 @@ class AudioCoreController extends ChangeNotifier
           }
           if (endedPath == null || endedPath != _lastEndedAutoAdvancePath) {
             _lastEndedAutoAdvancePath = endedPath;
-            unawaited(_handleAutoTransition());
+            _onTrackEndedController.add(endedPath);
+            if (manageQueueInternally) {
+              unawaited(_handleAutoTransition());
+            }
           }
         } else if (status.playbackState != 'ENDED' &&
             player.currentState != PlayerState.completed) {
@@ -391,6 +406,7 @@ class AudioCoreController extends ChangeNotifier
     _renderTick?.cancel();
     _positionTick?.cancel();
     _playbackStateSubscription?.cancel();
+    unawaited(_onTrackEndedController.close());
     unawaited(_engine.dispose());
     unawaited(_streamCacheProxy?.stop());
     visualizer.dispose();
@@ -569,68 +585,88 @@ class AudioCoreController extends ChangeNotifier
     }
   }
 
+  /// Directly plays an audio track URI without requiring an internal playlist.
+  Future<void> playTrackUri(
+    String uri, {
+    bool autoPlay = true,
+    Duration? position,
+    PlaybackReason reason = PlaybackReason.user,
+    FadeSettings? fadeSetting,
+  }) async {
+    if (!isInitialized) {
+      await initialize();
+    }
+    if (!isInitialized) return;
+
+    if (Platform.isIOS || Platform.isMacOS) {
+      final parsed = Uri.tryParse(uri);
+      final isRemote = parsed != null &&
+          (parsed.scheme == 'http' ||
+              parsed.scheme == 'https' ||
+              parsed.scheme == 'webdav');
+      if (!isRemote) {
+        await registerPersistentAccess(path: uri);
+        await beginScopedAccess(path: uri);
+      }
+    }
+
+    await player.performTransition(
+      uri: uri,
+      autoPlay: autoPlay,
+      position: position,
+      reason: reason,
+      fadeSetting: fadeSetting,
+      onStateChanged: (progressing) {
+        _isTransitioning = progressing;
+        notifyListeners();
+      },
+    );
+    visualizer.resetState();
+
+    if (Platform.isAndroid) {
+      unawaited(
+        Future.delayed(
+          const Duration(milliseconds: 200),
+          () => equalizer.reapply(),
+        ),
+      );
+    }
+  }
+
+  /// Directly crossfades from current track to a new track URI.
+  Future<void> crossfadeToUri(
+    String uri, {
+    Duration duration = const Duration(seconds: 3),
+    Duration? position,
+    bool autoPlay = true,
+  }) async {
+    await playTrackUri(
+      uri,
+      autoPlay: autoPlay,
+      position: position,
+      reason: PlaybackReason.user,
+      fadeSetting: FadeSettings(
+        fadeOnSwitch: true,
+        fadeOnPauseResume: false,
+        duration: duration,
+        mode: FadeMode.crossfade,
+      ),
+    );
+  }
+
   /// Plays a specific track with one high-level command.
   ///
-  /// The controller will try to locate the track in existing playlists first.
-  /// If it is not found, the track is staged in the queue playlist and played
-  /// from there.
+  /// In pure playback mode, this directly plays the track's URI.
   Future<void> playTrack(
     AudioTrack track, {
     String? preferredPlaylistId,
     FadeSettings? fadeSetting,
   }) async {
-    final playlistController = playlist;
-    final searchOrder = <String?>[
-      preferredPlaylistId,
-      playlistController.activePlaylistId,
-      playlistController.queuePlaylistId,
-    ];
-
-    final visited = <String>{};
-    for (final playlistId in searchOrder.whereType<String>()) {
-      if (!visited.add(playlistId)) continue;
-      final playlist = playlistController.playlistById(playlistId);
-      final index = playlist?.items.indexWhere((item) => item.id == track.id);
-      if (index != null && index >= 0) {
-        await playlistController.setActivePlaylist(
-          playlistId,
-          startIndex: index,
-          autoPlay: true,
-          fadeSetting: fadeSetting,
-        );
-        return;
-      }
-    }
-
-    for (final playlist in playlistController.playlists) {
-      if (!visited.add(playlist.id)) continue;
-      final index = playlist.items.indexWhere((item) => item.id == track.id);
-      if (index >= 0) {
-        await playlistController.setActivePlaylist(
-          playlist.id,
-          startIndex: index,
-          autoPlay: true,
-          fadeSetting: fadeSetting,
-        );
-        return;
-      }
-    }
-
-    await playlistController.ensureQueuePlaylist();
-    final queuePlaylist = playlistController.playlistById(
-      playlistController.queuePlaylistId,
-    );
-    final startIndex = queuePlaylist?.items.length ?? 0;
-    await playlistController.addTracksToPlaylist(
-      playlistController.queuePlaylistId,
-      <AudioTrack>[track],
-      fadeSetting: fadeSetting,
-    );
-    await playlistController.setActivePlaylist(
-      playlistController.queuePlaylistId,
-      startIndex: startIndex,
+    await playTrackUri(
+      track.uri,
       autoPlay: true,
       fadeSetting: fadeSetting,
+      reason: PlaybackReason.user,
     );
   }
 
@@ -679,6 +715,7 @@ class AudioCoreController extends ChangeNotifier
     bool autoPlayFirst = true,
     FadeSettings? fadeSetting,
   }) async {
+    manageQueueInternally = true;
     if (paths.isEmpty) return;
     if (!isInitialized) {
       await initialize();
