@@ -100,6 +100,7 @@ fn build_transcoder<'a>(
         request.channels,
         decoder.channel_layout(),
         decoder.channels(),
+        Some(&codec),
     );
     let sample_format = output_sample_format(&codec, decoder.format());
 

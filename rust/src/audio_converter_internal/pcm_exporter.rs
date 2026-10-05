@@ -44,6 +44,7 @@ pub(crate) fn decode_to_pcm(
         target_channels.map(|c| c as u16),
         decoder.channel_layout(),
         decoder.channels(),
+        None,
     );
     let sample_format = ffmpeg::util::format::Sample::I16(ffmpeg::util::format::sample::Type::Packed);
 

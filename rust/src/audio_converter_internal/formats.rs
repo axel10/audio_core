@@ -211,14 +211,42 @@ pub(crate) fn output_channel_layout(
     channels: Option<u16>,
     fallback: ffmpeg::ChannelLayout,
     fallback_channels: u16,
+    codec: Option<&FfmpegCodec>,
 ) -> ffmpeg::ChannelLayout {
-    match channels {
+    let candidate = match channels {
         Some(1) => ffmpeg::ChannelLayout::MONO,
         Some(2) => ffmpeg::ChannelLayout::STEREO,
         Some(value) => ffmpeg::ChannelLayout::default(i32::from(value)),
         None if fallback.is_empty() => ffmpeg::ChannelLayout::default(i32::from(fallback_channels)),
         None => fallback,
+    };
+
+    if let Some(codec) = codec {
+        if let Ok(audio) = codec.audio() {
+            if let Some(layouts) = audio.channel_layouts() {
+                let supported: Vec<ffmpeg::ChannelLayout> = layouts.collect();
+                if !supported.is_empty() && !supported.iter().any(|&layout| layout == candidate) {
+                    let target_channels = candidate.channels();
+                    let first = supported[0];
+                    return supported.into_iter().fold(first, |acc, cur| {
+                        if cur.channels() <= target_channels {
+                            if acc.channels() > target_channels || cur.channels() > acc.channels() {
+                                cur
+                            } else {
+                                acc
+                            }
+                        } else if acc.channels() > target_channels && cur.channels() < acc.channels() {
+                            cur
+                        } else {
+                            acc
+                        }
+                    });
+                }
+            }
+        }
     }
+
+    candidate
 }
 
 pub(crate) fn output_sample_format(
@@ -266,4 +294,26 @@ pub(crate) fn encoder_quality_for_bitrate(bit_rate: u32) -> Option<usize> {
     };
 
     Some(quality)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_output_channel_layout_downmixes_for_mp3_encoder() {
+        let _ = crate::audio_converter_internal::common::ensure_ffmpeg_initialized();
+        let mp3_spec = AudioCodecSpec {
+            preferred_name: "libmp3lame",
+            fallback_id: ffmpeg::codec::Id::MP3,
+        };
+        if let Some(codec) = mp3_spec.find() {
+            // 6.1 surround has 7 channels
+            let layout_6_1 = ffmpeg::ChannelLayout::default(7);
+            let layout = output_channel_layout(None, layout_6_1, 7, Some(&codec));
+            // libmp3lame only supports mono (1) and stereo (2), so it must be downmixed to stereo
+            assert_eq!(layout, ffmpeg::ChannelLayout::STEREO);
+            assert_eq!(layout.channels(), 2);
+        }
+    }
 }
