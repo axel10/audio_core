@@ -8,7 +8,9 @@ import 'random_playback_manager.dart';
 /// Manages playlists, tracks, and playback order.
 class PlaylistController extends ChangeNotifier {
   PlaylistController({required AudioVisualizerParent parent})
-    : _parent = parent;
+    : _parent = parent {
+    _ensureDefaultPlaylistSync();
+  }
 
   final AudioVisualizerParent _parent;
 
@@ -205,7 +207,11 @@ class PlaylistController extends ChangeNotifier {
     String id,
     List<AudioTrack> newTracks, {
     FadeSettings? fadeSetting,
+    bool reconcile = true,
   }) async {
+    if (id == _defaultPlaylistId) {
+      _ensureDefaultPlaylistSync();
+    }
     final idx = _playlists.indexWhere((p) => p.id == id);
     if (idx < 0) return;
 
@@ -225,7 +231,14 @@ class PlaylistController extends ChangeNotifier {
         _currentIndex = _activePlaylistTracks.isNotEmpty ? 0 : null;
       }
 
-      await _reconcile(oldTrack: oldTrack, fadeSetting: fadeSetting);
+      if (reconcile) {
+        await _reconcile(oldTrack: oldTrack, fadeSetting: fadeSetting);
+      } else {
+        await _syncActivePlaylistData();
+        _rebuildPlayOrder();
+        _reconcileRandom();
+        notifyListeners();
+      }
     } else {
       notifyListeners();
     }
@@ -531,6 +544,7 @@ class PlaylistController extends ChangeNotifier {
     _playlistMode = PlaylistMode.queue;
     _randomManager.setPolicy(null);
     _randomManager.clearHistory();
+    _ensureDefaultPlaylistSync();
     notifyListeners();
   }
 
@@ -952,14 +966,17 @@ class PlaylistController extends ChangeNotifier {
     }
   }
 
-  Future<void> _ensureDefaultPlaylist() async {
-    if (_activePlaylistId != null) return;
+  void _ensureDefaultPlaylistSync() {
     if (!_playlists.any((p) => p.id == _defaultPlaylistId)) {
       _playlists.add(
-        Playlist(id: _defaultPlaylistId, name: 'Queue', items: []),
+        const Playlist(id: _defaultPlaylistId, name: 'Queue', items: []),
       );
     }
-    _activePlaylistId = _defaultPlaylistId;
+    _activePlaylistId ??= _defaultPlaylistId;
+  }
+
+  Future<void> _ensureDefaultPlaylist() async {
+    _ensureDefaultPlaylistSync();
   }
 
   void _rebuildPlayOrder() {
