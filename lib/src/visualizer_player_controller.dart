@@ -662,6 +662,31 @@ class AudioCoreController extends ChangeNotifier
     String? preferredPlaylistId,
     FadeSettings? fadeSetting,
   }) async {
+    if (manageQueueInternally) {
+      final playlistController = playlist;
+      final searchOrder = <String?>[
+        preferredPlaylistId,
+        playlistController.activePlaylistId,
+        playlistController.queuePlaylistId,
+      ];
+
+      final visited = <String>{};
+      for (final playlistId in searchOrder.whereType<String>()) {
+        if (!visited.add(playlistId)) continue;
+        final p = playlistController.playlistById(playlistId);
+        final index = p?.items.indexWhere((item) => item.id == track.id);
+        if (index != null && index >= 0) {
+          await playlistController.setActivePlaylist(
+            playlistId,
+            startIndex: index,
+            autoPlay: true,
+            fadeSetting: fadeSetting,
+          );
+          return;
+        }
+      }
+    }
+
     await playTrackUri(
       track.uri,
       autoPlay: true,

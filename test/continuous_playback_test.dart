@@ -294,4 +294,34 @@ void main() {
     expect(controller.playlist.currentTrack?.uri, track1);
     expect(mockEngine.loadedPaths.last, track1);
   });
+
+  test('循环队列模式下：单曲队列播完自动循环重播该首', () async {
+    final file = File(p.join(tempDir.path, 'single_track.mp3'))..createSync();
+    final track = file.path;
+
+    await controller.playPaths([track], startIndex: 0);
+    controller.playlist.setMode(PlaylistMode.queueLoop);
+
+    expect(controller.playlist.currentIndex, 0);
+    expect(mockEngine.loadedPaths.length, 1);
+
+    // 模拟单曲播完
+    mockEngine.emitStatus(
+      AudioStatus(
+        path: track,
+        playbackState: 'ENDED',
+        position: const Duration(minutes: 3),
+        duration: const Duration(minutes: 3),
+        isPlaying: false,
+        volume: 1.0,
+      ),
+    );
+
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    expect(controller.playlist.currentIndex, 0);
+    expect(controller.playlist.currentTrack?.uri, track);
+    expect(mockEngine.loadedPaths.length, 2);
+    expect(mockEngine.loadedPaths.last, track);
+  });
 }

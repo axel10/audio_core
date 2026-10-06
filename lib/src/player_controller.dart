@@ -57,42 +57,44 @@ class PlayerController extends ChangeNotifier {
     FadeSettings? fadeSetting,
     required void Function(bool progressing) onStateChanged,
   }) async {
+    // Auto-infer autoNext / ended if current track naturally completed or ended,
+    // even if caller forgot to pass PlaybackReason.autoNext.
+    final isNaturallyCompleted =
+        _playerState == PlayerState.completed ||
+        (!_isPlaying &&
+            _duration > Duration.zero &&
+            _position >= _duration - const Duration(milliseconds: 1000));
+    final effectiveReason =
+        (reason == PlaybackReason.user && isNaturallyCompleted)
+            ? PlaybackReason.autoNext
+            : reason;
+
     final effectiveFadeSettings = fadeSetting ?? _fadeSettings;
     final switchingTracks = _selectedPath != null && _selectedPath != uri;
     final isActivelyPlaying = _isPlaying && _playerState == PlayerState.playing;
+
+    // Fading is only valid if actively playing and not an automatic track transition.
+    // When the previous track has already ended or is paused, transitions should be immediate
+    // without stalling or fading out dead silence.
     final shouldFade =
         switchingTracks &&
+        isActivelyPlaying &&
         effectiveFadeSettings.fadeOnSwitch &&
         effectiveFadeSettings.duration > Duration.zero &&
-        reason != PlaybackReason.autoNext &&
-        (reason == PlaybackReason.user || autoPlay);
-
-    // debugPrint(
-    //   '[PlayerController] performTransition uri=$uri autoPlay=$autoPlay '
-    //   'reason=$reason current=$_selectedPath posMs=${position?.inMilliseconds} '
-    //   'state=$_playerState isPlaying=$_isPlaying switching=$switchingTracks '
-    //   'fadeOnSwitch=${effectiveFadeSettings.fadeOnSwitch} '
-    //   'mode=${effectiveFadeSettings.mode} durationMs=${effectiveFadeSettings.duration.inMilliseconds} '
-    //   'shouldFade=$shouldFade nativeCrossfadeCandidate='
-    //   '${shouldFade && isActivelyPlaying && effectiveFadeSettings.mode == FadeMode.crossfade && _parent.engine.supportsCrossfade}',
-    // );
+        effectiveReason != PlaybackReason.autoNext &&
+        effectiveReason != PlaybackReason.ended &&
+        (effectiveReason == PlaybackReason.user || autoPlay);
 
     PlaybackTransition strategy = const ImmediateTransition();
 
     if (shouldFade) {
-      if (isActivelyPlaying &&
-          effectiveFadeSettings.mode == FadeMode.crossfade &&
+      if (effectiveFadeSettings.mode == FadeMode.crossfade &&
           _parent.engine.supportsCrossfade) {
-        // debugPrint('[PlayerController] transition strategy=NativeCrossfade');
         strategy = NativeCrossfadeTransition(
           duration: effectiveFadeSettings.duration,
         );
       } else {
-        // Fallback to sequential fade
-        // debugPrint(
-        //   '[PlayerController] transition strategy=SequentialFade '
-        //   'isActivelyPlaying=$isActivelyPlaying supportsCrossfade=${_parent.engine.supportsCrossfade}',
-        // );
+        // Fallback to sequential fade only when actively playing
         strategy = SequentialFadeTransition(
           duration: effectiveFadeSettings.duration,
           targetVolume: _volume,
@@ -553,6 +555,9 @@ class SequentialFadeTransition extends PlaybackTransition {
     player._duration = loadedDuration;
     player._durationReady = loadedDuration > Duration.zero;
     player._lastCommandTime = DateTime.now();
+    if (autoPlay) {
+      player._lastPlayCommandTime = player._lastCommandTime;
+    }
     player._isPlaying = autoPlay;
     player._playerState = autoPlay ? PlayerState.playing : PlayerState.ready;
     player._onTrackChanged(uri);
@@ -601,7 +606,9 @@ class NativeCrossfadeTransition extends PlaybackTransition {
     // We update local state immediately
     player._selectedPath = uri;
     player._position = position ?? Duration.zero;
+    player._lastCommandTime = DateTime.now();
     if (autoPlay) {
+      player._lastPlayCommandTime = player._lastCommandTime;
       player._isPlaying = true;
       player._playerState = PlayerState.playing;
     }

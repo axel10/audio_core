@@ -11,7 +11,6 @@ import android.media.audiofx.BassBoost
 import android.os.Build
 import android.provider.MediaStore
 import org.json.JSONObject
-import android.animation.ValueAnimator
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -99,6 +98,44 @@ class MyExoplayerPlugin :
     ActivityAware,
     ActivityResultListener,
     RequestPermissionsResultListener {
+    private interface VolumeFadeCallback {
+        fun onUpdate(progress: Float)
+        fun onEnd()
+    }
+
+    private class VolumeFadeTask(
+        private val handler: Handler,
+        private val durationMs: Long,
+        private val callback: VolumeFadeCallback,
+    ) : Runnable {
+        private var startTimeMs = 0L
+        private var isCancelled = false
+
+        fun cancel() {
+            isCancelled = true
+            handler.removeCallbacks(this)
+        }
+
+        override fun run() {
+            if (isCancelled) return
+            val now = SystemClock.uptimeMillis()
+            val elapsed = now - startTimeMs
+            if (durationMs <= 0L || elapsed >= durationMs) {
+                callback.onUpdate(1f)
+                callback.onEnd()
+                return
+            }
+            val progress = (elapsed.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+            callback.onUpdate(progress)
+            handler.postDelayed(this, 16L)
+        }
+
+        fun start() {
+            startTimeMs = SystemClock.uptimeMillis()
+            handler.post(this)
+        }
+    }
+
     private class PlayerContext(
         var id: String,
         val player: ExoPlayer,
@@ -106,7 +143,7 @@ class MyExoplayerPlugin :
         val cppEqualizerProcessor: CppEqualizerProcessor,
         var equalizer: Equalizer? = null,
         var bassBoost: BassBoost? = null,
-        var volumeAnimator: ValueAnimator? = null,
+        var volumeAnimator: VolumeFadeTask? = null,
         var volumeCommandGeneration: Long = 0L
     )
 
@@ -187,7 +224,7 @@ class MyExoplayerPlugin :
     private var activity: Activity? = null
     private var activityBinding: ActivityPluginBinding? = null
     private var pendingMediaLibraryPermissionResult: Result? = null
-    private var crossfadeAnimator: ValueAnimator? = null
+    private var crossfadeAnimator: VolumeFadeTask? = null
     private var crossfadeGeneration: Long = 0L
     private var activeCrossfadeSession: CrossfadeSession? = null
     private var fftEventSink: EventChannel.EventSink? = null
@@ -1081,44 +1118,38 @@ class MyExoplayerPlugin :
         )
         ctx.volumeAnimator?.cancel()
         val startVolume = ctx.player.volume
-        val animator = ValueAnimator.ofFloat(startVolume, targetVolume)
-        animator.duration = durationMs
-        animator.addUpdateListener { animation ->
-            if (ctx.volumeCommandGeneration != commandGeneration) {
-                animation.cancel()
-                return@addUpdateListener
-            }
-            ctx.player.volume = animation.animatedValue as Float
+        if (durationMs <= 0L) {
+            ctx.player.volume = targetVolume
+            onEnd?.invoke()
+            return
         }
-        animator.addListener(object : android.animation.AnimatorListenerAdapter() {
-            override fun onAnimationCancel(animation: android.animation.Animator) {
-                NativeLog.d(
-                    "AudioCore",
-                    "fadeVolumeTo cancel id=${ctx.id} generation=$commandGeneration " +
-                        "currentGeneration=${ctx.volumeCommandGeneration}",
-                )
-                if (ctx.volumeAnimator === animator) {
-                    ctx.volumeAnimator = null
-                }
-            }
 
-            override fun onAnimationEnd(animation: android.animation.Animator) {
-                if (ctx.volumeCommandGeneration != commandGeneration) return
-                if (ctx.volumeAnimator === animator) {
-                    ctx.volumeAnimator = null
+        val task = VolumeFadeTask(
+            fftEmitHandler,
+            durationMs,
+            object : VolumeFadeCallback {
+                override fun onUpdate(progress: Float) {
+                    if (ctx.volumeCommandGeneration != commandGeneration) {
+                        return
+                    }
+                    val currentVol = (startVolume + (targetVolume - startVolume) * progress).coerceIn(0f, 1f)
+                    ctx.player.volume = currentVol
                 }
-                NativeLog.d(
-                    "AudioCore",
-                    "fadeVolumeTo end id=${ctx.id} target=$targetVolume generation=$commandGeneration",
-                )
-                onEnd?.invoke()
+
+                override fun onEnd() {
+                    if (ctx.volumeCommandGeneration != commandGeneration) return
+                    ctx.volumeAnimator = null
+                    ctx.player.volume = targetVolume
+                    NativeLog.d(
+                        "AudioCore",
+                        "fadeVolumeTo end id=${ctx.id} target=$targetVolume generation=$commandGeneration",
+                    )
+                    onEnd?.invoke()
+                }
             }
-        })
-        ctx.volumeAnimator = animator
-        Handler(Looper.getMainLooper()).post {
-            if (ctx.volumeCommandGeneration != commandGeneration) return@post
-            animator.start()
-        }
+        )
+        ctx.volumeAnimator = task
+        task.start()
     }
 
     private fun handleCrossfade(
@@ -1204,53 +1235,37 @@ class MyExoplayerPlugin :
             )
 
             crossfadeAnimator?.cancel()
-            val animator = ValueAnimator.ofFloat(0f, 1f)
-            animator.duration = durationMs
-            animator.addUpdateListener { animation ->
-                if (crossfadeGeneration != generation) {
-                    animation.cancel()
-                    return@addUpdateListener
-                }
-                val progress = (animation.animatedValue as Float).coerceIn(0f, 1f)
-                val outgoingVolume = (baseVolume * (1f - progress)).coerceIn(0f, 1f)
-                val incomingVolume = (baseVolume * progress).coerceIn(0f, 1f)
-                mainCtx.player.volume = outgoingVolume
-                incomingCtx.player.volume = incomingVolume
-                NativeLog.v(
-                    "AudioCore",
-                    "handleCrossfade tick gen=$generation progress=$progress " +
-                        "outgoing=$outgoingVolume incoming=$incomingVolume " +
-                        "mainPlaying=${mainCtx.player.isPlaying} incomingPlaying=${incomingCtx.player.isPlaying}",
-                )
-            }
-            animator.addListener(object : android.animation.AnimatorListenerAdapter() {
-                override fun onAnimationCancel(animation: android.animation.Animator) {
-                    NativeLog.d(
-                        "AudioCore",
-                        "handleCrossfade cancel generation=$generation current=${crossfadeGeneration}",
-                    )
-                    if (crossfadeAnimator === animator) {
-                        crossfadeAnimator = null
+            val task = VolumeFadeTask(
+                fftEmitHandler,
+                durationMs,
+                object : VolumeFadeCallback {
+                    override fun onUpdate(progress: Float) {
+                        if (crossfadeGeneration != generation) return
+                        val outgoingVolume = (baseVolume * (1f - progress)).coerceIn(0f, 1f)
+                        val incomingVolume = (baseVolume * progress).coerceIn(0f, 1f)
+                        mainCtx.player.volume = outgoingVolume
+                        incomingCtx.player.volume = incomingVolume
+                        NativeLog.v(
+                            "AudioCore",
+                            "handleCrossfade tick gen=$generation progress=$progress " +
+                                "outgoing=$outgoingVolume incoming=$incomingVolume " +
+                                "mainPlaying=${mainCtx.player.isPlaying} incomingPlaying=${incomingCtx.player.isPlaying}",
+                        )
                     }
-                }
 
-                override fun onAnimationEnd(animation: android.animation.Animator) {
-                    if (crossfadeGeneration != generation) return
-                    NativeLog.d(
-                        "AudioCore",
-                        "handleCrossfade end generation=$generation current=${crossfadeGeneration}",
-                    )
-                    if (crossfadeAnimator === animator) {
+                    override fun onEnd() {
+                        if (crossfadeGeneration != generation) return
                         crossfadeAnimator = null
+                        NativeLog.d(
+                            "AudioCore",
+                            "handleCrossfade end generation=$generation current=$crossfadeGeneration",
+                        )
+                        finalizeCrossfade(generation)
                     }
-                    finalizeCrossfade(generation)
                 }
-            })
-            crossfadeAnimator = animator
-            Handler(Looper.getMainLooper()).post {
-                if (crossfadeGeneration != generation) return@post
-                animator.start()
-            }
+            )
+            crossfadeAnimator = task
+            task.start()
 
             result.success(null)
         } catch (e: Exception) {

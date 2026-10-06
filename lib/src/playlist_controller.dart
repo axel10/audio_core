@@ -410,6 +410,24 @@ class PlaylistController extends ChangeNotifier {
     return currentTrack != null;
   }
 
+  Future<bool> playByIndex(
+    int index, {
+    PlaybackReason reason = PlaybackReason.user,
+    FadeSettings? fadeSetting,
+  }) async {
+    if (index < 0 || index >= _activePlaylistTracks.length) return false;
+    final oldTrack = currentTrack;
+    _currentIndex = index;
+    await _reconcile(
+      forceLoad: true,
+      oldTrack: oldTrack,
+      autoPlay: reason != PlaybackReason.playlistChanged,
+      reason: reason,
+      fadeSetting: fadeSetting,
+    );
+    return currentTrack != null;
+  }
+
   Future<void> moveTrack(
     int oldIndex,
     int newIndex, {
@@ -459,6 +477,38 @@ class PlaylistController extends ChangeNotifier {
       }
     }
 
+    await _reconcile(oldTrack: oldTrack, fadeSetting: fadeSetting);
+  }
+
+  Future<void> removeTrack(String trackId, {FadeSettings? fadeSetting}) async {
+    final idx = _activePlaylistTracks.indexWhere((t) => t.id == trackId);
+    if (idx >= 0) {
+      await removeTrackAt(idx, fadeSetting: fadeSetting);
+    }
+  }
+
+  Future<void> removeTracksWhere(
+    bool Function(AudioTrack track) predicate, {
+    FadeSettings? fadeSetting,
+  }) async {
+    if (_activePlaylistTracks.isEmpty) return;
+    final oldTrack = currentTrack;
+    final remaining = _activePlaylistTracks.where((t) => !predicate(t)).toList();
+    if (remaining.length == _activePlaylistTracks.length) return;
+    if (remaining.isEmpty) {
+      await clear(fadeSetting: fadeSetting);
+      return;
+    }
+
+    int? newIndex;
+    if (oldTrack != null) {
+      final found = remaining.indexWhere((t) => t.id == oldTrack.id);
+      newIndex = found >= 0 ? found : (_currentIndex?.clamp(0, remaining.length - 1));
+    }
+    _activePlaylistTracks
+      ..clear()
+      ..addAll(remaining);
+    _currentIndex = newIndex;
     await _reconcile(oldTrack: oldTrack, fadeSetting: fadeSetting);
   }
 
@@ -695,6 +745,9 @@ class PlaylistController extends ChangeNotifier {
       }
 
       if (index == _currentIndex!) {
+        if (length == 1 && loop && await _isPlayableIndex(index)) {
+          return index;
+        }
         return null;
       }
 
@@ -828,7 +881,9 @@ class PlaylistController extends ChangeNotifier {
       } else if (oldTrack != null && track != null) {
         if (oldTrack.id != track.id) {
           shouldLoad = true;
-        } else if (reason == PlaybackReason.user) {
+        } else if (reason == PlaybackReason.user ||
+            _playlistMode == PlaylistMode.queueLoop ||
+            _playlistMode == PlaylistMode.singleLoop) {
           shouldLoad = true;
         }
       }
