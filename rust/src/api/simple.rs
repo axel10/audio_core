@@ -1,7 +1,6 @@
 pub mod audio_fingerprint;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
 pub mod controller;
-#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
 pub mod equalizer;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
 pub mod fft;
@@ -16,20 +15,6 @@ pub mod palette;
 
 use super::audio_converter;
 use std::path::Path;
-
-#[cfg(target_os = "android")]
-pub mod equalizer {
-    #[derive(Debug, Clone, Default)]
-    pub struct EqualizerConfig {
-        pub enabled: bool,
-        pub band_count: i32,
-        pub preamp_db: f32,
-        pub bass_boost_db: f32,
-        pub bass_boost_frequency_hz: f32,
-        pub bass_boost_q: f32,
-        pub band_gains_db: Vec<f32>,
-    }
-}
 
 #[cfg(target_os = "android")]
 pub mod controller {

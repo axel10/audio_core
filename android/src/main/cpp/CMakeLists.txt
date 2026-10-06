@@ -9,8 +9,7 @@ add_library( # Sets the name of the library.
         SHARED
 
         # Provides a relative path to your source file(s).
-        native-lib.cpp
-        EqualizerEngine.cpp)
+        native-lib.cpp)
 
 find_library( # Sets the name of the path variable.
         log-lib

@@ -16,7 +16,7 @@ import java.nio.ByteOrder
 import java.util.Collections
 
 /** Extracts DSF's channel-planar DSD blocks as interleaved DSD-LSB packets for FFmpeg. */
-internal class DsfExtractor : Extractor {
+class DsfExtractor : Extractor {
     companion object {
         const val MIME_TYPE = "audio/x-dsf"
         private const val HEADER_SIZE = 28

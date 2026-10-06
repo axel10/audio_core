@@ -156,7 +156,16 @@ class MyExoplayerPlugin :
         private const val REQUEST_PICK_OUTPUT_DIRECTORY = 42109
 
         init {
-            System.loadLibrary("my_exoplayer")
+            try {
+                System.loadLibrary("audio_core")
+            } catch (t: Throwable) {
+                // Ignore if already loaded or loaded by Flutter
+            }
+            try {
+                System.loadLibrary("my_exoplayer")
+            } catch (t: Throwable) {
+                // Ignore
+            }
         }
 
         private fun createPlayerListener(ctxRef: PlayerContext) = object : Player.Listener {
@@ -839,6 +848,13 @@ class MyExoplayerPlugin :
                 }
                 val strength = (bassBoostDb * 1000 / 15.0).toInt().coerceIn(0, 1000).toShort()
                 bb.setStrength(strength)
+                result.success(null)
+            }
+            "setCppEqualizerBassBoost" -> {
+                val gainDb = call.argument<Double>("gainDb")?.toFloat() ?: 0f
+                val freqHz = call.argument<Double>("freqHz")?.toFloat() ?: 80f
+                val q = call.argument<Double>("q")?.toFloat() ?: 0.75f
+                ctx.cppEqualizerProcessor.setBassBoost(gainDb, freqHz, q)
                 result.success(null)
             }
             "setCppEqualizerConfig" -> {

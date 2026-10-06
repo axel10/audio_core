@@ -387,6 +387,11 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
         previous == null ||
         !listEquals(previous.bandGainsDb, config.bandGainsDb);
 
+    final bassBoostChanged = previous == null ||
+        previous.bassBoostDb != config.bassBoostDb ||
+        previous.bassBoostFrequencyHz != config.bassBoostFrequencyHz ||
+        previous.bassBoostQ != config.bassBoostQ;
+
     if (enabledChanged) {
       await _channel.invokeMethod('setCppEqualizerEnabled', {
         'enabled': config.enabled,
@@ -396,6 +401,14 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
     if (preampChanged) {
       await _channel.invokeMethod('setCppEqualizerPreAmp', {
         'gainDb': config.preampDb,
+        'playerId': playerId,
+      });
+    }
+    if (bassBoostChanged) {
+      await _channel.invokeMethod('setCppEqualizerBassBoost', {
+        'gainDb': config.bassBoostDb,
+        'freqHz': config.bassBoostFrequencyHz,
+        'q': config.bassBoostQ,
         'playerId': playerId,
       });
     }

@@ -15,6 +15,16 @@ import android.util.Log
 @UnstableApi
 class CppEqualizerProcessor : BaseAudioProcessor() {
 
+    companion object {
+        init {
+            try {
+                System.loadLibrary("audio_core")
+            } catch (t: Throwable) {
+                NativeLog.d("CppEqualizer", "Note: System.loadLibrary(audio_core): ${t.message}")
+            }
+        }
+    }
+
     private var numBands = 10
     private var isInitialized = false
     private var isEnabled = false
@@ -35,6 +45,9 @@ class CppEqualizerProcessor : BaseAudioProcessor() {
 
     fun setEnabled(enabled: Boolean) {
         this.isEnabled = enabled
+        if (nativeHandle != 0L) {
+            nativeSetEnabled(nativeHandle, enabled)
+        }
     }
 
     fun setBandGain(index: Int, gainDb: Float) {
@@ -43,6 +56,12 @@ class CppEqualizerProcessor : BaseAudioProcessor() {
 
     fun setPreAmp(gainDb: Float) {
         nativeSetPreAmp(nativeHandle, gainDb)
+    }
+
+    fun setBassBoost(gainDb: Float, freqHz: Float = 80f, q: Float = 0.75f) {
+        if (nativeHandle != 0L) {
+            nativeSetBassBoost(nativeHandle, gainDb, freqHz, q)
+        }
     }
 
     fun release() {
@@ -64,6 +83,9 @@ class CppEqualizerProcessor : BaseAudioProcessor() {
         // Native initialization
         NativeLog.d("CppEqualizer", "Configuring EQ. SampleRate: ${inputAudioFormat.sampleRate} Hz, Channels: ${inputAudioFormat.channelCount}")
         nativeInit(nativeHandle, numBands, inputAudioFormat.sampleRate.toFloat(), inputAudioFormat.channelCount)
+        if (isEnabled) {
+            nativeSetEnabled(nativeHandle, true)
+        }
         isInitialized = true
         
         return AudioFormat(inputAudioFormat.sampleRate, inputAudioFormat.channelCount, C.ENCODING_PCM_FLOAT)
@@ -94,7 +116,7 @@ class CppEqualizerProcessor : BaseAudioProcessor() {
         }
         
         // Let native layer process in-place on the output buffer directly
-        if (isEnabled) {
+        if (nativeHandle != 0L) {
             nativeProcess(nativeHandle, outputBuffer, numSamples / inputAudioFormat.channelCount, inputAudioFormat.channelCount)
         }
         
@@ -115,5 +137,7 @@ class CppEqualizerProcessor : BaseAudioProcessor() {
     private external fun nativeProcess(handle: Long, buffer: ByteBuffer, numSamples: Int, channels: Int)
     private external fun nativeSetBandGain(handle: Long, index: Int, gainDb: Float)
     private external fun nativeSetPreAmp(handle: Long, gainDb: Float)
+    private external fun nativeSetEnabled(handle: Long, enabled: Boolean)
+    private external fun nativeSetBassBoost(handle: Long, gainDb: Float, freqHz: Float, q: Float)
 }
 

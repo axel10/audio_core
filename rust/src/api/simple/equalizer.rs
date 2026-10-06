@@ -1,10 +1,22 @@
 use fundsp::prelude::*;
+#[cfg(any(
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "ios"
+))]
 use rodio::Source;
 use std::cmp::{max, min};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, Mutex,
 };
+#[cfg(any(
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "ios"
+))]
 use std::time::Duration;
 
 pub const MAX_EQ_BANDS: usize = 32;
@@ -137,34 +149,34 @@ fn smooth_config_toward(current: &mut EqualizerConfig, target: &EqualizerConfig)
     changed
 }
 
-pub(crate) struct EqualizerShared {
+pub struct EqualizerShared {
     version: AtomicU64,
     config: Mutex<EqualizerConfig>,
 }
 
 impl EqualizerShared {
-    pub(crate) fn new(config: EqualizerConfig) -> Arc<Self> {
+    pub fn new(config: EqualizerConfig) -> Arc<Self> {
         Arc::new(Self {
             version: AtomicU64::new(1),
             config: Mutex::new(config.sanitized()),
         })
     }
 
-    pub(crate) fn current_config(&self) -> EqualizerConfig {
+    pub fn current_config(&self) -> EqualizerConfig {
         self.config
             .lock()
             .map(|config| config.clone())
             .unwrap_or_else(|_| EqualizerConfig::default())
     }
 
-    pub(crate) fn set_config(&self, config: EqualizerConfig) {
+    pub fn set_config(&self, config: EqualizerConfig) {
         if let Ok(mut current) = self.config.lock() {
             *current = config.sanitized();
             self.version.fetch_add(1, Ordering::AcqRel);
         }
     }
 
-    pub(crate) fn version(&self) -> u64 {
+    pub fn version(&self) -> u64 {
         self.version.load(Ordering::Acquire)
     }
 }
@@ -309,6 +321,137 @@ impl EqualizerChain {
     }
 }
 
+pub struct EqualizerProcessor {
+    shared: Arc<EqualizerShared>,
+    current_version: u64,
+    target_config: EqualizerConfig,
+    smoothed_config: EqualizerConfig,
+    chains: Vec<EqualizerChain>,
+    channels: usize,
+    sample_rate: u32,
+    sample_counter: usize,
+    fade_weight: f32,
+}
+
+impl EqualizerProcessor {
+    pub fn new(shared: Arc<EqualizerShared>, channels: usize, sample_rate: u32) -> Self {
+        let config = shared.current_config();
+        let safe_channels = max(channels, 1);
+        let chains = (0..safe_channels)
+            .map(|_| EqualizerChain::from_config(&config, sample_rate))
+            .collect::<Vec<_>>();
+        let initial_fade = if config.enabled { 1.0 } else { 0.0 };
+
+        Self {
+            shared,
+            current_version: 0,
+            target_config: config.clone(),
+            smoothed_config: config,
+            chains,
+            channels: safe_channels,
+            sample_rate,
+            sample_counter: 0,
+            fade_weight: initial_fade,
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.sample_counter = 0;
+        for chain in &mut self.chains {
+            chain.reset();
+        }
+    }
+
+    pub fn set_format(&mut self, channels: usize, sample_rate: u32) {
+        let safe_channels = max(channels, 1);
+        if self.channels != safe_channels || self.sample_rate != sample_rate {
+            self.channels = safe_channels;
+            self.sample_rate = sample_rate;
+            self.chains = (0..safe_channels)
+                .map(|_| EqualizerChain::from_config(&self.smoothed_config, sample_rate))
+                .collect();
+            self.reset();
+        }
+    }
+
+    pub fn process_interleaved(&mut self, buffer: &mut [f32], num_frames: usize) {
+        if self.channels == 0 || num_frames == 0 {
+            return;
+        }
+
+        let version = self.shared.version();
+        if version != self.current_version {
+            self.target_config = self.shared.current_config();
+            self.current_version = version;
+        }
+
+        let target_weight = if self.target_config.enabled { 1.0 } else { 0.0 };
+        if self.fade_weight == 0.0 && !self.smoothed_config.enabled && target_weight == 0.0 {
+            return;
+        }
+
+        let total_samples = num_frames * self.channels;
+        let buf_len = min(buffer.len(), total_samples);
+        let actual_frames = buf_len / self.channels;
+
+        let step = 1.0 / ((self.sample_rate as f32) * 0.008).max(64.0);
+
+        for f in 0..actual_frames {
+            if self.sample_counter % CONFIG_REFRESH_STRIDE == 0 {
+                let config_changed =
+                    smooth_config_toward(&mut self.smoothed_config, &self.target_config);
+                if config_changed {
+                    for chain in &mut self.chains {
+                        chain.update_from_config(&self.smoothed_config, self.sample_rate);
+                    }
+                }
+            }
+            self.sample_counter = self.sample_counter.wrapping_add(1);
+
+            let target_weight = if self.smoothed_config.enabled { 1.0 } else { 0.0 };
+            if (self.fade_weight - target_weight).abs() > 1e-4 {
+                if self.fade_weight < target_weight {
+                    self.fade_weight = (self.fade_weight + step).min(1.0);
+                } else {
+                    self.fade_weight = (self.fade_weight - step).max(0.0);
+                }
+            } else {
+                self.fade_weight = target_weight;
+            }
+
+            let frame_offset = f * self.channels;
+            if self.fade_weight >= 1.0 {
+                for ch in 0..self.channels {
+                    let s = buffer[frame_offset + ch];
+                    if let Some(chain) = self.chains.get_mut(ch) {
+                        buffer[frame_offset + ch] = chain.process_sample(s);
+                    }
+                }
+            } else if self.fade_weight > 0.0 {
+                let w = self.fade_weight;
+                let inv_w = 1.0 - w;
+                for ch in 0..self.channels {
+                    let s = buffer[frame_offset + ch];
+                    if let Some(chain) = self.chains.get_mut(ch) {
+                        let eq_out = chain.process_sample(s);
+                        buffer[frame_offset + ch] = s * inv_w + eq_out * w;
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.fade_weight > 0.0 || self.smoothed_config.enabled || self.target_config.enabled
+    }
+}
+
+#[cfg(any(
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "ios"
+))]
 pub struct EqSource<S>
 where
     S: Source<Item = f32>,
@@ -326,6 +469,12 @@ where
     fade_weight: f32,
 }
 
+#[cfg(any(
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "ios"
+))]
 impl<S> EqSource<S>
 where
     S: Source<Item = f32>,
@@ -423,6 +572,12 @@ where
     }
 }
 
+#[cfg(any(
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "ios"
+))]
 impl<S> Iterator for EqSource<S>
 where
     S: Source<Item = f32>,
@@ -435,6 +590,12 @@ where
     }
 }
 
+#[cfg(any(
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "ios"
+))]
 impl<S> Source for EqSource<S>
 where
     S: Source<Item = f32>,
@@ -568,6 +729,12 @@ mod tests {
         assert!(!sample.is_infinite(), "Sample should not be infinite");
     }
 
+    #[cfg(any(
+        target_os = "windows",
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
     #[test]
     fn test_crossfade_smoothing_transitions() {
         struct MockSource {
@@ -619,6 +786,181 @@ mod tests {
             let _ = eq_source.next();
             assert!(eq_source.fade_weight >= previous_weight);
             previous_weight = eq_source.fade_weight;
+        }
+    }
+
+    #[test]
+    fn test_equalizer_processor_interleaved_unity_and_bypass() {
+        let mut config = EqualizerConfig::default();
+        config.enabled = false;
+        let shared = EqualizerShared::new(config.clone());
+        let mut processor = EqualizerProcessor::new(Arc::clone(&shared), 2, 44100);
+
+        let mut buffer = [0.1f32, -0.2, 0.3, -0.4, 0.5, -0.6];
+        processor.process_interleaved(&mut buffer, 3);
+        assert_eq!(buffer, [0.1f32, -0.2, 0.3, -0.4, 0.5, -0.6]);
+
+        config.enabled = true;
+        config.band_count = 10;
+        config.band_gains_db = vec![0.0; 10];
+        shared.set_config(config);
+
+        // Process multiple blocks to complete crossfade
+        let mut frame_buf = vec![0.5f32; 1024 * 2];
+        processor.process_interleaved(&mut frame_buf, 1024);
+        for &s in &frame_buf[1000..] {
+            assert!((s - 0.5).abs() < 1e-4, "Expected 0.5 unity gain, got {}", s);
+        }
+    }
+}
+
+#[cfg(target_os = "android")]
+pub mod android_jni {
+    use super::*;
+    use jni::objects::{JByteBuffer, JClass};
+    use jni::sys::{jboolean, jfloat, jint, jlong};
+    use jni::JNIEnv;
+
+    pub struct AndroidEqualizer {
+        pub shared: Arc<EqualizerShared>,
+        pub processor: EqualizerProcessor,
+    }
+
+    #[no_mangle]
+    pub unsafe extern "system" fn Java_com_flutter_1rust_1bridge_audio_1core_CppEqualizerProcessor_nativeCreate(
+        _env: JNIEnv,
+        _class: JClass,
+    ) -> jlong {
+        let config = EqualizerConfig::default();
+        let shared = EqualizerShared::new(config);
+        let processor = EqualizerProcessor::new(Arc::clone(&shared), 2, 44100);
+        let eq = Box::new(AndroidEqualizer { shared, processor });
+        Box::into_raw(eq) as jlong
+    }
+
+    #[no_mangle]
+    pub unsafe extern "system" fn Java_com_flutter_1rust_1bridge_audio_1core_CppEqualizerProcessor_nativeDestroy(
+        _env: JNIEnv,
+        _class: JClass,
+        handle: jlong,
+    ) {
+        if handle != 0 {
+            drop(Box::from_raw(handle as *mut AndroidEqualizer));
+        }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "system" fn Java_com_flutter_1rust_1bridge_audio_1core_CppEqualizerProcessor_nativeInit(
+        _env: JNIEnv,
+        _class: JClass,
+        handle: jlong,
+        num_bands: jint,
+        sample_rate: jfloat,
+        channels: jint,
+    ) {
+        if handle != 0 {
+            let eq = &mut *(handle as *mut AndroidEqualizer);
+            let mut cfg = eq.shared.current_config();
+            cfg.band_count = num_bands;
+            eq.shared.set_config(cfg);
+            let safe_channels = if channels > 1 { channels as usize } else { 1 };
+            let safe_sample_rate = if sample_rate > 1.0 { sample_rate as u32 } else { 44100 };
+            eq.processor.set_format(safe_channels, safe_sample_rate);
+        }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "system" fn Java_com_flutter_1rust_1bridge_audio_1core_CppEqualizerProcessor_nativeProcess(
+        env: JNIEnv,
+        _class: JClass,
+        handle: jlong,
+        buffer: JByteBuffer,
+        num_frames: jint,
+        channels: jint,
+    ) {
+        if handle == 0 || num_frames <= 0 || channels <= 0 {
+            return;
+        }
+        let eq = &mut *(handle as *mut AndroidEqualizer);
+        if let Ok(addr) = env.get_direct_buffer_address(&buffer) {
+            if !addr.is_null() {
+                let total_samples = (num_frames as usize) * (channels as usize);
+                if let Ok(capacity) = env.get_direct_buffer_capacity(&buffer) {
+                    if capacity < total_samples * std::mem::size_of::<f32>() {
+                        return;
+                    }
+                }
+                let slice = std::slice::from_raw_parts_mut(addr as *mut f32, total_samples);
+                eq.processor.process_interleaved(slice, num_frames as usize);
+            }
+        }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "system" fn Java_com_flutter_1rust_1bridge_audio_1core_CppEqualizerProcessor_nativeSetBandGain(
+        _env: JNIEnv,
+        _class: JClass,
+        handle: jlong,
+        index: jint,
+        gain_db: jfloat,
+    ) {
+        if handle != 0 && index >= 0 {
+            let eq = &*(handle as *mut AndroidEqualizer);
+            let mut cfg = eq.shared.current_config();
+            let idx = index as usize;
+            if idx < cfg.band_gains_db.len() {
+                cfg.band_gains_db[idx] = gain_db;
+                eq.shared.set_config(cfg);
+            }
+        }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "system" fn Java_com_flutter_1rust_1bridge_audio_1core_CppEqualizerProcessor_nativeSetPreAmp(
+        _env: JNIEnv,
+        _class: JClass,
+        handle: jlong,
+        gain_db: jfloat,
+    ) {
+        if handle != 0 {
+            let eq = &*(handle as *mut AndroidEqualizer);
+            let mut cfg = eq.shared.current_config();
+            cfg.preamp_db = gain_db;
+            eq.shared.set_config(cfg);
+        }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "system" fn Java_com_flutter_1rust_1bridge_audio_1core_CppEqualizerProcessor_nativeSetEnabled(
+        _env: JNIEnv,
+        _class: JClass,
+        handle: jlong,
+        enabled: jboolean,
+    ) {
+        if handle != 0 {
+            let eq = &*(handle as *mut AndroidEqualizer);
+            let mut cfg = eq.shared.current_config();
+            cfg.enabled = enabled != 0;
+            eq.shared.set_config(cfg);
+        }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "system" fn Java_com_flutter_1rust_1bridge_audio_1core_CppEqualizerProcessor_nativeSetBassBoost(
+        _env: JNIEnv,
+        _class: JClass,
+        handle: jlong,
+        gain_db: jfloat,
+        freq_hz: jfloat,
+        q: jfloat,
+    ) {
+        if handle != 0 {
+            let eq = &*(handle as *mut AndroidEqualizer);
+            let mut cfg = eq.shared.current_config();
+            cfg.bass_boost_db = gain_db;
+            cfg.bass_boost_frequency_hz = freq_hz;
+            cfg.bass_boost_q = q;
+            eq.shared.set_config(cfg);
         }
     }
 }
