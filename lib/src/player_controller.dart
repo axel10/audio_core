@@ -600,12 +600,19 @@ class NativeCrossfadeTransition extends PlaybackTransition {
       '[NativeCrossfadeTransition] start uri=$uri autoPlay=$autoPlay '
       'positionMs=${position?.inMilliseconds} durationMs=${duration.inMilliseconds}',
     );
+    player._duration = Duration.zero;
+    player._durationReady = false;
+
     final resolvedUri = await player._parent.resolvePlayableUri(uri);
     await player._parent.engine.crossfade(resolvedUri, duration, position: position);
+
+    final loadedDuration = await player._parent.engine.getDuration();
 
     // We update local state immediately
     player._selectedPath = uri;
     player._position = position ?? Duration.zero;
+    player._duration = loadedDuration;
+    player._durationReady = loadedDuration > Duration.zero;
     player._lastCommandTime = DateTime.now();
     if (autoPlay) {
       player._lastPlayCommandTime = player._lastCommandTime;
@@ -616,7 +623,8 @@ class NativeCrossfadeTransition extends PlaybackTransition {
     player.notifyListeners();
     debugPrint(
       '[NativeCrossfadeTransition] done uri=$uri selected=${player.currentPath} '
-      'isPlaying=${player.isPlaying} state=${player.currentState}',
+      'isPlaying=${player.isPlaying} state=${player.currentState} '
+      'durationMs=${player.duration.inMilliseconds}',
     );
   }
 }

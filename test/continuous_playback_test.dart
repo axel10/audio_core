@@ -98,7 +98,7 @@ class MockAudioEngine implements AudioEngine {
   bool get fftDataIsPreGrouped => false;
 
   @override
-  bool get supportsCrossfade => false;
+  bool supportsCrossfade = false;
 
   @override
   Future<void> crossfade(
@@ -323,5 +323,39 @@ void main() {
     expect(controller.playlist.currentTrack?.uri, track);
     expect(mockEngine.loadedPaths.length, 2);
     expect(mockEngine.loadedPaths.last, track);
+  });
+
+  test('交叉淡入淡出切换曲目时能正确获取并更新新歌曲时长', () async {
+    final file1 = File(p.join(tempDir.path, 'track_cf1.mp3'))..createSync();
+    final file2 = File(p.join(tempDir.path, 'track_cf2.mp3'))..createSync();
+
+    final track1 = file1.path;
+    final track2 = file2.path;
+
+    // 1. 播放第 1 首歌，时长 3 分钟
+    mockEngine.currentDuration = const Duration(minutes: 3);
+    mockEngine.supportsCrossfade = true;
+
+    await controller.playPaths([track1, track2], startIndex: 0, autoPlayFirst: true);
+
+    expect(controller.player.currentPath, track1);
+    expect(controller.player.duration, const Duration(minutes: 3));
+
+    // 2. 模拟第 2 首歌时长为 5 分钟
+    mockEngine.currentDuration = const Duration(minutes: 5);
+
+    // 3. 使用交叉淡入淡出切换到第 2 首
+    await controller.playTrackUri(
+      track2,
+      fadeSetting: const FadeSettings(
+        fadeOnSwitch: true,
+        duration: Duration(seconds: 3),
+        mode: FadeMode.crossfade,
+      ),
+    );
+
+    // 4. 验证新歌曲路径与时长已同步更新为第 2 首（5 分钟），而不是残留第 1 首（3 分钟）
+    expect(controller.player.currentPath, track2);
+    expect(controller.player.duration, const Duration(minutes: 5));
   });
 }

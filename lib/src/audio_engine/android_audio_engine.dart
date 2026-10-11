@@ -37,7 +37,7 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'onPlayerStateChanged') {
         final String playerId = call.arguments['playerId'] ?? 'main';
-        if (playerId == _activePlayerId) {
+        if (playerId == _activePlayerId || playerId == 'crossfade') {
           final String? playbackState = call.arguments['state']?.toString();
           final int positionMs = call.arguments['position'] ?? 0;
           final int durationMs = call.arguments['duration'] ?? 0;
@@ -113,13 +113,13 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
       'positionMs=${position?.inMilliseconds}',
     );
     _latestFftCache = const <double>[];
+    _currentPath = path;
     await _channel.invokeMethod('crossfade', {
       'path': path,
       'durationMs': duration.inMilliseconds,
       if (position != null) 'positionMs': position.inMilliseconds,
       'playerId': _activePlayerId,
     });
-    _currentPath = path;
   }
 
   @override
