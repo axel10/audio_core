@@ -348,12 +348,18 @@ class AudioCoreController extends ChangeNotifier
           }
         }
 
+        final willAutoAdvance = shouldAutoAdvanceFromStatus(status) &&
+            willAutoAdvanceOnTrackEnd(status.path);
+        if (willAutoAdvance) {
+          _isTransitioning = true;
+        }
+
         player.applySnapshot(
           status.path,
           status.playbackState,
           adjustedPosition,
           status.duration,
-          status.isPlaying,
+          status.isPlaying || willAutoAdvance,
           status.volume,
           error: status.error,
         );
@@ -1135,45 +1141,66 @@ class AudioCoreController extends ChangeNotifier
     }
   }
 
-  Future<void> _handleAutoTransition() async {
-    if (_isTransitioning || player.currentState != PlayerState.completed) {
-      // debugPrint(
-      //   '[AudioCoreController] autoTransition skipped '
-      //   'isTransitioning=$_isTransitioning playerState=${player.currentState} '
-      //   'currentPath=${player.currentPath ?? "nil"}',
-      // );
-      return;
+  @visibleForTesting
+  bool willAutoAdvanceOnTrackEnd(String? endedPath) {
+    if (!manageQueueInternally) return false;
+    if (endedPath != null && endedPath == _stopAfterCurrentTrackPath) {
+      return false;
     }
-
-    // debugPrint(
-    //   '[AudioCoreController] autoTransition mode=${playlist.mode} '
-    //   'current=${playlist.currentTrack?.id} next=${playlist.nextTrack?.id} '
-    //   'lastEnded=$_lastEndedAutoAdvancePath',
-    // );
-
     if (playlist.mode == PlaylistMode.singleLoop) {
-      try {
-        await loadTrack(autoPlay: true, reason: PlaybackReason.autoNext);
-      } catch (e) {
-        debugPrint('[AudioCoreController] singleLoop loadTrack failed: $e');
-        await _engine.pause();
-      }
-      return;
+      return true;
     }
-
     if (playlist.mode == PlaylistMode.single) {
-      await _engine.pause();
+      return false;
+    }
+    return playlist.hasNext;
+  }
+
+  bool _isAutoTransitioning = false;
+
+  Future<void> _handleAutoTransition() async {
+    if (_isAutoTransitioning) {
       return;
     }
+    _isAutoTransitioning = true;
+    _isTransitioning = true;
+    notifyListeners();
 
     try {
-      final success = await playlist.playNext(reason: PlaybackReason.autoNext);
-      if (!success) {
-        await _engine.pause();
+      if (playlist.mode == PlaylistMode.singleLoop) {
+        try {
+          await loadTrack(autoPlay: true, reason: PlaybackReason.autoNext);
+        } catch (e) {
+          debugPrint('[AudioCoreController] singleLoop loadTrack failed: $e');
+          _isTransitioning = false;
+          await _engine.pause();
+          notifyListeners();
+        }
+        return;
       }
-    } catch (e) {
-      debugPrint('[AudioCoreController] autoTransition playNext failed: $e');
-      await _engine.pause();
+
+      if (playlist.mode == PlaylistMode.single) {
+        _isTransitioning = false;
+        await _engine.pause();
+        notifyListeners();
+        return;
+      }
+
+      try {
+        final success = await playlist.playNext(reason: PlaybackReason.autoNext);
+        if (!success) {
+          _isTransitioning = false;
+          await _engine.pause();
+          notifyListeners();
+        }
+      } catch (e) {
+        debugPrint('[AudioCoreController] autoTransition playNext failed: $e');
+        _isTransitioning = false;
+        await _engine.pause();
+        notifyListeners();
+      }
+    } finally {
+      _isAutoTransitioning = false;
     }
   }
 

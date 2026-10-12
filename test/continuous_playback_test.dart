@@ -358,4 +358,43 @@ void main() {
     expect(controller.player.currentPath, track2);
     expect(controller.player.duration, const Duration(minutes: 5));
   });
+
+  test('连续播放换轨期间：isPlaying 保持为 true，不发生短暂暂停闪烁', () async {
+    final file1 = File(p.join(tempDir.path, 'track_a.mp3'))..createSync();
+    final file2 = File(p.join(tempDir.path, 'track_b.mp3'))..createSync();
+
+    final track1 = file1.path;
+    final track2 = file2.path;
+
+    await controller.playPaths([track1, track2], startIndex: 0, autoPlayFirst: true);
+    expect(controller.player.isPlaying, isTrue);
+
+    final isPlayingHistory = <bool>[];
+    controller.player.addListener(() {
+      isPlayingHistory.add(controller.player.isPlaying);
+    });
+
+    // 模拟 track1 播放完毕
+    mockEngine.emitStatus(
+      AudioStatus(
+        path: track1,
+        playbackState: 'ENDED',
+        position: const Duration(minutes: 3),
+        duration: const Duration(minutes: 3),
+        isPlaying: false,
+        volume: 1.0,
+      ),
+    );
+
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    // 验证已经切到 track2
+    expect(controller.playlist.currentIndex, 1);
+    expect(controller.playlist.currentTrack?.uri, track2);
+
+    // 换轨期间与换轨完成后，任何一次通知中 isPlaying 都不得为 false
+    expect(isPlayingHistory, isNotEmpty);
+    expect(isPlayingHistory.contains(false), isFalse);
+    expect(controller.player.isPlaying, isTrue);
+  });
 }

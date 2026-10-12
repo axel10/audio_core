@@ -122,7 +122,11 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  Future<void> load(String path, {double? nativeVolume}) async {
+  Future<void> load(
+    String path, {
+    double? nativeVolume,
+    bool autoPlay = false,
+  }) async {
     _error = null;
     if (path.isEmpty) {
       setError('Selected file path is unavailable.');
@@ -149,8 +153,13 @@ class PlayerController extends ChangeNotifier {
       _duration = duration;
       _durationReady = duration > Duration.zero;
       _lastCommandTime = DateTime.now();
-      _isPlaying = false;
-      _playerState = PlayerState.ready;
+      if (!autoPlay) {
+        _isPlaying = false;
+        _playerState = PlayerState.ready;
+      } else {
+        _isPlaying = true;
+        _playerState = PlayerState.buffering;
+      }
 
       _onTrackChanged(path);
     } catch (e) {
@@ -574,7 +583,7 @@ class ImmediateTransition extends PlaybackTransition {
     required bool autoPlay,
     Duration? position,
   }) async {
-    await player.load(uri);
+    await player.load(uri, autoPlay: autoPlay);
     if (player.currentState == PlayerState.error) {
       throw Exception(player.error ?? 'ImmediateTransition load failed');
     }
