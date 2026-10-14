@@ -408,7 +408,6 @@ extension AudioCorePlugin: UIDocumentPickerDelegate {
       return
     }
 
-    _ = url.startAccessingSecurityScopedResource()
     _ = fileAccess.registerPersistentAccess(for: url)
     _ = fileAccess.acquireAccess(for: url)
     let path = url.standardizedFileURL.resolvingSymlinksInPath().path

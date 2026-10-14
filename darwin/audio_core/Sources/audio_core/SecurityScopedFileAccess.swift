@@ -269,16 +269,16 @@ final class SecurityScopedFileAccessCoordinator {
           startedSecurityScope[parentKey] = parentURL.startAccessingSecurityScopedResource()
         }
         activeAccessCounts[parentKey, default: 0] += 1
-      }
+      } else {
+        let key = Self.key(for: url)
+        if activeAccessCounts[key] == nil {
+          activeAccessCounts[key] = 0
+          activeAccessURLs[key] = url
+          startedSecurityScope[key] = url.startAccessingSecurityScopedResource()
+        }
 
-      let key = Self.key(for: url)
-      if activeAccessCounts[key] == nil {
-        activeAccessCounts[key] = 0
-        activeAccessURLs[key] = url
-        startedSecurityScope[key] = url.startAccessingSecurityScopedResource()
+        activeAccessCounts[key, default: 0] += 1
       }
-
-      activeAccessCounts[key, default: 0] += 1
     }
 
     _ = bookmarkStore.remember(url: url)
@@ -364,17 +364,19 @@ final class SecurityScopedFileAccessCoordinator {
     if Self.isCurrentSandboxPath(path) {
       return
     }
-    let key = Self.key(forPath: path)
+    let key: String
+    if let resolved = try? bookmarkStore.resolveURL(for: path) {
+      key = Self.key(for: resolved.parentScopeURL ?? resolved.url)
+    } else {
+      key = Self.key(forPath: path)
+    }
     stateQueue.sync {
       releaseAccessLocked(forKey: key)
     }
   }
 
   func releaseAccess(for url: URL) {
-    let key = Self.key(for: url)
-    stateQueue.sync {
-      releaseAccessLocked(forKey: key)
-    }
+    releaseAccess(for: url.path)
   }
 
   func releaseAllAccess() {
@@ -388,7 +390,7 @@ final class SecurityScopedFileAccessCoordinator {
 
   func withTemporaryAccess<T>(for path: String, _ body: (URL) throws -> T) throws -> T {
     let url = try acquireAccess(for: path)
-    defer { releaseAccess(for: url) }
+    defer { releaseAccess(for: path) }
     return try body(url)
   }
 
