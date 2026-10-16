@@ -199,6 +199,9 @@ pub fn get_capabilities() -> String {
 
 #[frb(init)]
 pub fn init_app() {
+    #[cfg(target_os = "android")]
+    crate::init_platform_logger();
+
     flutter_rust_bridge::setup_default_user_utils();
 }
 

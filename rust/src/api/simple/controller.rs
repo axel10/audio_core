@@ -1987,6 +1987,9 @@ fn drive_volume_fade(
 }
 
 pub fn init_app() {
+    #[cfg(target_os = "android")]
+    crate::init_platform_logger();
+
     flutter_rust_bridge::setup_default_user_utils();
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
     let _ = env_logger::builder()
