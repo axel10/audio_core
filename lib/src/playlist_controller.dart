@@ -244,6 +244,54 @@ class PlaylistController extends ChangeNotifier {
     }
   }
 
+  /// 用 [newTracks] 整体替换活动列表，并把当前项**原子地**定位到 [startIndex]。
+  ///
+  /// 语义等价于「`updatePlaylistTracks(id, newTracks, reconcile: false)` →
+  /// `playByIndex(startIndex)`」两步，但中间**不会**发出「当前曲目为空」的
+  /// 中间态通知：两步写法在旧曲目不在新列表里时会把 `_currentIndex` 置 null 并
+  /// 通知一次，UI（浮动 Dock 的 Mini 播放器、播放页等）会先闪成「无曲目」
+  /// 再恢复，表现为收起态的 Dock 先展开再收起（收起动画被重播一次）。
+  Future<void> replaceActiveTracksAndSelect(
+    String id,
+    List<AudioTrack> newTracks, {
+    int startIndex = 0,
+    PlaybackReason reason = PlaybackReason.user,
+    FadeSettings? fadeSetting,
+  }) async {
+    if (newTracks.isEmpty) {
+      // 没有可选中项：保持两步写法里 playByIndex 会直接失败的既有语义。
+      await updatePlaylistTracks(id, newTracks, reconcile: false);
+      return;
+    }
+
+    if (id == _defaultPlaylistId) {
+      _ensureDefaultPlaylistSync();
+    }
+    final idx = _playlists.indexWhere((p) => p.id == id);
+    if (idx < 0 || _activePlaylistId != id) {
+      // 非活动列表：退化为两步写法（此时不存在可见的「当前曲目」空窗）。
+      await updatePlaylistTracks(id, newTracks, reconcile: false);
+      await playByIndex(startIndex, reason: reason, fadeSetting: fadeSetting);
+      return;
+    }
+
+    _playlists[idx] = _playlists[idx].copyWith(items: newTracks);
+
+    final oldTrack = currentTrack;
+    _activePlaylistTracks
+      ..clear()
+      ..addAll(newTracks);
+    _currentIndex = startIndex.clamp(0, _activePlaylistTracks.length - 1).toInt();
+
+    await _reconcile(
+      forceLoad: true,
+      oldTrack: oldTrack,
+      autoPlay: reason != PlaybackReason.playlistChanged,
+      reason: reason,
+      fadeSetting: fadeSetting,
+    );
+  }
+
   Future<void> insertTrack(
     int index,
     AudioTrack track, {
