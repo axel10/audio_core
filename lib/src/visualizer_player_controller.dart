@@ -185,6 +185,13 @@ class AudioCoreController extends ChangeNotifier
   Timer? _positionTick;
   static const Duration _positionTickInterval = Duration(milliseconds: 250);
   static const Duration _backgroundPositionTickInterval = Duration(seconds: 10);
+
+  /// 与引擎位置对齐时：回退超过该幅度视为真实跳转（seek / 循环回绕），直接对齐；
+  /// 更小的回退只做限速纠偏，避免每轮校准都把播放位置往回拽。
+  static const int _maxPositionJumpBeforeSeekMs = 400;
+
+  /// 每轮对齐最多回拉多少毫秒（约 500ms 一轮，肉眼无感）。
+  static const int _maxBackstepSlewMs = 6;
   bool _isBackgroundThrottled = false;
   StreamSubscription<AudioStatus>? _playbackStateSubscription;
 
@@ -1135,7 +1142,22 @@ class AudioCoreController extends ChangeNotifier
           if (offset > 0) {
             adjustedPos += Duration(milliseconds: offset);
           }
-          player.updatePosition(adjustedPos);
+          final stepMs = (adjustedPos - player.position).inMilliseconds;
+          if (stepMs >= 0 || stepMs <= -_maxPositionJumpBeforeSeekMs) {
+            // 前进，或幅度够大（真 seek、循环回绕）：直接对齐
+            player.updatePosition(adjustedPos);
+          } else {
+            // 小幅回退是「本地墙钟插值」与「引擎时钟」的固定偏差
+            // （引擎位置对齐的是已播出的帧，天然落后一点点）。
+            // 直接对齐等于每秒把播放位置往回拽一次，逐字歌词会肉眼回跳，
+            // 这里改为每轮最多回拉 [_maxBackstepSlewMs]，肉眼无感。
+            final slew = stepMs < -_maxBackstepSlewMs
+                ? -_maxBackstepSlewMs
+                : stepMs;
+            player.updatePosition(
+              player.position + Duration(milliseconds: slew),
+            );
+          }
         }
       });
     }
