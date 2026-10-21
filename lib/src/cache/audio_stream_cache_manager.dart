@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:crypto/crypto.dart';
@@ -13,6 +14,8 @@ class AudioStreamCacheManager {
   final int Function()? maxCacheSizeBytesGetter;
   void Function(String cacheKey, File file)? onTrackCached;
   final Map<String, Future<File>> _activeDownloads = {};
+  final Map<String, StreamCacheWriter> _activeStreamWrites = {};
+  final Set<String> _pendingStreamWriteKeys = {};
 
   AudioStreamCacheManager({
     this.customCacheDirectory,
@@ -116,7 +119,7 @@ class AudioStreamCacheManager {
         recursive: true,
         followLinks: false,
       )) {
-        if (entity is File && !entity.path.endsWith('.tmp')) {
+        if (entity is File && !_isTransient(entity.path)) {
           files.add(entity);
           totalBytes += await entity.length();
         }
@@ -162,13 +165,91 @@ class AudioStreamCacheManager {
         recursive: true,
         followLinks: false,
       )) {
-        if (entity is File && !entity.path.endsWith('.tmp')) {
+        if (entity is File && !_isTransient(entity.path)) {
           total += await entity.length();
         }
       }
     } catch (_) {}
     return total;
   }
+
+  /// Whether a full download or a streaming write-back is already in flight
+  /// for [cacheKey].
+  ///
+  /// Callers use this to avoid stacking a second upstream connection on top of
+  /// a track that is already being persisted.
+  bool isWriteInProgress(String cacheKey) =>
+      _activeStreamWrites.containsKey(cacheKey) ||
+      _pendingStreamWriteKeys.contains(cacheKey) ||
+      _activeDownloads.containsKey(cacheKey);
+
+  /// Opens a write-back session that mirrors the playback stream into the
+  /// cache file, so the bytes forwarded to the player are also persisted.
+  ///
+  /// Returns `null` when caching is already someone else's job (already cached,
+  /// another writer, or a full download in flight) or when [expectedTotal] is
+  /// unknown. Callers then keep the pass-through + background prefetch path.
+  Future<StreamCacheWriter?> beginStreamWrite({
+    required String cacheKey,
+    required int expectedTotal,
+  }) async {
+    if (expectedTotal <= 0) return null;
+    if (isWriteInProgress(cacheKey)) return null;
+
+    // Reserve the key synchronously: the awaits below must not let a
+    // concurrent request for the same track open a second writer.
+    _pendingStreamWriteKeys.add(cacheKey);
+    try {
+      final finalFile = await getCacheFile(cacheKey);
+      if (await finalFile.exists() && await finalFile.length() > 0) {
+        await touchCacheFile(finalFile);
+        return null;
+      }
+      final partFile = File(
+        '${finalFile.path}.${DateTime.now().microsecondsSinceEpoch}.part',
+      );
+      final writer = StreamCacheWriter._(
+        cacheKey: cacheKey,
+        manager: this,
+        partFile: partFile,
+        finalFile: finalFile,
+        sink: partFile.openWrite(),
+        expectedTotal: expectedTotal,
+      );
+      _activeStreamWrites[cacheKey] = writer;
+      return writer;
+    } catch (e) {
+      debugPrint('[AudioStreamCache] Cannot open write-back for $cacheKey: $e');
+      return null;
+    } finally {
+      _pendingStreamWriteKeys.remove(cacheKey);
+    }
+  }
+
+  /// Removes `.part` files orphaned by an interrupted session (app killed
+  /// mid-playback). Safe to call on every startup.
+  Future<void> cleanupStalePartFiles({
+    Duration maxAge = const Duration(hours: 1),
+  }) async {
+    try {
+      final dir = await getCacheDirectory();
+      if (!await dir.exists()) return;
+      final cutoff = DateTime.now().subtract(maxAge);
+      await for (final entity in dir.list(followLinks: false)) {
+        if (entity is! File || !entity.path.endsWith('.part')) continue;
+        try {
+          final stat = await entity.stat();
+          if (stat.modified.isBefore(cutoff)) {
+            await entity.delete();
+            debugPrint('[AudioStreamCache] Removed stale part file: ${entity.path}');
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  static bool _isTransient(String path) =>
+      path.endsWith('.tmp') || path.endsWith('.part');
 
   /// Ensures a remote track is fully downloaded and cached locally on disk.
   Future<File> ensureTrackCached({
@@ -178,6 +259,19 @@ class AudioStreamCacheManager {
   }) async {
     final active = _activeDownloads[cacheKey];
     if (active != null) return active;
+
+    // The proxy is already mirroring the playback stream to disk: wait for it
+    // instead of opening a second connection for the same bytes.
+    final writer = _activeStreamWrites[cacheKey];
+    if (writer != null) {
+      final mirrored = await writer.done;
+      if (mirrored != null) return mirrored;
+      // The write-back was aborted (seek / client hang-up); fall through to a
+      // regular download. Re-check: someone else may have claimed the key while
+      // we were waiting.
+      final claimed = _activeDownloads[cacheKey];
+      if (claimed != null) return claimed;
+    }
 
     final future = _downloadTrack(
       cacheKey: cacheKey,
@@ -295,5 +389,125 @@ class AudioStreamCacheManager {
       await dir.delete(recursive: true);
       await dir.create(recursive: true);
     }
+  }
+}
+
+/// A write-back session that mirrors an in-flight playback stream into the
+/// cache file.
+///
+/// The proxy appends every chunk it forwards to the player into a `.part`
+/// file; once the declared byte count is reached the file is renamed into
+/// place. The `.part` file is therefore always a gap-free prefix starting at
+/// offset 0 — a seek or hang-up simply drops it and falls back to a regular
+/// download.
+class StreamCacheWriter {
+  StreamCacheWriter._({
+    required this.cacheKey,
+    required AudioStreamCacheManager manager,
+    required File partFile,
+    required File finalFile,
+    required IOSink sink,
+    required this.expectedTotal,
+  })  : _manager = manager,
+        _partFile = partFile,
+        _finalFile = finalFile,
+        _sink = sink;
+
+  final String cacheKey;
+
+  /// Byte size the upstream declared. The write-back only completes when
+  /// exactly this many bytes were appended.
+  final int expectedTotal;
+
+  final AudioStreamCacheManager _manager;
+  final File _partFile;
+  final File _finalFile;
+  final IOSink _sink;
+  final Completer<File?> _completion = Completer<File?>();
+
+  bool _active = true;
+  bool _failed = false;
+  int _written = 0;
+
+  /// Bytes appended to the `.part` file so far.
+  int get written => _written;
+
+  /// Whether this writer still accepts chunks.
+  bool get isActive => _active && !_failed;
+
+  /// Completes with the cached file on success, or `null` when the write-back
+  /// was aborted (seek, client hang-up, truncated upstream, disk error).
+  Future<File?> get done => _completion.future;
+
+  /// Appends one upstream chunk.
+  ///
+  /// Deliberately synchronous: flipping [isActive] and feeding chunks never
+  /// interleaves an await, so a caller that stops feeding cannot race with a
+  /// finalize in progress.
+  void addChunk(List<int> chunk) {
+    if (!isActive) return;
+    try {
+      _sink.add(chunk);
+      _written += chunk.length;
+    } catch (e) {
+      debugPrint('[AudioStreamCache] Write-back failed for $cacheKey: $e');
+      _failed = true;
+    }
+  }
+
+  /// Finalizes the cache file.
+  ///
+  /// Returns `null` and discards the `.part` file when the byte count does not
+  /// match [expectedTotal] — a partial file must never wear the final name,
+  /// because [AudioStreamCacheManager.isTrackCached] only checks for existence.
+  Future<File?> complete() async {
+    if (!_active) return null;
+    if (_failed || _written != expectedTotal) {
+      await abort();
+      return null;
+    }
+    _active = false;
+    _release();
+
+    try {
+      await _sink.flush();
+      await _sink.close();
+      if (await _finalFile.exists()) await _finalFile.delete();
+      await _partFile.rename(_finalFile.path);
+      await _manager.touchCacheFile(_finalFile);
+      await _manager.pruneCacheIfNeeded();
+      _manager.onTrackCached?.call(cacheKey, _finalFile);
+      if (!_completion.isCompleted) _completion.complete(_finalFile);
+      return _finalFile;
+    } catch (e) {
+      debugPrint('[AudioStreamCache] Failed to finalize $cacheKey: $e');
+      await _deletePart();
+      if (!_completion.isCompleted) _completion.complete(null);
+      return null;
+    }
+  }
+
+  /// Drops the session, closes the sink and removes the `.part` file.
+  Future<void> abort() async {
+    if (!_active && _completion.isCompleted) return;
+    _active = false;
+    _release();
+    try {
+      await _sink.close();
+    } catch (_) {}
+    await _deletePart();
+    if (!_completion.isCompleted) _completion.complete(null);
+  }
+
+  void _release() {
+    if (identical(_manager._activeStreamWrites[cacheKey], this)) {
+      _manager._activeStreamWrites.remove(cacheKey);
+    }
+  }
+
+  Future<void> _deletePart() async {
+    try {
+      if (await _partFile.exists()) await _partFile.delete();
+    } catch (_) {}
   }
 }

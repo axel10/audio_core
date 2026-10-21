@@ -1,4 +1,4 @@
-import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:audio_core/audio_core.dart';
@@ -14,7 +14,9 @@ void main() {
     tempDir = await Directory.systemTemp.createTemp('audio_stream_cache_test_');
     cacheManager = AudioStreamCacheManager(
       customCacheDirectory: tempDir,
-      maxCacheSizeBytesGetter: () => 1024 * 1024,
+      // Generous default: individual tests that need a tight budget pass
+      // `limitBytes` explicitly.
+      maxCacheSizeBytesGetter: () => 64 * 1024 * 1024,
     );
   });
 
@@ -162,7 +164,7 @@ void main() {
     });
 
     final proxy = AudioStreamCacheProxy(cacheManager: cacheManager);
-    final port = await proxy.start();
+    await proxy.start();
 
     final unencodedRemoteUrl = 'http://127.0.0.1:${mockUpstream.port}/music/(1) [] 君が好きだと叫びたい.flac';
     final proxyUrl = proxy.buildProxyUrl(
@@ -188,5 +190,184 @@ void main() {
     client.close();
     await proxy.stop();
     await mockUpstream.close(force: true);
+  });
+
+  group('stream write-back', () {
+    test('completes into the cache file when every declared byte arrived', () async {
+      final writer = await cacheManager.beginStreamWrite(
+        cacheKey: 'full_track',
+        expectedTotal: 8,
+      );
+      expect(writer, isNotNull);
+
+      writer!.addChunk([1, 2, 3, 4]);
+      writer.addChunk([5, 6, 7, 8]);
+      expect(writer.written, 8);
+
+      final cached = await writer.complete();
+      expect(cached, isNotNull);
+      expect(await cacheManager.isTrackCached('full_track'), isTrue);
+      expect(await cached!.readAsBytes(), equals([1, 2, 3, 4, 5, 6, 7, 8]));
+    });
+
+    test('discards the .part file when the byte count falls short', () async {
+      final writer = await cacheManager.beginStreamWrite(
+        cacheKey: 'short_track',
+        expectedTotal: 100,
+      );
+      expect(writer, isNotNull);
+
+      writer!.addChunk(List<int>.filled(40, 7));
+      final cached = await writer.complete();
+
+      expect(cached, isNull, reason: 'a partial body must never be cached');
+      expect(await cacheManager.isTrackCached('short_track'), isFalse);
+      final leftovers = tempDir
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.part'))
+          .toList();
+      expect(leftovers, isEmpty);
+    });
+
+    test('allows only one writer per cache key at a time', () async {
+      final first = await cacheManager.beginStreamWrite(
+        cacheKey: 'dup_track',
+        expectedTotal: 4,
+      );
+      expect(first, isNotNull);
+      expect(cacheManager.isWriteInProgress('dup_track'), isTrue);
+
+      final second = await cacheManager.beginStreamWrite(
+        cacheKey: 'dup_track',
+        expectedTotal: 4,
+      );
+      expect(second, isNull, reason: 'second writer must not open a .part file');
+
+      await first!.abort();
+      expect(cacheManager.isWriteInProgress('dup_track'), isFalse);
+      expect(await cacheManager.isTrackCached('dup_track'), isFalse);
+    });
+
+    test('ensureTrackCached waits for the in-flight write-back instead of downloading', () async {
+      final writer = await cacheManager.beginStreamWrite(
+        cacheKey: 'wait_track',
+        expectedTotal: 4,
+      );
+      expect(writer, isNotNull);
+
+      // An unreachable URL: if the manager opened a second connection this
+      // future would fail instead of resolving to the mirrored bytes.
+      final pending = cacheManager.ensureTrackCached(
+        cacheKey: 'wait_track',
+        remoteUrl: 'http://127.0.0.1:1/unreachable.flac',
+      );
+
+      writer!.addChunk([9, 8, 7, 6]);
+      await writer.complete();
+
+      final file = await pending;
+      expect(await file.readAsBytes(), equals([9, 8, 7, 6]));
+    });
+
+    test('playback caches the track without a second upstream request', () async {
+      final mockBytes = List<int>.generate(64 * 1024, (i) => i % 256);
+      var upstreamRequests = 0;
+
+      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      upstream.listen((request) {
+        upstreamRequests++;
+        request.response.headers.contentType = ContentType('audio', 'flac');
+        request.response.headers.contentLength = mockBytes.length;
+        request.response.add(mockBytes);
+        request.response.close();
+      });
+
+      final cachedCompleter = Completer<File>();
+      cacheManager.onTrackCached = (key, file) {
+        if (key == 'tee_track' && !cachedCompleter.isCompleted) {
+          cachedCompleter.complete(file);
+        }
+      };
+
+      final proxy = AudioStreamCacheProxy(cacheManager: cacheManager);
+      await proxy.start();
+      final client = HttpClient();
+      final url = proxy.buildProxyUrl(
+        remoteUrl: 'http://127.0.0.1:${upstream.port}/tee.flac',
+        cacheKey: 'tee_track',
+      );
+
+      final resp = await (await client.getUrl(Uri.parse(url))).close();
+      final received = <int>[];
+      await for (final chunk in resp) {
+        received.addAll(chunk);
+      }
+      expect(received, equals(mockBytes));
+
+      final cached =
+          await cachedCompleter.future.timeout(const Duration(seconds: 10));
+      expect(await cached.length(), mockBytes.length);
+      expect(await cached.readAsBytes(), equals(mockBytes));
+
+      expect(
+        upstreamRequests,
+        1,
+        reason: 'the forwarded bytes are the cached bytes; nothing is fetched twice',
+      );
+
+      client.close();
+      await proxy.stop();
+      await upstream.close(force: true);
+    });
+
+    test('falls back to a second request when the upstream length is unknown', () async {
+      final mockBytes = List<int>.generate(32 * 1024, (i) => i % 256);
+      var upstreamRequests = 0;
+
+      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      upstream.listen((request) {
+        upstreamRequests++;
+        // No contentLength -> chunked body, no total to mirror against.
+        request.response.headers.contentType = ContentType('audio', 'flac');
+        request.response.add(mockBytes);
+        request.response.close();
+      });
+
+      final cachedCompleter = Completer<File>();
+      cacheManager.onTrackCached = (key, file) {
+        if (key == 'chunked_track' && !cachedCompleter.isCompleted) {
+          cachedCompleter.complete(file);
+        }
+      };
+
+      final proxy = AudioStreamCacheProxy(cacheManager: cacheManager);
+      await proxy.start();
+      final client = HttpClient();
+      final url = proxy.buildProxyUrl(
+        remoteUrl: 'http://127.0.0.1:${upstream.port}/chunked.flac',
+        cacheKey: 'chunked_track',
+      );
+
+      final resp = await (await client.getUrl(Uri.parse(url))).close();
+      final received = <int>[];
+      await for (final chunk in resp) {
+        received.addAll(chunk);
+      }
+      expect(received, equals(mockBytes));
+
+      final cached =
+          await cachedCompleter.future.timeout(const Duration(seconds: 10));
+      expect(await cached.readAsBytes(), equals(mockBytes));
+      expect(
+        upstreamRequests,
+        2,
+        reason: 'unknown length keeps the legacy pass-through + prefetch path',
+      );
+
+      client.close();
+      await proxy.stop();
+      await upstream.close(force: true);
+    });
   });
 }

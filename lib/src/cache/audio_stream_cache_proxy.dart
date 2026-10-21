@@ -69,6 +69,7 @@ class AudioStreamCacheProxy {
         debugPrint('[AudioStreamCacheProxy] Server error: $e');
       });
       debugPrint('[AudioStreamCacheProxy] Started listening on 127.0.0.1:$_port');
+      unawaited(cacheManager.cleanupStalePartFiles());
       completer.complete(_port!);
       return _port!;
     } catch (e, stack) {
@@ -116,6 +117,32 @@ class AudioStreamCacheProxy {
   }
 
   final Map<String, Future<File>> _activePrefetches = {};
+
+  /// Fire-and-forget prefetch whose failure never escapes: a rejected
+  /// connection or a stopped server must not surface as an unhandled async
+  /// error in the caller's zone.
+  void _startBackgroundPrefetch({
+    required String targetUrl,
+    Map<String, String>? headers,
+    required String cacheKey,
+  }) {
+    final pending = ensureBackgroundPrefetch(
+      targetUrl: targetUrl,
+      headers: headers,
+      cacheKey: cacheKey,
+    );
+    if (pending == null) return;
+    unawaited(
+      pending.then<void>(
+        (_) {},
+        onError: (Object error, StackTrace stack) {
+          debugPrint(
+            '[AudioStreamCacheProxy] Background prefetch failed for $cacheKey: $error',
+          );
+        },
+      ),
+    );
+  }
 
   /// Eagerly triggers background caching for a track if not already cached.
   Future<File>? ensureBackgroundPrefetch({
@@ -207,15 +234,6 @@ class AudioStreamCacheProxy {
         await _serveLocalFile(request, file);
         return;
       }
-
-      // Eagerly trigger background prefetch so the full file is downloaded rapidly in the background
-      unawaited(
-        ensureBackgroundPrefetch(
-          targetUrl: targetUrl,
-          headers: upstreamHeaders,
-          cacheKey: cacheKey,
-        ),
-      );
 
       await _proxyUpstreamRequest(request, targetUrl, upstreamHeaders, cacheKey);
     } catch (e, stack) {
@@ -336,22 +354,94 @@ class AudioStreamCacheProxy {
       request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
     }
 
+    // Mirror the bytes we are about to forward into the cache file, so playing
+    // a track does not cost a second full download of the same bytes.
+    final expectedTotal = _expectedTotalBytes(upstreamResp);
+    StreamCacheWriter? writer;
+    if (expectedTotal != null) {
+      writer = await cacheManager.beginStreamWrite(
+        cacheKey: cacheKey,
+        expectedTotal: expectedTotal,
+      );
+    }
+
+    // Write-back unavailable for this response (unknown length, transcoded or
+    // chunked stream) and nobody else is persisting the track: keep the
+    // previous behaviour of downloading it on a second connection.
+    if (writer == null && !cacheManager.isWriteInProgress(cacheKey)) {
+      _startBackgroundPrefetch(
+        targetUrl: targetUrl,
+        headers: upstreamHeaders,
+        cacheKey: cacheKey,
+      );
+    }
+
     var chunkCount = 0;
     try {
-      await for (final chunk in upstreamResp) {
-        try {
-          request.response.add(chunk);
-          if (chunkCount++ < 5) {
-            await request.response.flush();
+      try {
+        await for (final chunk in upstreamResp) {
+          try {
+            request.response.add(chunk);
+            if (chunkCount++ < 5) {
+              await request.response.flush();
+            }
+          } catch (_) {
+            break;
           }
-        } catch (_) {
-          break;
+          // Synchronous: a hang-up on the next iteration stops the write-back
+          // without leaving a gap in the `.part` prefix.
+          writer?.addChunk(chunk);
+        }
+      } catch (_) {}
+
+      // Finalize BEFORE closing the response. `close()` only returns once the
+      // player has drained every buffered byte — i.e. when the song ends.
+      // Metadata, artwork and the waveform all hang off onTrackCached, so
+      // finalizing after `close()` keeps them blank for the whole track; a seek
+      // was the only thing that made them appear, because it aborted the
+      // write-back and re-downloaded on a second connection. The write-back is
+      // done as soon as the upstream body is, so keep this inside `try` — the
+      // `finally` below must not be able to run first.
+      if (writer != null) {
+        final cached = await writer.complete();
+        if (cached == null) {
+          // The stream was interrupted (seek / hang-up / truncated body) and
+          // the partial prefix was discarded; fall back to a full download.
+          _startBackgroundPrefetch(
+            targetUrl: targetUrl,
+            headers: upstreamHeaders,
+            cacheKey: cacheKey,
+          );
         }
       }
-    } catch (_) {}
+    } finally {
+      try {
+        await request.response.close();
+      } catch (_) {}
+    }
+  }
 
-    try {
-      await request.response.close();
-    } catch (_) {}
+  /// Byte size of the resource when the upstream declares one and the body
+  /// starts at offset 0, otherwise `null`.
+  ///
+  /// Chunked responses (Subsonic transcoding, non-static Jellyfin) have no
+  /// total, so they cannot be mirrored into a complete file.
+  static int? _expectedTotalBytes(HttpClientResponse resp) {
+    final status = resp.statusCode;
+    if (status == HttpStatus.ok) {
+      final length = resp.contentLength;
+      return length > 0 ? length : null;
+    }
+    if (status == HttpStatus.partialContent) {
+      final contentRange = resp.headers.value(HttpHeaders.contentRangeHeader);
+      if (contentRange == null) return null;
+      final match =
+          RegExp(r'^bytes\s+(\d+)-(\d+)/(\d+)$').firstMatch(contentRange.trim());
+      if (match == null) return null;
+      if (match.group(1) != '0') return null;
+      final total = int.tryParse(match.group(3) ?? '');
+      return (total != null && total > 0) ? total : null;
+    }
+    return null;
   }
 }
