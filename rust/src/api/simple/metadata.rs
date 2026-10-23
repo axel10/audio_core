@@ -257,7 +257,13 @@ fn build_thumbnail(
                 };
                 Image::from_u8(&webp_image, width, height, colorspace)
             } else {
-                return Err(anyhow::anyhow!("failed to decode artwork image: {zune_err}"));
+                // zune-image 只编译了 jpeg/png 两种解码器，其余格式会被判为 Unknown；
+                // 把原始字节的指纹一并带出来，便于定位到底是哪种容器。
+                let detail = describe_image_bytes(artwork_bytes);
+                log::warn!("failed to decode artwork image: {zune_err} ({detail})");
+                return Err(anyhow::anyhow!(
+                    "failed to decode artwork image: {zune_err} [{detail}]"
+                ));
             }
         }
     };
@@ -278,6 +284,61 @@ fn build_thumbnail(
     }
 
     Ok((image, width, height))
+}
+
+/// 解码失败时的诊断信息：总长度、前 16 字节、粗判格式。
+fn describe_image_bytes(bytes: &[u8]) -> String {
+    let head = &bytes[..bytes.len().min(16)];
+    let hex = head
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "len={} head=[{hex}] kind={}",
+        bytes.len(),
+        sniff_image_kind(bytes)
+    )
+}
+
+/// 按魔数粗判图片容器，不依赖任何解码器是否被编译进来。
+fn sniff_image_kind(bytes: &[u8]) -> &'static str {
+    if bytes.starts_with(b"GIF8") {
+        return "gif";
+    }
+    if bytes.starts_with(b"BM") {
+        return "bmp";
+    }
+    if bytes.starts_with(b"RIFF") {
+        if bytes.len() < 12 {
+            return "riff(truncated)";
+        }
+        if &bytes[8..12] == b"WEBP" {
+            // 静态 WebP 会被 libwebp 兜底解出来，走到这里仍失败基本只剩动图
+            return match webp::BitstreamFeatures::new(bytes) {
+                Some(features) if features.has_animation() => "webp(animated)",
+                _ => "webp",
+            };
+        }
+        return "riff(other)";
+    }
+    if bytes.starts_with(&[0xFF, 0xD8]) {
+        return "jpeg";
+    }
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return "png";
+    }
+    if bytes.len() >= 12 && &bytes[4..8] == b"ftyp" {
+        let brand = &bytes[8..12];
+        if brand == b"avif" || brand == b"avis" {
+            return "avif";
+        }
+        if brand == b"heic" || brand == b"heix" || brand == b"mif1" {
+            return "heif";
+        }
+        return "isobmff";
+    }
+    "unknown"
 }
 
 fn file_token(path: &str) -> String {
