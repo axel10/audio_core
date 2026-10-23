@@ -250,23 +250,28 @@ class MyExoplayerPlugin :
     )
 
     private var fftGroupingConfig = FftGroupingConfig()
+
+    /**
+     * Dart 侧的 FFT 分析跑在 30Hz（analysisFrequencyHz），而这里的推送由 FFT hop
+     * 驱动（44.1k 下约 86 次/秒），多出来的帧一定会被 Dart 丢掉。
+     * 按 30Hz 发送即可：播放页的 60fps 由 processRender 插值补足，视觉无损失。
+     * 队列空时消费者会停下，由生产者重新唤起，所以低帧率音源不会被拖慢。
+     */
+    private val fftEmitIntervalMs = 33L
     private val fftConsumerRunnable = object : Runnable {
         override fun run() {
-            val payload = fftQueue.poll()
-            if (payload != null) {
-                sendFftPayload(payload.first, payload.second)
+            // 每个 player 只保留最新一帧：排队发旧帧只会让频谱越来越滞后于音频。
+            val latestByPlayer = LinkedHashMap<String, FloatArray>()
+            while (true) {
+                val payload = fftQueue.poll() ?: break
+                latestByPlayer[payload.first] = payload.second
+            }
+            for ((playerId, magnitudes) in latestByPlayer) {
+                sendFftPayload(playerId, magnitudes)
             }
             synchronized(fftEmitLock) {
                 if (!fftQueue.isEmpty()) {
-                    var frameDurationMs = 11L
-                    val mainCtx = playerContexts[MAIN_PLAYER_ID]
-                    if (mainCtx != null) {
-                        val sampleRate = mainCtx.fftProcessor.sampleRate
-                        if (sampleRate > 0) {
-                            frameDurationMs = (512.0 / sampleRate * 1000.0).toLong().coerceIn(5, 50)
-                        }
-                    }
-                    fftEmitHandler.postDelayed(this, frameDurationMs)
+                    fftEmitHandler.postDelayed(this, fftEmitIntervalMs)
                 } else {
                     fftConsumerActive = false
                 }
