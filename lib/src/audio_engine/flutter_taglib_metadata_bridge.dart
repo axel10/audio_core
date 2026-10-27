@@ -158,12 +158,18 @@ Future<bool> updateTrackMetadataWithFlutterTaglib({
 
       final date = _stringOrNull(metadata['date']);
       final year = _asInt(metadata['year']);
-      _applyDateAndYearProperties(
-        merged,
-        date: date,
-        year: year,
-        clearBeforeWrite: clearBeforeWrite,
-      );
+      if (metadata.containsKey('year') && year == null) {
+        // Explicit clear: drop both YEAR and DATE so no stale release info stays.
+        merged.remove(taglib.TagProperties.year);
+        merged.remove(taglib.TagProperties.date);
+      } else {
+        _applyDateAndYearProperties(
+          merged,
+          date: date,
+          year: year,
+          clearBeforeWrite: clearBeforeWrite,
+        );
+      }
 
       _putSingle(merged, taglib.TagProperties.comment, metadata['comment']);
       _putSingle(merged, taglib.TagProperties.lyrics, metadata['lyrics']);

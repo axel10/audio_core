@@ -54,6 +54,8 @@ class TrackMetadataUpdate {
     this.pictures = const <TrackMetadataPicture>[],
     this.clearArtwork,
     this.clearTrackNumber,
+    this.clearGenres,
+    this.clearYear,
   });
 
   final String? title;
@@ -77,6 +79,12 @@ class TrackMetadataUpdate {
   final bool? clearArtwork;
   final bool? clearTrackNumber;
 
+  /// Removes the genre tag(s) even when [genres] is empty.
+  final bool? clearGenres;
+
+  /// Removes the year (and its accompanying date) tag when no [year] is given.
+  final bool? clearYear;
+
   Map<String, Object?> toMap({bool includeEmptyCollections = false}) {
     return <String, Object?>{
       if (title != null) 'title': title,
@@ -90,7 +98,10 @@ class TrackMetadataUpdate {
       if (trackTotal != null) 'trackTotal': trackTotal,
       if (discNumber != null) 'discNumber': discNumber,
       if (date != null) 'date': date,
-      if (year != null) 'year': year,
+      if (clearYear == true)
+        'year': null
+      else if (year != null)
+        'year': year,
       if (comment != null) 'comment': comment,
       if (lyrics != null) 'lyrics': lyrics,
       if (composer != null) 'composer': composer,
@@ -98,7 +109,10 @@ class TrackMetadataUpdate {
       if (performer != null) 'performer': performer,
       if (conductor != null) 'conductor': conductor,
       if (remixer != null) 'remixer': remixer,
-      if (includeEmptyCollections || genres.isNotEmpty) 'genres': genres,
+      if (clearGenres == true)
+        'genres': const <String>[]
+      else if (includeEmptyCollections || genres.isNotEmpty)
+        'genres': genres,
       if (clearArtwork == true)
         'pictures': const <Object?>[]
       else if (includeEmptyCollections || pictures.isNotEmpty)
