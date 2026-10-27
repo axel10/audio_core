@@ -132,23 +132,17 @@ final class SecurityScopedBookmarkStore {
     return resolvedURL
   }
 
+  /// Persists a bookmark for `url`.
+  ///
+  /// IMPORTANT: `url` must be the original URL returned by the system picker.
+  /// Rebuilding it via `standardizedFileURL` / `resolvingSymlinksInPath()`
+  /// drops the security-scope token, so the resulting bookmark can never be
+  /// started again after the picker session ends.
   private func rememberLocked(url: URL) -> Bool {
     guard url.isFileURL else { return false }
 
     do {
-      #if os(macOS)
-      let bookmarkData = try url.bookmarkData(
-        options: [.withSecurityScope],
-        includingResourceValuesForKeys: nil,
-        relativeTo: nil
-      )
-      #else
-      let bookmarkData = try url.bookmarkData(
-        options: [],
-        includingResourceValuesForKeys: nil,
-        relativeTo: nil
-      )
-      #endif
+      let bookmarkData = try Self.createBookmarkData(for: url)
       let key1 = Self.bookmarkKey(for: url)
       let key2 = url.standardizedFileURL.path
       let key3 = url.path
@@ -160,6 +154,36 @@ final class SecurityScopedBookmarkStore {
     } catch {
       return false
     }
+  }
+
+  /// Creates the persisted bookmark data for `url`.
+  ///
+  /// `.minimalBookmark` is the only creation option iOS keeps across launches;
+  /// an empty option set yields a bookmark that resolves to a plain
+  /// (non scoped) URL, and `startAccessingSecurityScopedResource()` then fails
+  /// on every later launch.
+  private static func createBookmarkData(for url: URL) throws -> Data {
+    #if os(macOS)
+    return try url.bookmarkData(
+      options: [.withSecurityScope],
+      includingResourceValuesForKeys: nil,
+      relativeTo: nil
+    )
+    #else
+    do {
+      return try url.bookmarkData(
+        options: .minimalBookmark,
+        includingResourceValuesForKeys: nil,
+        relativeTo: nil
+      )
+    } catch {
+      return try url.bookmarkData(
+        options: [],
+        includingResourceValuesForKeys: nil,
+        relativeTo: nil
+      )
+    }
+    #endif
   }
 
   private static func url(from path: String) -> URL {
@@ -259,86 +283,114 @@ final class SecurityScopedFileAccessCoordinator {
     }
 
     let (url, parentScopeURL) = try bookmarkStore.resolveURL(for: path)
-
-    stateQueue.sync {
-      if let parentURL = parentScopeURL {
-        let parentKey = Self.key(for: parentURL)
-        if activeAccessCounts[parentKey] == nil {
-          activeAccessCounts[parentKey] = 0
-          activeAccessURLs[parentKey] = parentURL
-          startedSecurityScope[parentKey] = parentURL.startAccessingSecurityScopedResource()
-        }
-        activeAccessCounts[parentKey, default: 0] += 1
-      } else {
-        let key = Self.key(for: url)
-        if activeAccessCounts[key] == nil {
-          activeAccessCounts[key] = 0
-          activeAccessURLs[key] = url
-          startedSecurityScope[key] = url.startAccessingSecurityScopedResource()
-        }
-
-        activeAccessCounts[key, default: 0] += 1
-      }
-    }
-
+    _ = retainAccess(for: parentScopeURL ?? url)
     _ = bookmarkStore.remember(url: url)
     return url
   }
 
+  /// Registers persistent access for [path].
+  ///
+  /// Returns `true` only when the path is actually usable right now. A stored
+  /// bookmark that can no longer be started (created without a security scope,
+  /// or a File Provider location whose grant was revoked) must not be reported
+  /// as success — otherwise the library silently scans zero files.
   @discardableResult
   func registerPersistentAccess(for path: String) -> Bool {
     if Self.isCurrentSandboxPath(path) {
       return true
     }
 
-    do {
-      let (url, parentScopeURL) = try bookmarkStore.resolveURL(for: path)
-      if let parentURL = parentScopeURL {
-        let parentStarted = parentURL.startAccessingSecurityScopedResource()
-        defer {
-          if parentStarted {
-            parentURL.stopAccessingSecurityScopedResource()
-          }
-        }
-        return bookmarkStore.remember(url: url)
-      }
-      return bookmarkStore.remember(url: url)
-    } catch {
-      return false
+    if bookmarkStore.hasBookmark(for: path), probeBookmarkAccess(for: path) {
+      return true
     }
+
+    // No usable bookmark yet: the path may still be inside the picker's
+    // authorization window for this process, so start it before saving.
+    let url = URL(fileURLWithPath: path)
+    let started = url.startAccessingSecurityScopedResource()
+    defer {
+      if started {
+        url.stopAccessingSecurityScopedResource()
+      }
+    }
+    return bookmarkStore.remember(url: url)
   }
 
   @discardableResult
   func registerPersistentAccess(for url: URL) -> Bool {
     guard url.isFileURL else { return false }
-    let standardized = url.standardizedFileURL.resolvingSymlinksInPath()
-    let path = standardized.path
-    if Self.isCurrentSandboxPath(path) {
+    if Self.isCurrentSandboxPath(url.path) {
       return true
     }
-    return bookmarkStore.remember(url: standardized)
+    // Keep the original URL: any standardization drops the security scope.
+    return bookmarkStore.remember(url: url)
   }
 
   func acquireAccess(for url: URL) -> URL {
     guard url.isFileURL else { return url }
-    let standardized = url.standardizedFileURL.resolvingSymlinksInPath()
-    let path = standardized.path
-    if let resolved = Self.resolveSandboxInternalPath(path) {
+    if let resolved = Self.resolveSandboxInternalPath(url.path) {
       return URL(fileURLWithPath: resolved)
     }
 
-    let key = Self.key(for: standardized)
-    stateQueue.sync {
-      if activeAccessCounts[key] == nil {
-        activeAccessCounts[key] = 0
-        activeAccessURLs[key] = standardized
-        startedSecurityScope[key] = standardized.startAccessingSecurityScopedResource()
-      }
-      activeAccessCounts[key, default: 0] += 1
+    // Same reason as above: never standardize before starting the scope.
+    _ = retainAccess(for: url)
+    _ = bookmarkStore.remember(url: url)
+    return url
+  }
+
+  /// Starts a security-scoped access session for [path].
+  ///
+  /// Unlike [acquireAccess], the return value is authoritative: it reports
+  /// whether the scope is really active, so callers can roll back a root path
+  /// that would otherwise scan to zero files.
+  @discardableResult
+  func beginScopedAccess(for path: String) -> Bool {
+    if Self.resolveSandboxInternalPath(path) != nil {
+      return true
     }
 
-    _ = bookmarkStore.remember(url: standardized)
-    return standardized
+    guard let (url, parentScopeURL) = try? bookmarkStore.resolveURL(for: path) else {
+      return false
+    }
+    return retainAccess(for: parentScopeURL ?? url)
+  }
+
+  /// Starts the scope for `url` and registers the session only when it really
+  /// became active.
+  ///
+  /// A failed attempt is never cached: caches keyed by a failed start would
+  /// prevent a later retry (for example right after the user re-picks the
+  /// folder) from ever succeeding.
+  @discardableResult
+  private func retainAccess(for url: URL) -> Bool {
+    let key = Self.key(for: url)
+    var started = false
+    stateQueue.sync {
+      if startedSecurityScope[key] == true {
+        activeAccessCounts[key, default: 0] += 1
+        started = true
+        return
+      }
+      guard url.startAccessingSecurityScopedResource() else { return }
+      activeAccessURLs[key] = url
+      startedSecurityScope[key] = true
+      activeAccessCounts[key, default: 0] += 1
+      started = true
+    }
+    return started
+  }
+
+  /// Starts and immediately stops the stored bookmark to verify it still works.
+  private func probeBookmarkAccess(for path: String) -> Bool {
+    guard let (url, parentScopeURL) = try? bookmarkStore.resolveURL(for: path) else {
+      return false
+    }
+    let target = parentScopeURL ?? url
+    let started = target.startAccessingSecurityScopedResource()
+    if started {
+      target.stopAccessingSecurityScopedResource()
+    }
+    return started
   }
 
   func forgetPersistentAccess(for path: String) {

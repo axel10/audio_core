@@ -197,12 +197,10 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
         return
       }
-      do {
-        _ = try fileAccess.acquireAccess(for: path)
-        result(true)
-      } catch {
-        result(false)
-      }
+      // Report the real scope state. Returning `true` unconditionally made the
+      // Dart side believe a root path was authorized while every directory
+      // listing was actually rejected with EPERM.
+      result(fileAccess.beginScopedAccess(for: path))
 
     case "endScopedAccess":
       guard let path = Self.readString(call.arguments, key: "path") else {
@@ -298,6 +296,21 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     guard let values = args[key] as? [Any] else { return nil }
     let strings = values.compactMap { $0 as? String }.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     return strings.isEmpty ? nil : strings
+  }
+
+  /// Returns whether the directory at [path] can actually be opened for
+  /// listing. Uses `opendir` so probing a huge folder stays O(1).
+  static func isDirectoryReadable(path: String) -> Bool {
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+          isDirectory.boolValue else {
+      return false
+    }
+    guard let handle = opendir(path) else {
+      return false
+    }
+    closedir(handle)
+    return true
   }
 
   public static func resolveDisplayName(forPath path: String) -> String? {
@@ -408,9 +421,29 @@ extension AudioCorePlugin: UIDocumentPickerDelegate {
       return
     }
 
-    _ = fileAccess.registerPersistentAccess(for: url)
+    // The security scope lives only in this exact URL object. Standardizing it
+    // (`standardizedFileURL` / `resolvingSymlinksInPath()`) before calling
+    // `startAccessingSecurityScopedResource()` silently kills the grant, and
+    // every later directory listing fails with EPERM. Start and persist the
+    // bookmark from the original URL first, then derive the path string.
     _ = fileAccess.acquireAccess(for: url)
+    _ = fileAccess.registerPersistentAccess(for: url)
+
     let path = url.standardizedFileURL.resolvingSymlinksInPath().path
+
+    // Verify instead of assuming: a picked directory we cannot list would show
+    // up in the library as "0 songs" with no explanation.
+    guard Self.isDirectoryReadable(path: path) else {
+      debugPrint("[AudioCorePlugin] picked directory is not readable: \(path)")
+      pendingPickerResult?(FlutterError(
+        code: "DIRECTORY_ACCESS_DENIED",
+        message: path,
+        details: nil
+      ))
+      pendingPickerResult = nil
+      return
+    }
+
     pendingPickerResult?(path)
     pendingPickerResult = nil
   }
