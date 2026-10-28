@@ -392,6 +392,9 @@ struct PlayerController {
     last_error: Option<String>,
     last_error_kind: Option<PlaybackErrorKind>,
     sink_invalidated: bool,
+    /// `dispose_audio` 显式释放过输出流。设备监视器必须尊重这个状态，
+    /// 否则轮询会把「刻意释放」当成「流挂了」，1 秒后又开一条 paused 流。
+    audio_disposed: bool,
 }
 
 struct PendingEdit {
@@ -706,6 +709,7 @@ impl PlayerController {
             last_error: None,
             last_error_kind: None,
             sink_invalidated: false,
+            audio_disposed: false,
         }
     }
 
@@ -716,6 +720,8 @@ impl PlayerController {
     }
 
     fn ensure_audio_output(&mut self) -> Result<(), String> {
+        // 真正需要输出流了（播放/加载/切换输出设置），解除 dispose 留下的静默期。
+        self.audio_disposed = false;
         if self.sink.is_some() {
             return Ok(());
         }
@@ -1058,6 +1064,8 @@ impl PlayerController {
         auto_play: bool,
     ) -> Result<(), String> {
         self.pause_fade_in_progress = false;
+        // 与 dispose 同理：这次通知会先于本次加载的结果发出，旧错误不能搭上这帧。
+        self.clear_last_error();
         self.clear_pending_playback_state();
         let previous_public_path = self.public_path().map(str::to_string);
         let deck = self.open_deck_from_backend(path, backend, start_offset, auto_play, 1.0)?;
@@ -1290,8 +1298,14 @@ impl PlayerController {
     }
 
     fn poll_output_device(&mut self) {
+        // dispose / stop 之后的「无输出流」是刻意的，不是故障。
+        if self.audio_disposed {
+            return;
+        }
+
         #[cfg(target_os = "windows")]
         if self.output_mode == AudioOutputMode::WasapiExclusive {
+            self.poll_exclusive_output_device();
             return;
         }
 
@@ -1299,15 +1313,23 @@ impl PlayerController {
         let current_name = current_default_device.as_ref().map(describe_output_device);
 
         let device_changed = self.active_output_device_name != current_name;
-        let needs_recovery = self.sink_invalidated || self.sink.is_none() || device_changed;
+        // 注意：`sink.is_none()` 不再是恢复条件 —— 它同时代表「已释放」（dispose /
+        // 独占 release_on_pause），会把刻意的释放撤销掉。只有在「确实有曲目在播，
+        // 但输出流不见了」这种真异常下才补建。
+        let sink_lost_while_playing = self.sink.is_none() && self.any_deck_playing();
+        let needs_recovery = self.sink_invalidated || device_changed || sink_lost_while_playing;
 
         if !needs_recovery {
             return;
         }
 
         info!(
-            "[AudioDeviceMonitor] Output device change/recovery detected: device_changed={}, sink_invalidated={}, sink_is_none={}, current_name={:?}",
-            device_changed, self.sink_invalidated, self.sink.is_none(), current_name
+            "[AudioDeviceMonitor] Output device change/recovery detected: device_changed={}, sink_invalidated={}, sink_is_none={}, sink_lost_while_playing={}, current_name={:?}",
+            device_changed,
+            self.sink_invalidated,
+            self.sink.is_none(),
+            sink_lost_while_playing,
+            current_name
         );
 
         let was_playing = self.any_deck_playing();
@@ -1320,6 +1342,8 @@ impl PlayerController {
         self.sink_invalidated = false;
 
         // Attempt to open new output
+        // 这一支只在共享模式下走，独占模式由 poll_exclusive_output_device 处理，
+        // 所以这里固定开共享流是与 output_mode 一致的。
         if current_name.is_some() {
             match Self::open_current_default_output() {
                 Ok((new_sink, name)) => {
@@ -1353,9 +1377,63 @@ impl PlayerController {
         }
     }
 
+    /// 独占模式的恢复路径。
+    ///
+    /// 独占流不走 cpal，`active_output_device_name` 是 WASAPI 的友好名、
+    /// `describe_output_device` 给的是 cpal 的 DeviceId，两者口径不同，比名字只会
+    /// 得到「永远变了」。所以这里只听服务线程自己的健康信号：设备被拔掉/被抢占时
+    /// `GetBuffer`/`ReleaseBuffer` 会失败并置位，这里据此重建独占流并接回原曲目。
+    #[cfg(target_os = "windows")]
+    fn poll_exclusive_output_device(&mut self) {
+        let exclusive_failed = match self.sink.as_ref() {
+            Some(OutputSink::WasapiExclusive(sink)) => sink.has_failed(),
+            _ => false,
+        };
+
+        if !(exclusive_failed || self.sink_invalidated) {
+            return;
+        }
+
+        let was_playing = self.any_deck_playing();
+        let pos = self.public_position();
+        let path = self.public_path().map(str::to_string);
+
+        info!(
+            "[WasapiExclusive] Sink unhealthy (failed={}, invalidated={}), rebuilding output",
+            exclusive_failed, self.sink_invalidated
+        );
+
+        self.sink = None;
+        self.active_output_device_name = None;
+        self.sink_invalidated = false;
+
+        let Some(p) = path else {
+            return;
+        };
+
+        // open_deck_from_backend 会按 output_mode 重新尝试独占流，失败才回落共享，
+        // 所以这里不需要自己分派。
+        if let Err(message) = self.replace_current_from_path(&p, pos, was_playing) {
+            error!(
+                "[WasapiExclusive] restore failed path={}: {}",
+                p, message
+            );
+            self.set_last_error(
+                format!("playback restore failed: {message}"),
+                PlaybackErrorKind::OutputDevice,
+            );
+            super::notify_playback_state_changed();
+        }
+    }
+
     fn dispose_audio(&mut self) {
         self.transition_generation = self.transition_generation.wrapping_add(1);
         self.pause_fade_in_progress = false;
+        // 顺序很关键：clear_pending_playback_state() 会立刻推一帧快照出去，
+        // 若那时 last_error 还在，上层就当成「刚刚发生的错误」再弹一次提示。
+        self.clear_last_error();
+        // 释放后不再自动恢复输出流，直到真正需要播放。
+        self.audio_disposed = true;
         self.clear_pending_playback_state();
         if let Some(incoming) = self.incoming_deck.take() {
             incoming.clear();
@@ -1424,6 +1502,7 @@ impl PlayerController {
         let deck =
             self.open_deck_from_path(&edit.path, edit.position, edit.was_playing, edit.gain)?;
         self.current_deck = Some(deck);
+        self.clear_last_error();
         self.clear_pending_playback_state();
 
         if self.public_path() != Some(&edit.path) {
@@ -1491,6 +1570,8 @@ pub(crate) fn stress_diagnostic_details() -> serde_json::Value {
                 "playback_speed": c.playback_speed.get_speed(),
                 "volume": c.volume,
                 "has_output_sink": c.sink.is_some(),
+                "audio_disposed": c.audio_disposed,
+                "sink_invalidated": c.sink_invalidated,
                 "transition_generation": c.transition_generation,
             })
         })
@@ -2119,13 +2200,11 @@ pub fn crossfade_to_audio_file(path: String, duration_ms: i64) -> Result<(), Str
     let mut c = controller()
         .lock()
         .map_err(|_| "player lock poisoned".to_string())?;
+    c.clear_last_error();
     c.clear_pending_playback_state();
     let duration = Duration::from_millis(duration_ms.max(0) as u64);
     match c.start_crossfade_with_backend(&path, backend, duration) {
-        Ok(()) => {
-            c.clear_last_error();
-            Ok(())
-        }
+        Ok(()) => Ok(()),
         Err(msg) => {
             error!("[crossfade_to_audio_file] path={}: {}", path, msg);
             c.set_last_error(msg.clone(), PlaybackErrorKind::Track);
@@ -2148,6 +2227,7 @@ pub fn play_audio(fade_duration_ms: i64) -> Result<(), String> {
     }
 
     c.pause_fade_in_progress = false;
+    c.clear_last_error();
     c.clear_pending_playback_state();
     let duration = Duration::from_millis(fade_duration_ms.max(0) as u64);
     if !duration.is_zero() {

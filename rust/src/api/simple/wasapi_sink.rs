@@ -10,7 +10,7 @@ pub(crate) mod wasapi_impl {
     use std::thread::{self, JoinHandle};
 
     use windows::core::{GUID, PCWSTR, PWSTR};
-    use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
+    use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_FAILED, WAIT_OBJECT_0};
     use windows::Win32::Media::Audio::*;
     use windows::Win32::System::Com::StructuredStorage::PropVariantClear;
     use windows::Win32::System::Com::*;
@@ -264,6 +264,9 @@ pub(crate) mod wasapi_impl {
         format_config: WasapiFormatConfig,
         device_name: String,
         stop_signal: Arc<AtomicBool>,
+        /// 服务线程判定输出流已不可用（设备被拔掉/被抢占/ReleaseBuffer 失败）。
+        /// 控制器轮询据此重建独占流 —— 独占模式没有 cpal 的错误回调可用。
+        failed: Arc<AtomicBool>,
         thread_handle: Option<JoinHandle<()>>,
         event_handle: usize,
     }
@@ -401,6 +404,8 @@ pub(crate) mod wasapi_impl {
 
                 let stop_signal = Arc::new(AtomicBool::new(false));
                 let stop_signal_clone = Arc::clone(&stop_signal);
+                let failed = Arc::new(AtomicBool::new(false));
+                let failed_clone = Arc::clone(&failed);
                 let format_config_clone = format_config.clone();
                 let event_val = event.0 as usize;
 
@@ -429,14 +434,35 @@ pub(crate) mod wasapi_impl {
                             SampleType::Int16 => channels * 2,
                         };
 
+                        // 设备被拔掉/被抢占时，事件通常不再触发，于是只表现为连续
+                        // 超时（走不到 GetBuffer 的报错分支）。缓冲区只有 50ms，连续
+                        // 3 次 2s 超时（≈6s 完全没有渲染回调）足以判定流已失效。
+                        const MAX_CONSECUTIVE_TIMEOUTS: u32 = 3;
+                        let mut consecutive_timeouts: u32 = 0;
+
                         while !stop_signal_clone.load(Ordering::Relaxed) {
                             let wait_res = WaitForSingleObject(HANDLE(event_val as isize), 2000);
                             if wait_res != WAIT_OBJECT_0 {
                                 if stop_signal_clone.load(Ordering::Relaxed) {
                                     break;
                                 }
+                                if wait_res == WAIT_FAILED {
+                                    error!("[WasapiExclusive] WaitForSingleObject failed, stream is gone");
+                                    failed_clone.store(true, Ordering::Release);
+                                    break;
+                                }
+                                consecutive_timeouts += 1;
+                                if consecutive_timeouts >= MAX_CONSECUTIVE_TIMEOUTS {
+                                    error!(
+                                        "[WasapiExclusive] No render callback for {} consecutive timeouts, treating stream as lost",
+                                        consecutive_timeouts
+                                    );
+                                    failed_clone.store(true, Ordering::Release);
+                                    break;
+                                }
                                 continue;
                             }
+                            consecutive_timeouts = 0;
 
                             if stop_signal_clone.load(Ordering::Relaxed) {
                                 break;
@@ -446,6 +472,7 @@ pub(crate) mod wasapi_impl {
                                 Ok(ptr) => ptr,
                                 Err(e) => {
                                     error!("[WasapiExclusive] GetBuffer error: 0x{:08X}", e.code().0 as u32);
+                                    failed_clone.store(true, Ordering::Release);
                                     break;
                                 }
                             };
@@ -515,6 +542,7 @@ pub(crate) mod wasapi_impl {
 
                             if let Err(e) = render_client.ReleaseBuffer(buffer_frame_count, 0) {
                                 error!("[WasapiExclusive] ReleaseBuffer error: 0x{:08X}", e.code().0 as u32);
+                                failed_clone.store(true, Ordering::Release);
                                 break;
                             }
                         }
@@ -530,10 +558,16 @@ pub(crate) mod wasapi_impl {
                     format_config,
                     device_name,
                     stop_signal,
+                    failed,
                     thread_handle: Some(thread_handle),
                     event_handle: event_val,
                 })
             }
+        }
+
+        /// 输出流是否已被服务线程判定为不可用（设备失效 / 被别的进程抢占）。
+        pub(crate) fn has_failed(&self) -> bool {
+            self.failed.load(Ordering::Acquire)
         }
 
         pub(crate) fn mixer(&self) -> Mixer {
