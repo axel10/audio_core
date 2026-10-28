@@ -369,6 +369,7 @@ class AudioCoreController extends ChangeNotifier
           status.isPlaying || willAutoAdvance,
           status.volume,
           error: status.error,
+          errorKind: status.errorKind,
         );
         if (status.isPlaying) {
           _startVisualizerTicks();

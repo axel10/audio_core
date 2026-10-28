@@ -215,6 +215,18 @@ enum AudioOutputMode {
 
 enum FadeMode { sequential, crossfade }
 
+/// 播放错误归属的层级。
+///
+/// 输出设备错误（切默认设备、拔耳机、独占流被抢占）由内核的设备监视器自行恢复，
+/// **不能**当成曲目问题上报，否则上层会把「音乐还在放」的情况显示成「歌曲已损坏」。
+enum PlaybackErrorKind {
+  /// 曲目层面的错误（解码失败、文件不存在/无法打开）。
+  track,
+
+  /// 输出设备层面的错误，可由 `poll_output_device` / `play_all` 自动恢复。
+  outputDevice,
+}
+
 class FadeSettings {
   final bool fadeOnSwitch;
   final bool fadeOnPauseResume;
@@ -257,6 +269,7 @@ class PlaybackState {
   final double volume;
   final String? path;
   final String? error;
+  final PlaybackErrorKind? errorKind;
 
   const PlaybackState({
     this.playbackState,
@@ -266,6 +279,7 @@ class PlaybackState {
     required this.volume,
     this.path,
     this.error,
+    this.errorKind,
   });
 
   static Future<PlaybackState> default_() =>
@@ -279,7 +293,8 @@ class PlaybackState {
       isPlaying.hashCode ^
       volume.hashCode ^
       path.hashCode ^
-      error.hashCode;
+      error.hashCode ^
+      errorKind.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -292,5 +307,6 @@ class PlaybackState {
           isPlaying == other.isPlaying &&
           volume == other.volume &&
           path == other.path &&
-          error == other.error;
+          error == other.error &&
+          errorKind == other.errorKind;
 }

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 
 import 'player_models.dart';
 import 'playlist_models.dart';
+import 'rust/api/simple/controller.dart' show PlaybackErrorKind;
 
 /// Manages the actual audio engine session and transitions.
 class PlayerController extends ChangeNotifier {
@@ -394,17 +395,32 @@ class PlayerController extends ChangeNotifier {
     bool isPlaying,
     double nativeVolume, {
     String? error,
+    PlaybackErrorKind? errorKind,
   }) {
     // debugPrint('[DartSnapshotLog] applySnapshot path=$path playbackState=$playbackState positionMs=${position.inMilliseconds} isPlaying=$isPlaying oldState=$_playerState');
 
     if (error != null) {
+      // 输出设备错误（切默认设备、拔耳机、独占流被抢占）由内核的设备监视器自行恢复。
+      // 这里既不能进 PlayerState.error，也不能写 _error：一旦写进去，上层会把
+      // 「音乐还在播」的情况显示成「歌曲已损坏」。只留日志。
+      if (errorKind == PlaybackErrorKind.outputDevice) {
+        debugPrint(
+          '[PlayerController] Ignoring output-device error state=$playbackState '
+          'path=${path ?? "null"} positionMs=${position.inMilliseconds} error=$error',
+        );
+        return;
+      }
       debugPrint(
         '[PlayerController] applySnapshot native error state=$playbackState '
+        'kind=${errorKind?.name ?? "track"} '
         'path=${path ?? "null"} positionMs=${position.inMilliseconds} error=$error',
       );
       setError(error);
       return;
     }
+
+    // 无错误的快照说明播放已恢复（设备错误被忽略时原生不会主动清错），顺手清掉残留消息。
+    _error = null;
 
     final now = DateTime.now();
     final recentlyCommanded =

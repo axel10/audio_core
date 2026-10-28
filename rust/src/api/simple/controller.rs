@@ -304,6 +304,19 @@ impl OutputSink {
     }
 }
 
+/// 播放错误归属的层级。
+///
+/// 输出设备错误（切默认设备、拔耳机、独占流被抢占）由内核的设备监视器自行恢复，
+/// **不能**当成曲目问题上报，否则上层会把「音乐还在放」的情况显示成「歌曲已损坏」。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+pub enum PlaybackErrorKind {
+    /// 曲目层面的错误（解码失败、文件不存在/无法打开）。
+    #[default]
+    Track,
+    /// 输出设备层面的错误，可由 `poll_output_device` / `play_all` 自动恢复。
+    OutputDevice,
+}
+
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PlaybackState {
     pub playback_state: Option<String>,
@@ -313,6 +326,7 @@ pub struct PlaybackState {
     pub volume: f32,
     pub path: Option<String>,
     pub error: Option<String>,
+    pub error_kind: Option<PlaybackErrorKind>,
 }
 
 struct PlaybackDeck {
@@ -376,6 +390,7 @@ struct PlayerController {
     last_decode_engine: Option<String>,
     last_fft_request_time: Arc<Mutex<std::time::Instant>>,
     last_error: Option<String>,
+    last_error_kind: Option<PlaybackErrorKind>,
     sink_invalidated: bool,
 }
 
@@ -689,6 +704,7 @@ impl PlayerController {
             last_decode_engine: None,
             last_fft_request_time: Arc::new(Mutex::new(std::time::Instant::now())),
             last_error: None,
+            last_error_kind: None,
             sink_invalidated: false,
         }
     }
@@ -1098,7 +1114,20 @@ impl PlayerController {
             volume: self.volume,
             path: public_deck.map(|deck| deck.loaded_path.clone()),
             error: self.last_error.clone(),
+            error_kind: self.last_error_kind,
         }
+    }
+
+    /// 唯一写入 `last_error` 的入口：消息与归属必须同时落库，避免出现
+    /// 「有 error 但没有 kind」导致上层按曲目损坏兜底。
+    fn set_last_error(&mut self, message: impl Into<String>, kind: PlaybackErrorKind) {
+        self.last_error = Some(message.into());
+        self.last_error_kind = Some(kind);
+    }
+
+    fn clear_last_error(&mut self) {
+        self.last_error = None;
+        self.last_error_kind = None;
     }
 
     fn clear_pending_playback_state(&mut self) {
@@ -1296,7 +1325,7 @@ impl PlayerController {
                 Ok((new_sink, name)) => {
                     self.sink = Some(OutputSink::Shared(new_sink));
                     self.active_output_device_name = Some(name);
-                    self.last_error = None;
+                    self.clear_last_error();
                     if let Some(p) = path {
                         info!("[AudioDeviceMonitor] Restoring playback to {}", p);
                         if let Err(message) = self.replace_current_from_path(&p, pos, was_playing) {
@@ -1304,7 +1333,10 @@ impl PlayerController {
                                 "[AudioDeviceMonitor] playback restore failed path={}: {}",
                                 p, message
                             );
-                            self.last_error = Some(format!("playback restore failed: {message}"));
+                            self.set_last_error(
+                                format!("playback restore failed: {message}"),
+                                PlaybackErrorKind::OutputDevice,
+                            );
                             super::notify_playback_state_changed();
                         }
                     } else if let Some(sink) = self.sink.as_ref() {
@@ -1414,7 +1446,7 @@ fn report_audio_stream_error(error: rodio::cpal::Error) {
     } else {
         error!("[AudioDeviceMonitor] Fatal audio stream error: {}", message);
         if let Ok(mut controller) = controller().lock() {
-            controller.last_error = Some(message);
+            controller.set_last_error(message, PlaybackErrorKind::OutputDevice);
             controller.sink_invalidated = true;
             super::notify_playback_state_changed();
         }
@@ -1445,6 +1477,7 @@ pub(crate) fn snapshot_playback_state() -> PlaybackState {
             volume: 1.0,
             path: None,
             error: None,
+            error_kind: None,
         })
 }
 
@@ -2029,7 +2062,10 @@ pub fn init_app() {
                 }
                 Err(message) => {
                     error!("[AudioDeviceMonitor] initial audio output failed: {}", message);
-                    c.last_error = Some(format!("audio output initialization failed: {message}"));
+                    c.set_last_error(
+                        format!("audio output initialization failed: {message}"),
+                        PlaybackErrorKind::OutputDevice,
+                    );
                     super::notify_playback_state_changed();
                 }
             }
@@ -2043,7 +2079,7 @@ pub fn load_audio_file(path: String) -> Result<(), String> {
         Err(msg) => {
             error!("[load_audio_file] path={}: {}", path, msg);
             if let Ok(mut c) = controller().lock() {
-                c.last_error = Some(msg.clone());
+                c.set_last_error(msg.clone(), PlaybackErrorKind::Track);
                 super::notify_playback_state_changed();
             }
             return Err(msg);
@@ -2055,12 +2091,12 @@ pub fn load_audio_file(path: String) -> Result<(), String> {
         .map_err(|_| "player lock poisoned".to_string())?;
     match c.replace_current_from_backend(&path, backend, Duration::ZERO, false) {
         Ok(()) => {
-            c.last_error = None;
+            c.clear_last_error();
             Ok(())
         }
         Err(msg) => {
             error!("[load_audio_file] path={}: {}", path, msg);
-            c.last_error = Some(msg.clone());
+            c.set_last_error(msg.clone(), PlaybackErrorKind::Track);
             super::notify_playback_state_changed();
             Err(msg)
         }
@@ -2073,7 +2109,7 @@ pub fn crossfade_to_audio_file(path: String, duration_ms: i64) -> Result<(), Str
         Err(msg) => {
             error!("[crossfade_to_audio_file] path={}: {}", path, msg);
             if let Ok(mut c) = controller().lock() {
-                c.last_error = Some(msg.clone());
+                c.set_last_error(msg.clone(), PlaybackErrorKind::Track);
                 super::notify_playback_state_changed();
             }
             return Err(msg);
@@ -2087,12 +2123,12 @@ pub fn crossfade_to_audio_file(path: String, duration_ms: i64) -> Result<(), Str
     let duration = Duration::from_millis(duration_ms.max(0) as u64);
     match c.start_crossfade_with_backend(&path, backend, duration) {
         Ok(()) => {
-            c.last_error = None;
+            c.clear_last_error();
             Ok(())
         }
         Err(msg) => {
             error!("[crossfade_to_audio_file] path={}: {}", path, msg);
-            c.last_error = Some(msg.clone());
+            c.set_last_error(msg.clone(), PlaybackErrorKind::Track);
             super::notify_playback_state_changed();
             Err(msg)
         }
@@ -2106,7 +2142,7 @@ pub fn play_audio(fade_duration_ms: i64) -> Result<(), String> {
     if c.public_deck().is_none() {
         let msg = "player is not initialized".to_string();
         error!("[play_audio] {}", msg);
-        c.last_error = Some(msg.clone());
+        c.set_last_error(msg.clone(), PlaybackErrorKind::Track);
         super::notify_playback_state_changed();
         return Err(msg);
     }
@@ -2125,7 +2161,7 @@ pub fn play_audio(fade_duration_ms: i64) -> Result<(), String> {
     } else {
         c.play_all()?;
     }
-    c.last_error = None;
+    c.clear_last_error();
     super::notify_playback_state_changed();
     Ok(())
 }
@@ -2398,7 +2434,10 @@ pub fn set_audio_output_mode(
     if let Some(p) = path {
         if let Err(message) = c.replace_current_from_path(&p, pos, was_playing) {
             error!("[AudioOutput] Failed to resume track {p}: {message}");
-            c.last_error = Some(format!("resume track failed: {message}"));
+            c.set_last_error(
+                format!("resume track failed: {message}"),
+                PlaybackErrorKind::OutputDevice,
+            );
         }
     }
 

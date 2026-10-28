@@ -2387,6 +2387,18 @@ impl SseDecode for crate::api::simple::controller::AudioOutputMode {
     }
 }
 
+impl SseDecode for crate::api::simple::controller::PlaybackErrorKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::simple::controller::PlaybackErrorKind::Track,
+            1 => crate::api::simple::controller::PlaybackErrorKind::OutputDevice,
+            _ => unreachable!("Invalid variant for PlaybackErrorKind: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for bool {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2546,6 +2558,19 @@ impl SseDecode for Vec<crate::api::simple::metadata::TrackPicture> {
     }
 }
 
+impl SseDecode for Option<crate::api::simple::controller::PlaybackErrorKind> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(
+                <crate::api::simple::controller::PlaybackErrorKind>::sse_decode(deserializer),
+            );
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<String> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2626,6 +2651,8 @@ impl SseDecode for crate::api::simple::controller::PlaybackState {
         let mut var_volume = <f32>::sse_decode(deserializer);
         let mut var_path = <Option<String>>::sse_decode(deserializer);
         let mut var_error = <Option<String>>::sse_decode(deserializer);
+        let mut var_errorKind =
+            <Option<crate::api::simple::controller::PlaybackErrorKind>>::sse_decode(deserializer);
         return crate::api::simple::controller::PlaybackState {
             playback_state: var_playbackState,
             position_ms: var_positionMs,
@@ -2634,6 +2661,7 @@ impl SseDecode for crate::api::simple::controller::PlaybackState {
             volume: var_volume,
             path: var_path,
             error: var_error,
+            error_kind: var_errorKind,
         };
     }
 }
@@ -3000,6 +3028,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::simple::controller::AudioOutp
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::simple::controller::PlaybackErrorKind {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Track => 0.into_dart(),
+            Self::OutputDevice => 1.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::simple::controller::PlaybackErrorKind
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::simple::controller::PlaybackErrorKind>
+    for crate::api::simple::controller::PlaybackErrorKind
+{
+    fn into_into_dart(self) -> crate::api::simple::controller::PlaybackErrorKind {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::simple::equalizer::EqualizerConfig {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -3080,6 +3129,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::simple::controller::PlaybackS
             self.volume.into_into_dart().into_dart(),
             self.path.into_into_dart().into_dart(),
             self.error.into_into_dart().into_dart(),
+            self.error_kind.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3328,6 +3378,22 @@ impl SseEncode for crate::api::simple::controller::AudioOutputMode {
     }
 }
 
+impl SseEncode for crate::api::simple::controller::PlaybackErrorKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::simple::controller::PlaybackErrorKind::Track => 0,
+                crate::api::simple::controller::PlaybackErrorKind::OutputDevice => 1,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for bool {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -3462,6 +3528,16 @@ impl SseEncode for Vec<crate::api::simple::metadata::TrackPicture> {
     }
 }
 
+impl SseEncode for Option<crate::api::simple::controller::PlaybackErrorKind> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::simple::controller::PlaybackErrorKind>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<String> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -3534,6 +3610,10 @@ impl SseEncode for crate::api::simple::controller::PlaybackState {
         <f32>::sse_encode(self.volume, serializer);
         <Option<String>>::sse_encode(self.path, serializer);
         <Option<String>>::sse_encode(self.error, serializer);
+        <Option<crate::api::simple::controller::PlaybackErrorKind>>::sse_encode(
+            self.error_kind,
+            serializer,
+        );
     }
 }
 

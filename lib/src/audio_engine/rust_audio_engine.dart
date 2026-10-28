@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../fft_processor.dart';
 import '../rust/api/simple_api.dart' as rust;
+import '../rust/api/simple/controller.dart' show PlaybackErrorKind;
 import '../rust/api/simple/equalizer.dart';
 import '../track_metadata.dart';
 import '../track_metadata_update.dart';
@@ -33,7 +34,8 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
       if (hasError || isErrorState) {
         debugPrint(
           '[RustAudioEngine] Playback error state=${state.playbackState ?? "null"} '
-          'path=${state.path ?? "null"} error=${hasError ? nativeError : "<missing native error>"}',
+          'path=${state.path ?? "null"} kind=${state.errorKind?.name ?? "unknown"} '
+          'error=${hasError ? nativeError : "<missing native error>"}',
         );
       }
       final propagatedError = hasError
@@ -51,6 +53,10 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
           volume: state.volume,
           updateTimeSinceEpochMs: DateTime.now().millisecondsSinceEpoch,
           error: propagatedError,
+          // 原生没有给 kind 时按曲目错误兜底，与引入 kind 之前的行为一致。
+          errorKind: propagatedError == null
+              ? null
+              : (state.errorKind ?? PlaybackErrorKind.track),
         ),
       );
     });

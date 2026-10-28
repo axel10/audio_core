@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import '../fft_processor.dart';
 import '../track_artwork.dart';
 import '../rust/api/simple/equalizer.dart';
+import '../rust/api/simple/controller.dart' show PlaybackErrorKind;
 import '../rust/api/simple_api.dart' as rust;
 import '../track_metadata.dart';
 import '../track_metadata_update.dart';
@@ -25,6 +26,9 @@ class AudioStatus {
   final bool isPlaying;
   final double volume;
   final String? error;
+
+  /// 错误归属：为空时按曲目错误处理（保持旧行为）。
+  final PlaybackErrorKind? errorKind;
   final int? updateTimeSinceEpochMs;
 
   AudioStatus({
@@ -36,6 +40,7 @@ class AudioStatus {
     required this.volume,
     this.updateTimeSinceEpochMs,
     this.error,
+    this.errorKind,
   });
 }
 

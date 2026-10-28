@@ -2405,6 +2405,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlaybackErrorKind dco_decode_playback_error_kind(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return PlaybackErrorKind.values[raw as int];
+  }
+
+  @protected
+  PlaybackErrorKind? dco_decode_opt_playback_error_kind(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_playback_error_kind(raw);
+  }
+
+  @protected
   bool dco_decode_bool(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as bool;
@@ -2608,8 +2620,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PlaybackState dco_decode_playback_state(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
     return PlaybackState(
       playbackState: dco_decode_opt_String(arr[0]),
       positionMs: dco_decode_i_64(arr[1]),
@@ -2618,6 +2630,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       volume: dco_decode_f_32(arr[4]),
       path: dco_decode_opt_String(arr[5]),
       error: dco_decode_opt_String(arr[6]),
+      errorKind: dco_decode_opt_playback_error_kind(arr[7]),
     );
   }
 
@@ -2888,6 +2901,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_i_32(deserializer);
     return AudioOutputMode.values[inner];
+  }
+
+  @protected
+  PlaybackErrorKind sse_decode_playback_error_kind(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return PlaybackErrorKind.values[inner];
+  }
+
+  @protected
+  PlaybackErrorKind? sse_decode_opt_playback_error_kind(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_playback_error_kind(deserializer));
+    } else {
+      return null;
+    }
   }
 
   @protected
@@ -3164,6 +3198,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_volume = sse_decode_f_32(deserializer);
     var var_path = sse_decode_opt_String(deserializer);
     var var_error = sse_decode_opt_String(deserializer);
+    var var_errorKind = sse_decode_opt_playback_error_kind(deserializer);
     return PlaybackState(
       playbackState: var_playbackState,
       positionMs: var_positionMs,
@@ -3172,6 +3207,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       volume: var_volume,
       path: var_path,
       error: var_error,
+      errorKind: var_errorKind,
     );
   }
 
@@ -3476,6 +3512,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_playback_error_kind(
+    PlaybackErrorKind self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_opt_playback_error_kind(
+    PlaybackErrorKind? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_playback_error_kind(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_bool(bool self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint8(self ? 1 : 0);
@@ -3745,6 +3803,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_f_32(self.volume, serializer);
     sse_encode_opt_String(self.path, serializer);
     sse_encode_opt_String(self.error, serializer);
+    sse_encode_opt_playback_error_kind(self.errorKind, serializer);
   }
 
   @protected

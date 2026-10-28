@@ -75,6 +75,17 @@ pub mod controller {
         pub is_bit_perfect: bool,
     }
 
+    /// 与桌面端 `controller::PlaybackErrorKind` 保持同构：frb 只生成一份 Dart 结构，
+    /// 变体顺序必须一致，否则 Android 侧 SSE 解出来的 kind 会错位。
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub enum PlaybackErrorKind {
+        /// 曲目层面的错误（解码失败、文件不存在/无法打开）。
+        #[default]
+        Track,
+        /// 输出设备层面的错误，可由上层自动恢复。
+        OutputDevice,
+    }
+
     #[derive(Debug, Clone, Default)]
     pub struct PlaybackState {
         pub playback_state: Option<String>,
@@ -84,6 +95,7 @@ pub mod controller {
         pub volume: f32,
         pub path: Option<String>,
         pub error: Option<String>,
+        pub error_kind: Option<PlaybackErrorKind>,
     }
 
     pub struct SpeedShared {
