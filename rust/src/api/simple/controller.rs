@@ -939,19 +939,29 @@ impl PlayerController {
         let latest_fft = Arc::new(Mutex::new(vec![0.0; RAW_FFT_BINS]));
         clear_fft_buffer(&latest_fft);
 
-        if self.output_mode == AudioOutputMode::WasapiExclusive && self.bit_perfect {
-            player.set_volume(1.0);
-        } else {
-            player.set_volume((self.volume * gain).clamp(0.0, 1.0));
-        }
+        // 音量必须在这里套用 master volume，无条件、无分支。
+        // 曾经在 WasapiExclusive + bit_perfect 下强制 set_volume(1.0)（想保持数字直通），
+        // 结果是：任何「重建 deck」的路径都会把实际输出拉回满电平，而 c.volume 不变，
+        // 于是 UI 仍显示旧音量、耳朵却是 100%。手动切歌之所以没这个问题，是因为
+        // 走淡入淡出/crossfade 时 drive_volume_fade / drive_crossfade 会不断重设
+        // master volume；而自动播完切歌走 ImmediateTransition → load_audio_file(auto_play=false)
+        // → play_audio(0) → play_all()，在独占 + 释放设备于暂停时还会 replace_current_from_path
+        // 重建一次 deck，这条链路上没有任何地方补 master volume。
+        // bit-perfect 的语义只包含「不做重采样 / 旁路 EQ 与变速」（见 is_bit_perfect 分支），
+        // 不包含跳过数字音量。
+        player.set_volume((self.volume * gain).clamp(0.0, 1.0));
 
         info!(
-            "[AudioTrace][Decode] path={} engine={} channels={} sample_rate={} duration_ms={}",
+            "[AudioTrace][Decode] path={} engine={} channels={} sample_rate={} duration_ms={} master_volume={} gain={} applied_volume={} auto_play={}",
             path,
             decode_engine,
             decoded_source.channels(),
             decoded_source.sample_rate(),
-            total.as_millis()
+            total.as_millis(),
+            self.volume,
+            gain,
+            (self.volume * gain).clamp(0.0, 1.0),
+            auto_play
         );
         let output_config = self
             .sink
