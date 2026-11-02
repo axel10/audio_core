@@ -33,6 +33,7 @@ class VisualizerController extends ChangeNotifier {
   late final VisualizerOutputManager visualizerOutputManager;
 
   bool _fftEnabled = true;
+  bool _isPlaying = true;
   int _lastAnalysisMicros = 0;
   List<double> _currentRawBins = const [];
 
@@ -60,6 +61,16 @@ class VisualizerController extends ChangeNotifier {
   }
 
   // --- Actions ---
+
+  /// 同步播放状态。
+  ///
+  /// - 各个 [VisualizerOutputStream]（迷你播放器 / 独立输出）会被切到
+  ///   「衰减到静止再停表」的暂停态，避免暂停后仍以 60Hz 空转推送。
+  /// - 本控制器的 [optimizedStream] 也会带上真实播放态，供订阅方判定。
+  void updatePlaybackState(Duration position, bool isPlaying) {
+    _isPlaying = isPlaying;
+    visualizerOutputManager.updatePlaybackState(position, isPlaying);
+  }
 
   void setEnabled(bool enabled) {
     if (_fftEnabled == enabled) return;
@@ -94,6 +105,8 @@ class VisualizerController extends ChangeNotifier {
     bool sourceAlreadyGrouped = false,
   }) {
     if (!_fftEnabled) return;
+
+    _isPlaying = isPlaying;
 
     final engineBins = _getLatestFft();
 
@@ -135,7 +148,7 @@ class VisualizerController extends ChangeNotifier {
         FftFrame(
           position: Duration.zero,
           values: _fftProcessor.latestOptimizedFft,
-          isPlaying: true,
+          isPlaying: _isPlaying,
         ),
       );
     }

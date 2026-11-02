@@ -180,6 +180,47 @@ class FftProcessor {
     );
   }
 
+  /// 暂停后的收尾衰减：不再吸收任何采样，只让当前频谱按 gravity 自然落下。
+  ///
+  /// 与 [processAnalysis] 共用 [_applySmoothingAndGravity]，所以「暂停」和
+  /// 「音乐自然变轻」看起来是同一条下落曲线，不会突然定格或断崖。
+  /// 走这条路径可以跳过 [_groupBins]/[_normalizeAndScale]，暂停期间不再
+  /// 白算一遍频段聚合。
+  void decayTowardsSilence(double dtSec) {
+    final zeros = List<double>.filled(_options.frequencyGroups, 0.0);
+    final fallen = _applySmoothingAndGravity(
+      previous: _optimizedState,
+      next: zeros,
+      smoothing: _options.smoothingCoefficient,
+      gravity: _options.gravityCoefficient,
+      dtSec: dtSec,
+    );
+
+    // 贴地即归零：否则 processRender 的插值会留一点残值，
+    // 订阅方拿到的最后一帧不是干净的 0，看起来像「卡在一丝余量」。
+    var silent = true;
+    for (final value in fallen) {
+      if (value > 1e-4) {
+        silent = false;
+        break;
+      }
+    }
+
+    // 归零那一帧的插值起点也要归零，否则 lerp 会从上一帧的值往回退 70% 收尾。
+    _interpFrom = List<double>.from(silent ? zeros : _optimizedState);
+    _optimizedState = silent ? zeros : fallen;
+    _interpTo = List<double>.from(_optimizedState);
+    _interpMicros = 0;
+  }
+
+  /// 频谱是否已经落到静止（所有频段都贴地）。
+  bool get isSilent {
+    for (final value in _optimizedState) {
+      if (value > 1e-4) return false;
+    }
+    return true;
+  }
+
   void resetState() {
     _latestRawFft = const [];
     _latestOptimizedFft = List<double>.filled(_options.frequencyGroups, 0.0);

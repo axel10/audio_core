@@ -34,6 +34,7 @@ class VisualizerOutputStream {
   Timer? _renderTimer;
   int _lastAnalysisMicros = 0;
   bool _isActive = false;
+  bool _isPlaying = true;
   int _listenerCount = 0;
 
   void _onListen() {
@@ -77,10 +78,13 @@ class VisualizerOutputStream {
 
   /// Starts the render timer for this output stream.
   void start() {
-    if (_isActive) return;
     _isActive = true;
     _lastAnalysisMicros = 0;
-    _restartRenderTimer();
+    // 已经在跑就重启一次即可：暂停衰减到底时定时器会自行停表，
+    // 但 [_isActive] 仍是 true，这里必须允许补起来，不能提前 return。
+    if (_renderTimer == null) {
+      _restartRenderTimer();
+    }
   }
 
   /// Stops the render timer.
@@ -90,6 +94,25 @@ class VisualizerOutputStream {
     _renderTimer = null;
     _fftProcessor.resetState();
   }
+
+  /// 同步播放状态。
+  ///
+  /// 暂停后不再取真实采样，改为每 tick 让当前频谱按 gravity 自然落下
+  /// （[FftProcessor.decayTowardsSilence]），落到静止即停表；恢复播放时
+  /// 重新起表。这样暂停不会定格，也不会让 60Hz 定时器空转标脏 UI。
+  void setPlaying(bool isPlaying) {
+    if (_isPlaying == isPlaying) return;
+    _isPlaying = isPlaying;
+    if (isPlaying) {
+      _lastAnalysisMicros = 0;
+      if (_isActive && _renderTimer == null) {
+        _restartRenderTimer();
+      }
+    }
+  }
+
+  /// 当前是否处于播放态（供调试/测试读取）。
+  bool get isPlaying => _isPlaying;
 
   /// Restarts the render timer with current frame rate.
   void _restartRenderTimer() {
@@ -103,6 +126,11 @@ class VisualizerOutputStream {
 
   void _onRenderTick() {
     if (!_isActive || !_fftStreamController.hasListener) {
+      return;
+    }
+
+    if (!_isPlaying) {
+      _tickPausedDecay();
       return;
     }
 
@@ -132,6 +160,27 @@ class VisualizerOutputStream {
     _emitFftFrame();
   }
 
+  /// 暂停态：只让频谱落下，不再取真实采样。
+  ///
+  /// 落到底就停表 —— 订阅方（列表小图标 / 迷你播放器频谱）此时拿到的是
+  /// 全零，继续以 60Hz 推送只会让 UI 反复标脏出帧。
+  void _tickPausedDecay() {
+    final nowMicros = DateTime.now().microsecondsSinceEpoch;
+    final dtSec = _lastAnalysisMicros == 0
+        ? 1.0 / 60.0
+        : (nowMicros - _lastAnalysisMicros) / 1000000.0;
+    _lastAnalysisMicros = nowMicros;
+
+    _fftProcessor.decayTowardsSilence(dtSec);
+    _fftProcessor.processRender(_renderIntervalMicros, _analysisIntervalMicros);
+    _emitFftFrame();
+
+    if (_fftProcessor.isSilent) {
+      _renderTimer?.cancel();
+      _renderTimer = null;
+    }
+  }
+
   int get _renderIntervalMicros {
     final frameRate = _config.targetFrameRate;
     return frameRate > 0 ? (1000000.0 / frameRate).round() : 16667;
@@ -149,7 +198,7 @@ class VisualizerOutputStream {
       FftFrame(
         position: Duration.zero, // Position is updated by the manager
         values: _fftProcessor.latestOptimizedFft,
-        isPlaying: true, // Managed by the main controller
+        isPlaying: _isPlaying,
       ),
     );
   }

@@ -20,6 +20,10 @@ class VisualizerOutputManager {
   final Map<String, VisualizerOutputStream> _outputs = {};
   bool _disposed = false;
 
+  /// 最近一次同步过来的播放态。新建输出流时先对齐它，
+  /// 否则暂停期间新挂上的输出流会以「播放中」起表、白转一轮。
+  bool _isPlaying = true;
+
   /// All output stream IDs.
   List<String> get outputIds => List<String>.unmodifiable(_outputs.keys);
 
@@ -46,6 +50,7 @@ class VisualizerOutputManager {
       fftSourceProvider: _fftSourceProvider,
       sourceAlreadyGrouped: _sourceAlreadyGrouped,
     );
+    output.setPlaying(_isPlaying);
     _outputs[config.id] = output;
 
     return output;
@@ -114,9 +119,14 @@ class VisualizerOutputManager {
   }
 
   /// Updates the position and playing state for all outputs.
+  ///
+  /// 暂停态会转发给每个输出流：它们不再取真实采样，而是让当前频谱按
+  /// gravity 自然落下，落到底自行停表；恢复播放时重新起表。
   void updatePlaybackState(Duration position, bool isPlaying) {
-    // This could be used to update the FftFrame with correct position
-    // For now, outputs fetch position from provider
+    _isPlaying = isPlaying;
+    for (final output in _outputs.values) {
+      output.setPlaying(isPlaying);
+    }
   }
 
   /// Disposes all output streams and clears the manager.
