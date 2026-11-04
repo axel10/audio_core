@@ -21,6 +21,10 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
   private var preparedAccessPaths = Set<String>()
   private let preparedAccessPathsLock = NSLock()
 
+  /// 冷启动时文档打开可能早于插件注册完成，先攒在这里等 Dart 拉取。
+  private static var pendingOpenedPaths: [String] = []
+  private static let pendingOpenedPathsLock = NSLock()
+
   public override init() {
     super.init()
   }
@@ -61,6 +65,14 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     instance.converterChannel = converterChannel
     registrar.addMethodCallDelegate(instance, channel: channel)
     registrar.addMethodCallDelegate(instance, channel: converterChannel)
+    #if os(iOS)
+    // 文档打开走的是 UIScene 生命周期（`scene(_:openURLContexts:)`），
+    // Flutter 的插件生命周期委托只转发 openURL（自定义 scheme），
+    // 所以必须额外注册为 scene 委托，否则「文件 app → 用 Vynody 打开」无人接收。
+    if #available(iOS 13.0, *) {
+      registrar.addSceneDelegate(instance)
+    }
+    #endif
     fftChannel.setStreamHandler(instance)
     debugPrint("[AudioCorePlugin] register: Completed registration for instance \(Unmanaged.passUnretained(instance).toOpaque()).")
   }
@@ -192,6 +204,10 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     case "listPersistentAccessPaths":
       result(fileAccess.listPersistentAccessPaths())
 
+    case "getPendingOpenedFiles":
+      // 冷启动阶段由 scene 回调攒下的外部打开路径，Dart 就绪后主动拉取。
+      result(Self.drainPendingOpenedPaths())
+
     case "beginScopedAccess":
       guard let path = Self.readString(call.arguments, key: "path") else {
         result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
@@ -268,13 +284,15 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
 
   private func softCleanup() {
     debugPrint("[AudioCorePlugin] softCleanup called for instance \(Unmanaged.passUnretained(self).toOpaque())")
+    // 热重启只回收「文件写入锁」这类内核自己发起的临时授权。
+    // 不要调用 releaseAllAccess()：用户授予的曲库 root / 分享目录 / 播放曲目
+    // 属于应用级授权，必须活得比插件实例久，否则每次热重启后曲库都变成 0 首。
     preparedAccessPathsLock.lock()
     for path in preparedAccessPaths {
       fileAccess.releaseAccess(for: path)
     }
     preparedAccessPaths.removeAll()
     preparedAccessPathsLock.unlock()
-    fileAccess.releaseAllAccess()
     channel = nil
     converterChannel = nil
   }
@@ -429,7 +447,57 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     }
     return bundleId
   }
+
+  // MARK: - 外部打开（供 scene 委托使用）
+
+  fileprivate static func appendPendingOpenedPaths(_ paths: [String]) {
+    guard !paths.isEmpty else { return }
+    pendingOpenedPathsLock.lock()
+    pendingOpenedPaths.append(contentsOf: paths)
+    pendingOpenedPathsLock.unlock()
+  }
+
+  fileprivate static func drainPendingOpenedPaths() -> [String] {
+    pendingOpenedPathsLock.lock()
+    defer { pendingOpenedPathsLock.unlock() }
+    let paths = pendingOpenedPaths
+    pendingOpenedPaths.removeAll()
+    return paths
+  }
+
+  /// 把已拿到授权的外部路径推给 Dart；通道尚未建好时先攒着等 Dart 拉取。
+  fileprivate func notifyOpenedPaths(_ paths: [String]) {
+    guard !paths.isEmpty else { return }
+    guard let channel else {
+      Self.appendPendingOpenedPaths(paths)
+      return
+    }
+    channel.invokeMethod("onOpenFiles", arguments: paths)
+  }
 }
+
+#if os(iOS)
+@available(iOS 13.0, *)
+extension AudioCorePlugin: FlutterSceneLifeCycleDelegate {
+  /// 文档「打开方式 → Vynody」的入口。
+  ///
+  /// 必须在回调内用**原始 URL** 打开 scope 并落 bookmark：security scope 只挂在
+  /// 这个 URL 对象上，一旦标准化或降级成路径字符串就再也拿不回来。回调返回后
+  /// 这个 URL 即失效，所以授权动作不能推迟到 Dart 侧再做。
+  public func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) -> Bool {
+    var paths: [String] = []
+    for context in URLContexts {
+      let url = context.url
+      guard url.isFileURL else { continue }
+      _ = fileAccess.acquireAccess(for: url)
+      _ = fileAccess.registerPersistentAccess(for: url)
+      paths.append(url.path)
+    }
+    notifyOpenedPaths(paths)
+    return !paths.isEmpty
+  }
+}
+#endif
 
 #if os(iOS)
 extension AudioCorePlugin: UIDocumentPickerDelegate {
