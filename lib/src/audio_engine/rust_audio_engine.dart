@@ -256,21 +256,36 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
 
   @override
   Future<Float32List> getAudioPcm({String? path, int sampleStride = 0}) async {
-    if (_isApple && path != null && path.isNotEmpty) {
-      await beginScopedAccess(path);
+    // 一次性读取：用完立刻放掉，不要把 default 桶当常驻授权用。
+    final needsScope = _isApple && path != null && path.isNotEmpty;
+    if (needsScope) {
+      await beginScopedAccess(path, holder: AppleFileAccessHolder.reader);
     }
-    return rust.getAudioPcm(
-      path: path,
-      sampleStride: BigInt.from(sampleStride),
-    );
+    try {
+      return await rust.getAudioPcm(
+        path: path,
+        sampleStride: BigInt.from(sampleStride),
+      );
+    } finally {
+      if (needsScope) {
+        await endScopedAccess(path, holder: AppleFileAccessHolder.reader);
+      }
+    }
   }
 
   @override
   Future<int> getAudioPcmChannelCount({String? path}) async {
-    if (_isApple && path != null && path.isNotEmpty) {
-      await beginScopedAccess(path);
+    final needsScope = _isApple && path != null && path.isNotEmpty;
+    if (needsScope) {
+      await beginScopedAccess(path, holder: AppleFileAccessHolder.reader);
     }
-    return rust.getAudioPcmChannelCount(path: path);
+    try {
+      return await rust.getAudioPcmChannelCount(path: path);
+    } finally {
+      if (needsScope) {
+        await endScopedAccess(path, holder: AppleFileAccessHolder.reader);
+      }
+    }
   }
 
   @override
@@ -376,24 +391,68 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
     return const <String>[];
   }
 
+  /// 已向原生申请、尚未释放的占用：holder → 路径集合。仅苹果平台使用。
+  ///
+  /// 原生只能计数，分不清「第二次 begin 是同一次占用的重入」。播放链路
+  /// app → 控制器 → 引擎三层各 begin 一次，而释放只发生一次，计数永远回不到零；
+  /// 分享链路同理。因此在这里做进程内去重：同一 (holder, 路径) 只下发一次
+  /// begin，end 也只下发一次。
+  static final Map<String, Set<String>> _scopedAccessPaths =
+      <String, Set<String>>{};
+
+  static const String _defaultScopedHolder = 'default';
+
+  static String _scopedHolderKey(String? holder) =>
+      (holder == null || holder.isEmpty) ? _defaultScopedHolder : holder;
+
   @override
   Future<bool> beginScopedAccess(String path, {String? holder}) async {
-    if (_isApple) {
-      final success = await _amberInvokeMethod<bool>('beginScopedAccess', {
-        'path': path,
-        if (holder != null && holder.isNotEmpty) 'holder': holder,
-      });
-      return success ?? false;
-    }
+    if (!_isApple) return true;
+
+    final key = _scopedHolderKey(holder);
+    final held = _scopedAccessPaths.putIfAbsent(key, () => <String>{});
+    if (held.contains(path)) return true;
+
+    final success = await _amberInvokeMethod<bool>('beginScopedAccess', {
+      'path': path,
+      'holder': key,
+    });
+    // begin 返回 false 有两种含义：路径本来就在可访问范围内（系统没有为此
+    // 增加引用计数），或系统拒绝。两种情况都不能记成「已持有」，否则后面
+    // 的 end 会去减一份并不存在的额度。
+    if (success != true) return false;
+
+    held.add(path);
     return true;
   }
 
   @override
   Future<void> endScopedAccess(String path, {String? holder}) async {
-    if (_isApple) {
+    if (!_isApple) return;
+
+    final key = _scopedHolderKey(holder);
+    final held = _scopedAccessPaths[key];
+    if (held == null || !held.remove(path)) {
+      // 从未真正持有过，不能下发 end：减掉的会是别的调用方或别的 holder 的份额。
+      return;
+    }
+    await _amberInvokeMethod<void>('endScopedAccess', {
+      'path': path,
+      'holder': key,
+    });
+  }
+
+  @override
+  Future<void> releaseScopedAccessHolder(String holder) async {
+    if (!_isApple) return;
+
+    final key = _scopedHolderKey(holder);
+    final held = _scopedAccessPaths.remove(key);
+    if (held == null) return;
+    for (final path in held) {
       await _amberInvokeMethod<void>('endScopedAccess', {
         'path': path,
-        if (holder != null && holder.isNotEmpty) 'holder': holder,
+        'holder': key,
       });
     }
   }

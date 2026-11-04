@@ -1385,6 +1385,10 @@ class AudioCoreController extends ChangeNotifier
     return _engine.beginScopedAccess(targetPath, holder: holder);
   }
 
+  /// 一次性放掉某个 holder 名下的全部占用（停止播放、清空队列时用）。
+  Future<void> releaseScopedAccessHolder(String holder) =>
+      _engine.releaseScopedAccessHolder(holder);
+
   /// Ends an Apple security-scoped access session for [path].
   Future<void> endScopedAccess({required String path, String? holder}) async {
     final targetPath = _resolvePersistentAccessPath(path);

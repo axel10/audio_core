@@ -17,6 +17,12 @@ abstract final class AppleFileAccessHolder {
   /// 音频转码的输入与输出目录。
   static const String converter = 'converter';
 
+  /// 一次性的短时写租约（写标签、覆盖文件），begin/end 必须成对。
+  static const String writer = 'writer';
+
+  /// 一次性的短时读租约（波形、PCM、时长探测）。
+  static const String reader = 'reader';
+
   /// 未显式声明 holder 的调用方，必须与原生侧默认值一致。
   static const String fallback = 'default';
 }

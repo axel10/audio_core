@@ -73,6 +73,11 @@ class MockAudioEngine implements AudioEngine {
   }
 
   @override
+  Future<void> releaseScopedAccessHolder(String holder) async {
+    scopedAccessPaths.clear();
+  }
+
+  @override
   Future<void> forgetPersistentAccess(String path) async {
     registeredPaths.remove(path);
   }

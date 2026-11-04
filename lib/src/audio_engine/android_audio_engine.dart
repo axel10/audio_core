@@ -518,6 +518,9 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   Future<void> endScopedAccess(String path, {String? holder}) async {}
 
   @override
+  Future<void> releaseScopedAccessHolder(String holder) async {}
+
+  @override
   Future<bool> updateTrackMetadata({
     required String path,
     required Map<String, Object?> metadata,

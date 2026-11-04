@@ -137,6 +137,9 @@ abstract class AudioEngine {
   /// 只释放 [holder] 自己那份授权；全 holder 归零才真正关闭系统作用域。
   Future<void> endScopedAccess(String path, {String? holder});
 
+  /// 一次性放掉 [holder] 名下的全部占用（停止播放、清空队列时用）。
+  Future<void> releaseScopedAccessHolder(String holder);
+
   // Native metadata updates
   Future<bool> updateTrackMetadata({
     required String path,
