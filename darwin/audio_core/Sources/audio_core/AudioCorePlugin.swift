@@ -200,14 +200,20 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       // Report the real scope state. Returning `true` unconditionally made the
       // Dart side believe a root path was authorized while every directory
       // listing was actually rejected with EPERM.
-      result(fileAccess.beginScopedAccess(for: path))
+      result(fileAccess.beginScopedAccess(
+        for: path,
+        holder: Self.readAccessHolder(call.arguments)
+      ))
 
     case "endScopedAccess":
       guard let path = Self.readString(call.arguments, key: "path") else {
         result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
         return
       }
-      fileAccess.releaseAccess(for: path)
+      fileAccess.releaseAccess(
+        for: path,
+        holder: Self.readAccessHolder(call.arguments)
+      )
       result(nil)
 
     case "getDirectoryDisplayName":
@@ -289,6 +295,19 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
   private static func readString(_ arguments: Any?, key: String) -> String? {
     guard let args = arguments as? [String: Any] else { return nil }
     return args[key] as? String
+  }
+
+  /// 读取 `beginScopedAccess` / `endScopedAccess` 的持有者标识。
+  ///
+  /// 缺省走 coordinator 的 default holder，保证旧调用方（示例页、写入锁）
+  /// 各自成对时仍然闭合。
+  private static func readAccessHolder(_ arguments: Any?) -> String {
+    let holder = readString(arguments, key: "holder")?
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let holder, !holder.isEmpty else {
+      return SecurityScopedFileAccessCoordinator.defaultAccessHolder
+    }
+    return holder
   }
 
   private static func readStringArray(_ arguments: Any?, key: String) -> [String]? {

@@ -17,6 +17,7 @@ import 'rust/frb_generated.dart';
 import 'fft_processor.dart';
 import 'player_state_snapshot.dart';
 import 'equalizer_controller.dart';
+import 'apple_file_access_holder.dart';
 import 'audio_engine/audio_engine_interface.dart';
 import 'audio_engine/android_audio_engine.dart';
 import 'audio_engine/rust_audio_engine.dart';
@@ -570,7 +571,7 @@ class AudioCoreController extends ChangeNotifier
               uri.scheme == 'webdav');
       if (!isRemote) {
         await registerPersistentAccess(path: track.uri);
-        await beginScopedAccess(path: track.uri);
+        await beginScopedAccess(path: track.uri, holder: AppleFileAccessHolder.playback);
       }
     }
 
@@ -620,7 +621,7 @@ class AudioCoreController extends ChangeNotifier
               parsed.scheme == 'webdav');
       if (!isRemote) {
         await registerPersistentAccess(path: uri);
-        await beginScopedAccess(path: uri);
+        await beginScopedAccess(path: uri, holder: AppleFileAccessHolder.playback);
       }
     }
 
@@ -731,7 +732,7 @@ class AudioCoreController extends ChangeNotifier
               uri.scheme == 'webdav');
       if (!isRemote) {
         await registerPersistentAccess(path: track.uri);
-        await beginScopedAccess(path: track.uri);
+        await beginScopedAccess(path: track.uri, holder: AppleFileAccessHolder.playback);
       }
     }
 
@@ -764,7 +765,7 @@ class AudioCoreController extends ChangeNotifier
     if (Platform.isIOS || Platform.isMacOS) {
       for (final path in paths) {
         await registerPersistentAccess(path: path);
-        await beginScopedAccess(path: path);
+        await beginScopedAccess(path: path, holder: AppleFileAccessHolder.playback);
       }
     }
 
@@ -1375,17 +1376,20 @@ class AudioCoreController extends ChangeNotifier
   }
 
   /// Begins an Apple security-scoped access session for [path].
-  Future<bool> beginScopedAccess({required String path}) async {
+  ///
+  /// [holder] 决定这份授权记在谁名下，缺省 `default`；同一次会话的 end 必须
+  /// 传同一个 holder，否则不会真正关闭（详见 [AppleFileAccessHolder]）。
+  Future<bool> beginScopedAccess({required String path, String? holder}) async {
     final targetPath = _resolvePersistentAccessPath(path);
     if (targetPath == null) return false;
-    return _engine.beginScopedAccess(targetPath);
+    return _engine.beginScopedAccess(targetPath, holder: holder);
   }
 
   /// Ends an Apple security-scoped access session for [path].
-  Future<void> endScopedAccess({required String path}) async {
+  Future<void> endScopedAccess({required String path, String? holder}) async {
     final targetPath = _resolvePersistentAccessPath(path);
     if (targetPath == null) return;
-    await _engine.endScopedAccess(targetPath);
+    await _engine.endScopedAccess(targetPath, holder: holder);
   }
 
   /// Requests Android audio library permission through the platform bridge.

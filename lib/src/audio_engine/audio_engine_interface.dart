@@ -127,8 +127,15 @@ abstract class AudioEngine {
   Future<void> forgetPersistentAccess(String path);
   Future<bool> hasPersistentAccess(String path);
   Future<List<String>> listPersistentAccessPaths();
-  Future<bool> beginScopedAccess(String path);
-  Future<void> endScopedAccess(String path);
+
+  /// 打开 [path] 的安全作用域授权，记在 [holder] 名下。
+  ///
+  /// 原生侧按 (scope 路径, holder) 分账，[holder] 缺省用 `default`；
+  /// 调用方应传 [AppleFileAccessHolder] 里的常量，并保证 begin/end 成对同源。
+  Future<bool> beginScopedAccess(String path, {String? holder});
+
+  /// 只释放 [holder] 自己那份授权；全 holder 归零才真正关闭系统作用域。
+  Future<void> endScopedAccess(String path, {String? holder});
 
   // Native metadata updates
   Future<bool> updateTrackMetadata({

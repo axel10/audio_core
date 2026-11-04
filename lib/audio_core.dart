@@ -1,6 +1,7 @@
 library;
 
 export 'src/audio_converter.dart';
+export 'src/apple_file_access_holder.dart';
 
 export 'src/rust/api/simple_api.dart'
     hide FadeSettings, FadeMode, TrackMetadataUpdate, AudioDetails;

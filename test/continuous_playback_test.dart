@@ -62,13 +62,13 @@ class MockAudioEngine implements AudioEngine {
   }
 
   @override
-  Future<bool> beginScopedAccess(String path) async {
+  Future<bool> beginScopedAccess(String path, {String? holder}) async {
     scopedAccessPaths.add(path);
     return true;
   }
 
   @override
-  Future<void> endScopedAccess(String path) async {
+  Future<void> endScopedAccess(String path, {String? holder}) async {
     scopedAccessPaths.remove(path);
   }
 

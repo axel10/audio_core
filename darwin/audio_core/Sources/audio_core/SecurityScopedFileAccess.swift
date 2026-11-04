@@ -201,10 +201,21 @@ final class SecurityScopedBookmarkStore {
 
 final class SecurityScopedFileAccessCoordinator {
   private let bookmarkStore = SecurityScopedBookmarkStore()
-  private var activeAccessCounts: [String: Int] = [:]
+  /// key → (holder → 引用计数)。
+  ///
+  /// 打开方互不相同：扫描器持 root、播放链路持当前曲目、LAN 分享持分享目录、
+  /// 转码持输入输出。只用一个整数计数时任意一方的结束动作都会减到别人的份额上
+  /// ——分享接收端在 finally 里同时 end 「分享目录」和「落在该目录下的文件」，
+  /// 两次都落到同一个父 scope key，能把扫描器持有的 root 计数打到 0 而提前关闭；
+  /// 反过来播放链路每首歌 +1 又从不归还，让真正的关闭永远减不到 0。
+  /// 按 holder 分账后，只有打开它的那一方才能减掉自己那份，全部归零才真正 stop。
+  private var activeAccessHolders: [String: [String: Int]] = [:]
   private var activeAccessURLs: [String: URL] = [:]
   private var startedSecurityScope: [String: Bool] = [:]
   private let stateQueue = DispatchQueue(label: "audio_core.security_scoped_file_access")
+
+  /// 未声明 holder 的调用方（文件写入的临时授权、示例页等）。
+  static let defaultAccessHolder = "default"
 
   static func isCurrentSandboxPath(_ path: String) -> Bool {
     #if os(iOS)
@@ -283,7 +294,10 @@ final class SecurityScopedFileAccessCoordinator {
     }
 
     let (url, parentScopeURL) = try bookmarkStore.resolveURL(for: path)
-    _ = retainAccess(for: parentScopeURL ?? url)
+    _ = retainAccess(
+      for: parentScopeURL ?? url,
+      holder: Self.defaultAccessHolder
+    )
     _ = bookmarkStore.remember(url: url)
     return url
   }
@@ -333,18 +347,21 @@ final class SecurityScopedFileAccessCoordinator {
     }
 
     // Same reason as above: never standardize before starting the scope.
-    _ = retainAccess(for: url)
+    _ = retainAccess(for: url, holder: Self.defaultAccessHolder)
     _ = bookmarkStore.remember(url: url)
     return url
   }
 
-  /// Starts a security-scoped access session for [path].
+  /// Starts a security-scoped access session for [path] on behalf of [holder].
   ///
   /// Unlike [acquireAccess], the return value is authoritative: it reports
   /// whether the scope is really active, so callers can roll back a root path
   /// that would otherwise scan to zero files.
   @discardableResult
-  func beginScopedAccess(for path: String) -> Bool {
+  func beginScopedAccess(
+    for path: String,
+    holder: String = SecurityScopedFileAccessCoordinator.defaultAccessHolder
+  ) -> Bool {
     if Self.resolveSandboxInternalPath(path) != nil {
       return true
     }
@@ -352,7 +369,7 @@ final class SecurityScopedFileAccessCoordinator {
     guard let (url, parentScopeURL) = try? bookmarkStore.resolveURL(for: path) else {
       return false
     }
-    return retainAccess(for: parentScopeURL ?? url)
+    return retainAccess(for: parentScopeURL ?? url, holder: holder)
   }
 
   /// Starts the scope for `url` and registers the session only when it really
@@ -362,19 +379,18 @@ final class SecurityScopedFileAccessCoordinator {
   /// prevent a later retry (for example right after the user re-picks the
   /// folder) from ever succeeding.
   @discardableResult
-  private func retainAccess(for url: URL) -> Bool {
+  private func retainAccess(for url: URL, holder: String) -> Bool {
     let key = Self.key(for: url)
     var started = false
     stateQueue.sync {
-      if startedSecurityScope[key] == true {
-        activeAccessCounts[key, default: 0] += 1
-        started = true
-        return
+      if startedSecurityScope[key] != true {
+        guard url.startAccessingSecurityScopedResource() else { return }
+        activeAccessURLs[key] = url
+        startedSecurityScope[key] = true
       }
-      guard url.startAccessingSecurityScopedResource() else { return }
-      activeAccessURLs[key] = url
-      startedSecurityScope[key] = true
-      activeAccessCounts[key, default: 0] += 1
+      var counts = activeAccessHolders[key] ?? [:]
+      counts[holder, default: 0] += 1
+      activeAccessHolders[key] = counts
       started = true
     }
     return started
@@ -412,7 +428,10 @@ final class SecurityScopedFileAccessCoordinator {
     bookmarkStore.storedPaths()
   }
 
-  func releaseAccess(for path: String) {
+  func releaseAccess(
+    for path: String,
+    holder: String = SecurityScopedFileAccessCoordinator.defaultAccessHolder
+  ) {
     if Self.isCurrentSandboxPath(path) {
       return
     }
@@ -423,17 +442,20 @@ final class SecurityScopedFileAccessCoordinator {
       key = Self.key(forPath: path)
     }
     stateQueue.sync {
-      releaseAccessLocked(forKey: key)
+      releaseAccessLocked(forKey: key, holder: holder)
     }
   }
 
-  func releaseAccess(for url: URL) {
-    releaseAccess(for: url.path)
+  func releaseAccess(
+    for url: URL,
+    holder: String = SecurityScopedFileAccessCoordinator.defaultAccessHolder
+  ) {
+    releaseAccess(for: url.path, holder: holder)
   }
 
   func releaseAllAccess() {
     stateQueue.sync {
-      let keys = Array(activeAccessCounts.keys)
+      let keys = Array(activeAccessHolders.keys)
       for key in keys {
         releaseAllAccessLocked(forKey: key)
       }
@@ -446,16 +468,28 @@ final class SecurityScopedFileAccessCoordinator {
     return try body(url)
   }
 
-  private func releaseAccessLocked(forKey key: String) {
-    guard let count = activeAccessCounts[key] else { return }
+  /// 只减「[holder] 自己开的那一份」。
+  ///
+  /// 该 holder 没在这里打开过（或者已经减完）时直接返回：跨 holder 的误释放
+  /// 必须是 no-op，否则会把别人持有的 scope 提前关掉。只有一个 holder 计数
+  /// 归零不算结束，必须全部 holder 都放掉。
+  private func releaseAccessLocked(forKey key: String, holder: String) {
+    guard var counts = activeAccessHolders[key] else { return }
+    guard let current = counts[holder], current > 0 else { return }
 
-    let nextCount = count - 1
-    if nextCount > 0 {
-      activeAccessCounts[key] = nextCount
+    let next = current - 1
+    if next > 0 {
+      counts[holder] = next
+      activeAccessHolders[key] = counts
       return
     }
 
-    releaseAllAccessLocked(forKey: key)
+    counts.removeValue(forKey: holder)
+    if counts.isEmpty {
+      releaseAllAccessLocked(forKey: key)
+    } else {
+      activeAccessHolders[key] = counts
+    }
   }
 
   private func releaseAllAccessLocked(forKey key: String) {
@@ -463,7 +497,7 @@ final class SecurityScopedFileAccessCoordinator {
       url.stopAccessingSecurityScopedResource()
     }
 
-    activeAccessCounts[key] = nil
+    activeAccessHolders[key] = nil
     activeAccessURLs[key] = nil
     startedSecurityScope[key] = nil
   }

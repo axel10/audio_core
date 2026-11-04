@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import 'package:flutter/foundation.dart';
+import 'apple_file_access_holder.dart';
 import 'visualizer_player_controller.dart';
 import 'rust/api/simple.dart' as rust_api;
 
@@ -995,7 +996,10 @@ class AudioConverter {
     try {
       final bool? result = await _appleFileAccessChannel.invokeMethod<bool>(
         'beginScopedAccess',
-        <String, Object?>{'path': path},
+        <String, Object?>{
+          'path': path,
+          'holder': AppleFileAccessHolder.converter,
+        },
       );
       return result ?? false;
     } catch (_) {
@@ -1011,7 +1015,10 @@ class AudioConverter {
     try {
       await _appleFileAccessChannel.invokeMethod(
         'endScopedAccess',
-        <String, Object?>{'path': path},
+        <String, Object?>{
+          'path': path,
+          'holder': AppleFileAccessHolder.converter,
+        },
       );
     } catch (_) {
       // Best-effort cleanup.

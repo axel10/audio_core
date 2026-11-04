@@ -9,6 +9,7 @@ import '../rust/api/simple/equalizer.dart';
 import '../track_metadata.dart';
 import '../track_metadata_update.dart';
 import '../audio_details.dart';
+import '../apple_file_access_holder.dart';
 import 'audio_engine_interface.dart';
 import 'flutter_taglib_metadata_bridge.dart';
 import 'track_artwork_support.dart';
@@ -79,7 +80,7 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
     try {
       if (_isApple && path.isNotEmpty) {
         await registerPersistentAccess(path);
-        await beginScopedAccess(path);
+        await beginScopedAccess(path, holder: AppleFileAccessHolder.playback);
       }
       await rust.loadAudioFile(path: path);
     } catch (e, st) {
@@ -97,7 +98,7 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
     try {
       if (_isApple && path.isNotEmpty) {
         await registerPersistentAccess(path);
-        await beginScopedAccess(path);
+        await beginScopedAccess(path, holder: AppleFileAccessHolder.playback);
       }
       await rust.crossfadeToAudioFile(
         path: path,
@@ -122,7 +123,7 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
     try {
       if (_isApple && path.isNotEmpty) {
         await registerPersistentAccess(path);
-        await beginScopedAccess(path);
+        await beginScopedAccess(path, holder: AppleFileAccessHolder.playback);
       }
       final resolvedTargetVolume = (targetVolume ?? _currentVolume)
           .clamp(0.0, 1.0)
@@ -376,10 +377,11 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
-  Future<bool> beginScopedAccess(String path) async {
+  Future<bool> beginScopedAccess(String path, {String? holder}) async {
     if (_isApple) {
       final success = await _amberInvokeMethod<bool>('beginScopedAccess', {
         'path': path,
+        if (holder != null && holder.isNotEmpty) 'holder': holder,
       });
       return success ?? false;
     }
@@ -387,9 +389,12 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   }
 
   @override
-  Future<void> endScopedAccess(String path) async {
+  Future<void> endScopedAccess(String path, {String? holder}) async {
     if (_isApple) {
-      await _amberInvokeMethod<void>('endScopedAccess', {'path': path});
+      await _amberInvokeMethod<void>('endScopedAccess', {
+        'path': path,
+        if (holder != null && holder.isNotEmpty) 'holder': holder,
+      });
     }
   }
 
