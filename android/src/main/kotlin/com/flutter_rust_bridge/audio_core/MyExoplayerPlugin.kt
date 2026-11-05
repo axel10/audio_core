@@ -978,6 +978,16 @@ class MyExoplayerPlugin :
         )
     }
 
+    /**
+     * MediaStore 的音轨号没有统一格式：可能是 "3"、"3/12"，也可能是 0、空或 null。
+     * 目录代表封面只认正整数，统一在这里收敛，别把原始字符串丢给 Dart 侧各解一遍。
+     */
+    private fun parseTrackNumber(raw: String?): Int? {
+        if (raw.isNullOrBlank()) return null
+        val number = raw.trim().substringBefore('/').trim().toIntOrNull() ?: return null
+        return number.takeIf { it > 0 }
+    }
+
     private fun handleScanAudioLibrary(result: Result) {
         NativeLog.d(
             "AudioCore",
@@ -998,7 +1008,7 @@ class MyExoplayerPlugin :
             return
         }
 
-        val projection = arrayOf(
+        val projectionColumns = mutableListOf(
             MediaStore.Audio.Media._ID,
             MediaStore.Audio.Media.DISPLAY_NAME,
             MediaStore.Audio.Media.TITLE,
@@ -1010,7 +1020,15 @@ class MyExoplayerPlugin :
             MediaStore.Audio.Media.MIME_TYPE,
             MediaStore.Audio.Media.DATE_ADDED,
             MediaStore.Audio.Media.DATA,
+            // 音轨号是「目录代表封面」选曲的排序依据。老列所有版本都有；新列
+            // CD_TRACK_NUMBER 只有 API 30+ 存在，低版本把未知列放进 projection
+            // 会被 MediaStore 拒绝，所以按 SDK 条件添加。
+            MediaStore.Audio.Media.TRACK,
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            projectionColumns.add(MediaStore.MediaColumns.CD_TRACK_NUMBER)
+        }
+        val projection = projectionColumns.toTypedArray()
 
         val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC"
         val items = mutableListOf<Map<String, Any?>>()
@@ -1038,6 +1056,9 @@ class MyExoplayerPlugin :
             val mimeTypeIndex = cursor.getColumnIndex(MediaStore.Audio.Media.MIME_TYPE)
             val dateAddedIndex = cursor.getColumnIndex(MediaStore.Audio.Media.DATE_ADDED)
             val dataIndex = cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
+            // 列可能不存在（低版本 / 定制 ROM），getColumnIndex 返回 -1，读取前必须判。
+            val trackIndex = cursor.getColumnIndex(MediaStore.Audio.Media.TRACK)
+            val cdTrackIndex = cursor.getColumnIndex(MediaStore.MediaColumns.CD_TRACK_NUMBER)
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idIndex)
@@ -1059,6 +1080,13 @@ class MyExoplayerPlugin :
                     ?: dataPath?.substringBeforeLast('/', missingDelimiterValue = "")
                     ?: ""
 
+                // 新列优先，没填就退回老列；"3/12" / 0 / 空一律收敛成 null 或正整数。
+                val trackNumber = parseTrackNumber(
+                    if (cdTrackIndex >= 0) cursor.getString(cdTrackIndex) else null
+                ) ?: parseTrackNumber(
+                    if (trackIndex >= 0) cursor.getString(trackIndex) else null
+                )
+
                 items.add(
                     mapOf(
                         "id" to id.toString(),
@@ -1073,6 +1101,7 @@ class MyExoplayerPlugin :
                         "bucketDisplayName" to if (bucketNameIndex >= 0) cursor.getString(bucketNameIndex) else null,
                         "mimeType" to mimeType,
                         "dateAddedSeconds" to if (dateAddedIndex >= 0) cursor.getLong(dateAddedIndex) else null,
+                        "trackNumber" to trackNumber,
                     ),
                 )
             }

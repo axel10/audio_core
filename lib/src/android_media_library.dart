@@ -14,6 +14,7 @@ class AndroidMediaLibraryEntry {
     this.durationMs,
     this.bucketDisplayName,
     this.mimeType,
+    this.trackNumber,
   });
 
   final String id;
@@ -27,6 +28,12 @@ class AndroidMediaLibraryEntry {
   final int? durationMs;
   final String? bucketDisplayName;
   final String? mimeType;
+
+  /// MediaStore 里的音轨号（正整数）。
+  ///
+  /// 目录代表封面靠它决定「先试哪首歌」；没有标签或列未填充时为 null。
+  /// 与数据库读到的标签音轨号并存，由使用方决定优先级（DB 更权威）。
+  final int? trackNumber;
 
   Duration get duration => Duration(
     milliseconds: durationMs == null
@@ -78,8 +85,22 @@ class AndroidMediaLibraryEntry {
       durationMs: (map['durationMs'] as num?)?.toInt(),
       bucketDisplayName: map['bucketDisplayName']?.toString(),
       mimeType: map['mimeType']?.toString(),
+      trackNumber: _parseTrackNumber(map['trackNumber']),
     );
   }
+}
+
+/// 兼容旧版原生插件直接透传的原始值：可能是 `"3/12"`、0、空串或非法文本。
+int? _parseTrackNumber(Object? value) {
+  if (value == null) return null;
+  if (value is num) {
+    final parsed = value.toInt();
+    return parsed > 0 ? parsed : null;
+  }
+  final raw = value.toString().trim();
+  if (raw.isEmpty) return null;
+  final parsed = int.tryParse(raw.split('/').first.trim());
+  return (parsed != null && parsed > 0) ? parsed : null;
 }
 
 /// Strongly typed result for an Android media library scan.
