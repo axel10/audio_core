@@ -136,6 +136,17 @@ class EqualizerPanel extends StatelessWidget {
     EqualizerController equalizer,
     EqualizerConfig config,
   ) {
+    final bandCountOptions =
+        <int>{
+          5,
+          10,
+          15,
+          20,
+          31,
+          EqualizerController.maxEqualizerBands,
+          if (config.bandCount > 0) config.bandCount,
+        }.toList()..sort();
+
     return Column(
       children: [
         Row(
@@ -157,8 +168,10 @@ class EqualizerPanel extends StatelessWidget {
               children: [
                 Text('Bands', style: Theme.of(context).textTheme.labelLarge),
                 DropdownButton<int>(
-                  value: config.bandCount,
-                  items: [5, 10, 15, 20].map((int value) {
+                  value: bandCountOptions.contains(config.bandCount)
+                      ? config.bandCount
+                      : null,
+                  items: bandCountOptions.map((int value) {
                     return DropdownMenuItem<int>(
                       value: value,
                       child: Text('$value Bands'),

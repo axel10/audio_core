@@ -154,6 +154,7 @@ pub struct EqualizerShared {
     config: Mutex<EqualizerConfig>,
 }
 
+#[flutter_rust_bridge::frb(ignore)]
 impl EqualizerShared {
     pub fn new(config: EqualizerConfig) -> Arc<Self> {
         Arc::new(Self {
@@ -333,6 +334,7 @@ pub struct EqualizerProcessor {
     fade_weight: f32,
 }
 
+#[flutter_rust_bridge::frb(ignore)]
 impl EqualizerProcessor {
     pub fn new(shared: Arc<EqualizerShared>, channels: usize, sample_rate: u32) -> Self {
         let config = shared.current_config();

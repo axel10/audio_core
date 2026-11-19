@@ -141,6 +141,7 @@ class MyExoplayerPlugin :
         val player: ExoPlayer,
         val fftProcessor: FFTAudioProcessor,
         val cppEqualizerProcessor: CppEqualizerProcessor,
+        val rustReverbProcessor: RustReverbProcessor,
         var equalizer: Equalizer? = null,
         var bassBoost: BassBoost? = null,
         var volumeAnimator: VolumeFadeTask? = null,
@@ -371,6 +372,7 @@ class MyExoplayerPlugin :
         val safeContext = context!!
         val fftProcessor = FFTAudioProcessor(1024)
         val cppEqualizerProcessor = CppEqualizerProcessor()
+        val rustReverbProcessor = RustReverbProcessor()
         val renderersFactory = object : DefaultRenderersFactory(safeContext) {
             init {
                 // Keep the extension renderer in the normal position, but let
@@ -421,7 +423,7 @@ class MyExoplayerPlugin :
                 enableAudioTrackPlaybackParams: Boolean
             ): AudioSink? {
                 val defaultSink = DefaultAudioSink.Builder(context)
-                    .setAudioProcessors(arrayOf(cppEqualizerProcessor, fftProcessor))
+                    .setAudioProcessors(arrayOf(cppEqualizerProcessor, rustReverbProcessor, fftProcessor))
                     .build()
                 val usbMgr = usbExclusiveManager
                 return if (usbMgr != null) {
@@ -460,7 +462,7 @@ class MyExoplayerPlugin :
         player.addAnalyticsListener(EventLogger())
         cppEqualizerProcessor.setNumBands(10)
         
-        val ctx = PlayerContext(id, player, fftProcessor, cppEqualizerProcessor)
+        val ctx = PlayerContext(id, player, fftProcessor, cppEqualizerProcessor, rustReverbProcessor)
         fftProcessor.updateGroupingOptions(
             fftGroupingConfig.frequencyGroups,
             fftGroupingConfig.skipHighFrequencyGroups,
@@ -933,6 +935,29 @@ class MyExoplayerPlugin :
                     ctx.equalizer?.enabled = false
                     ctx.bassBoost?.enabled = false
                 }
+                result.success(null)
+            }
+            "setReverbConfig" -> {
+                val enabled = call.argument<Boolean>("enabled") ?: false
+                val algorithm = call.argument<Int>("algorithm") ?: 0
+                val dryMix = call.argument<Double>("dryMix")?.toFloat() ?: 0.85f
+                val wetMix = call.argument<Double>("wetMix")?.toFloat() ?: 0.75f
+                val roomSize = call.argument<Double>("roomSize")?.toFloat() ?: 0.9f
+                val damping = call.argument<Double>("damping")?.toFloat() ?: 0.4f
+                val width = call.argument<Double>("width")?.toFloat() ?: 0.75f
+                val timeSeconds = call.argument<Double>("timeSeconds")?.toFloat() ?: 2.8f
+                val freeze = call.argument<Boolean>("freeze") ?: false
+                ctx.rustReverbProcessor.setConfig(
+                    enabled = enabled,
+                    algorithm = algorithm,
+                    dryMix = dryMix,
+                    wetMix = wetMix,
+                    roomSize = roomSize,
+                    damping = damping,
+                    width = width,
+                    timeSeconds = timeSeconds,
+                    freeze = freeze,
+                )
                 result.success(null)
             }
             "getSystemEqualizerParams" -> {
@@ -1517,6 +1542,7 @@ class MyExoplayerPlugin :
         ctx.equalizer?.release()
         ctx.bassBoost?.release()
         ctx.cppEqualizerProcessor.release()
+        ctx.rustReverbProcessor.release()
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../fft_processor.dart';
 import '../rust/api/simple/equalizer.dart';
+import '../rust/api/simple/reverb.dart';
 import '../rust/api/simple_api.dart' as rust;
 import '../track_metadata.dart';
 import '../track_metadata_update.dart';
@@ -25,6 +26,7 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   double _currentVolume = 1.0;
   final String _activePlayerId = 'main';
   EqualizerConfig? _lastConfig;
+  ReverbConfig? _lastReverbConfig;
   bool _isPlaying = false;
   List<double> _latestFftCache = const <double>[];
   _PendingAndroidEdit? _pendingEdit;
@@ -430,6 +432,39 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   Future<EqualizerConfig> getEqualizerConfig() async {
     if (_lastConfig != null) return _lastConfig!;
     throw UnimplementedError('getEqualizerConfig not available on Android yet');
+  }
+
+  @override
+  Future<void> setReverbConfig(ReverbConfig config) async {
+    _lastReverbConfig = config;
+    await _channel.invokeMethod('setReverbConfig', {
+      'playerId': _activePlayerId,
+      'enabled': config.enabled,
+      'algorithm': config.algorithm.index,
+      'dryMix': config.dryMix,
+      'wetMix': config.wetMix,
+      'roomSize': config.roomSize,
+      'damping': config.damping,
+      'width': config.width,
+      'timeSeconds': config.timeSeconds,
+      'freeze': config.freeze,
+    });
+  }
+
+  @override
+  Future<ReverbConfig> getReverbConfig() async {
+    return _lastReverbConfig ??
+        const ReverbConfig(
+          enabled: false,
+          algorithm: ReverbAlgorithm.freeverb,
+          dryMix: 0.85,
+          wetMix: 0.75,
+          roomSize: 0.9,
+          damping: 0.4,
+          width: 0.75,
+          timeSeconds: 2.8,
+          freeze: false,
+        );
   }
 
   @override

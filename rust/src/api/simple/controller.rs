@@ -1,4 +1,6 @@
 use super::equalizer::{EqSource, EqualizerConfig, EqualizerShared};
+use super::reverb::ReverbConfig;
+use crate::reverb_dsp::{ReverbShared, ReverbSource};
 use super::fft::{clear_fft_buffer, FftSource, RAW_FFT_BINS};
 use super::resampler::normalize_audio_source;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
@@ -376,6 +378,7 @@ struct PlayerController {
     current_deck: Option<PlaybackDeck>,
     incoming_deck: Option<PlaybackDeck>,
     equalizer: Arc<EqualizerShared>,
+    reverb: Arc<ReverbShared>,
     playback_speed: Arc<SpeedShared>,
     volume: f32,
     transition_generation: u64,
@@ -693,6 +696,7 @@ impl PlayerController {
             current_deck: None,
             incoming_deck: None,
             equalizer: EqualizerShared::new(EqualizerConfig::default()),
+            reverb: ReverbShared::new(ReverbConfig::default()),
             playback_speed: Arc::new(SpeedShared::new(1.0)),
             volume: 1.0,
             transition_generation: 0,
@@ -995,7 +999,8 @@ impl PlayerController {
         let post_prefetch_source: Box<dyn Source<Item = f32> + Send> = if is_bit_perfect {
             prefetched_source
         } else {
-            Box::new(EqSource::new(prefetched_source, Arc::clone(&self.equalizer)))
+            let eq_source = EqSource::new(prefetched_source, Arc::clone(&self.equalizer));
+            Box::new(ReverbSource::new(eq_source, Arc::clone(&self.reverb)))
         };
 
         let speed_source: Box<dyn Source<Item = f32> + Send> = if is_bit_perfect {
@@ -2383,6 +2388,22 @@ pub fn set_audio_equalizer_config(config: EqualizerConfig) -> Result<(), String>
         .map_err(|_| "player lock poisoned".to_string())?;
 
     c.equalizer.set_config(config);
+    Ok(())
+}
+
+pub fn get_audio_reverb_config() -> ReverbConfig {
+    controller()
+        .lock()
+        .map(|c| c.reverb.current_config())
+        .unwrap_or_default()
+}
+
+pub fn set_audio_reverb_config(config: ReverbConfig) -> Result<(), String> {
+    let c = controller()
+        .lock()
+        .map_err(|_| "player lock poisoned".to_string())?;
+
+    c.reverb.set_config(config);
     Ok(())
 }
 

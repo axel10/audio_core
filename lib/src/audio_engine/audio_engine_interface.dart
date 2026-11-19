@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import '../fft_processor.dart';
 import '../track_artwork.dart';
 import '../rust/api/simple/equalizer.dart';
+import '../rust/api/simple/reverb.dart';
 import '../rust/api/simple/controller.dart' show PlaybackErrorKind;
 import '../rust/api/simple_api.dart' as rust;
 import '../track_metadata.dart';
@@ -105,6 +106,8 @@ abstract class AudioEngine {
   // Effects
   Future<void> setEqualizerConfig(EqualizerConfig config);
   Future<EqualizerConfig> getEqualizerConfig();
+  Future<void> setReverbConfig(ReverbConfig config);
+  Future<ReverbConfig> getReverbConfig();
 
   // Platform specific features (optional or capabilities-based)
   bool get supportsCrossfade;

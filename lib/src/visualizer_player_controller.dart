@@ -16,6 +16,7 @@ import 'rust/api/simple/controller.dart' as rust_controller;
 import 'rust/frb_generated.dart';
 import 'fft_processor.dart';
 import 'player_state_snapshot.dart';
+import 'rust/api/simple/reverb.dart';
 import 'equalizer_controller.dart';
 import 'apple_file_access_holder.dart';
 import 'audio_engine/audio_engine_interface.dart';
@@ -1508,6 +1509,13 @@ class AudioCoreController extends ChangeNotifier
   void resetEqualizerDefaults() => equalizer.resetDefaults();
   List<double> getEqualizerBandCenters({int? bandCount}) =>
       equalizer.getBandCenters(bandCount: bandCount);
+
+  Future<void> setReverbConfig(ReverbConfig config) async {
+    await _engine.setReverbConfig(config);
+    notifyListeners();
+  }
+
+  Future<ReverbConfig> getReverbConfig() => _engine.getReverbConfig();
 
   Future<void> removeAllTags({String? path}) async {
     final targetPath = path ?? player.currentPath;

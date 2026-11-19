@@ -13,6 +13,7 @@ import 'api/simple/controller.dart';
 import 'api/simple/equalizer.dart';
 import 'api/simple/metadata.dart';
 import 'api/simple/palette.dart';
+import 'api/simple/reverb.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'frb_generated.dart';
@@ -129,6 +130,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int dco_decode_box_autoadd_i_32(dynamic raw);
 
   @protected
+  PlaybackErrorKind dco_decode_box_autoadd_playback_error_kind(dynamic raw);
+
+  @protected
+  ReverbConfig dco_decode_box_autoadd_reverb_config(dynamic raw);
+
+  @protected
   TrackMetadataUpdate dco_decode_box_autoadd_track_metadata_update(dynamic raw);
 
   @protected
@@ -193,13 +200,27 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int? dco_decode_opt_box_autoadd_i_32(dynamic raw);
 
   @protected
+  PlaybackErrorKind? dco_decode_opt_box_autoadd_playback_error_kind(
+    dynamic raw,
+  );
+
+  @protected
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
 
   @protected
   Uint8List? dco_decode_opt_list_prim_u_8_strict(dynamic raw);
 
   @protected
+  PlaybackErrorKind dco_decode_playback_error_kind(dynamic raw);
+
+  @protected
   PlaybackState dco_decode_playback_state(dynamic raw);
+
+  @protected
+  ReverbAlgorithm dco_decode_reverb_algorithm(dynamic raw);
+
+  @protected
+  ReverbConfig dco_decode_reverb_config(dynamic raw);
 
   @protected
   TrackArtworkResult dco_decode_track_artwork_result(dynamic raw);
@@ -320,6 +341,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int sse_decode_box_autoadd_i_32(SseDeserializer deserializer);
 
   @protected
+  PlaybackErrorKind sse_decode_box_autoadd_playback_error_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  ReverbConfig sse_decode_box_autoadd_reverb_config(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   TrackMetadataUpdate sse_decode_box_autoadd_track_metadata_update(
     SseDeserializer deserializer,
   );
@@ -392,13 +423,29 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int? sse_decode_opt_box_autoadd_i_32(SseDeserializer deserializer);
 
   @protected
+  PlaybackErrorKind? sse_decode_opt_box_autoadd_playback_error_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
   Uint8List? sse_decode_opt_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
+  PlaybackErrorKind sse_decode_playback_error_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   PlaybackState sse_decode_playback_state(SseDeserializer deserializer);
+
+  @protected
+  ReverbAlgorithm sse_decode_reverb_algorithm(SseDeserializer deserializer);
+
+  @protected
+  ReverbConfig sse_decode_reverb_config(SseDeserializer deserializer);
 
   @protected
   TrackArtworkResult sse_decode_track_artwork_result(
@@ -545,6 +592,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_box_autoadd_i_32(int self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_playback_error_kind(
+    PlaybackErrorKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_reverb_config(
+    ReverbConfig self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_track_metadata_update(
     TrackMetadataUpdate self,
     SseSerializer serializer,
@@ -633,6 +692,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_box_autoadd_i_32(int? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_playback_error_kind(
+    PlaybackErrorKind? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
 
   @protected
@@ -642,7 +707,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_playback_error_kind(
+    PlaybackErrorKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_playback_state(PlaybackState self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_reverb_algorithm(
+    ReverbAlgorithm self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_reverb_config(ReverbConfig self, SseSerializer serializer);
 
   @protected
   void sse_encode_track_artwork_result(

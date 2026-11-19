@@ -1,5 +1,6 @@
 pub mod api;
 mod frb_generated;
+pub mod reverb_dsp;
 
 #[cfg(target_os = "android")]
 pub mod usb_audio;

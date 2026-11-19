@@ -6,10 +6,11 @@
 import '../../frb_generated.dart';
 import 'equalizer.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'reverb.dart';
 
-// These functions are ignored because they are not marked as `pub`: `_snapshot_loaded_path`, `any_deck_playing`, `apply_master_volume`, `channel_count`, `clear_pending_playback_state`, `clear`, `compute_rms`, `config`, `controller`, `create_player`, `describe_output_device`, `dispose_audio`, `drive_crossfade`, `drive_volume_fade`, `engine`, `ensure_audio_output`, `finish_file_write`, `get_audio_waveform_fallback_with_pcm`, `get_desired_exclusive_format`, `into_source`, `invalidate_waveform_cache`, `is_playing`, `mark_track_ended`, `mix_to_mono_samples`, `mixer`, `new`, `new`, `new`, `normalize_playback_speed`, `open_current_default_output`, `open_deck_from_backend`, `open_deck_from_path`, `open_symphonia`, `open`, `open`, `pause_all`, `pause`, `play_all`, `play`, `playback_position`, `playback_state_snapshot`, `poll_output_device`, `prepare_for_file_write`, `public_deck`, `public_path`, `public_position`, `record_fft_request`, `reduce_waveform_chunks`, `replace_current_from_backend`, `replace_current_from_path`, `report_audio_stream_error`, `round_waveform_precision`, `sample_rate`, `seek_to`, `seek_to`, `set_master_volume`, `settle_to_public_deck`, `snapshot_playback_state`, `start_crossfade_with_backend`, `start_crossfade`, `start_default_output_monitor`, `start_volume_fade`, `stress_diagnostic_details`, `toggle_all`, `total_duration`, `total_duration`, `warm_waveform_cache_for_public_path`
+// These functions are ignored because they are not marked as `pub`: `_snapshot_loaded_path`, `any_deck_playing`, `apply_master_volume`, `channel_count`, `clear_last_error`, `clear_pending_playback_state`, `clear`, `compute_rms`, `config`, `controller`, `create_player`, `describe_output_device`, `dispose_audio`, `drive_crossfade`, `drive_volume_fade`, `engine`, `ensure_audio_output`, `finish_file_write`, `get_audio_waveform_fallback_with_pcm`, `get_desired_exclusive_format`, `into_source`, `invalidate_waveform_cache`, `is_playing`, `mark_track_ended`, `mix_to_mono_samples`, `mixer`, `new`, `new`, `new`, `normalize_playback_speed`, `open_current_default_output`, `open_deck_from_backend`, `open_deck_from_path`, `open_symphonia`, `open`, `open`, `pause_all`, `pause`, `play_all`, `play`, `playback_position`, `playback_state_snapshot`, `poll_output_device`, `prepare_for_file_write`, `public_deck`, `public_path`, `public_position`, `record_fft_request`, `reduce_waveform_chunks`, `replace_current_from_backend`, `replace_current_from_path`, `report_audio_stream_error`, `round_waveform_precision`, `sample_rate`, `seek_to`, `seek_to`, `set_last_error`, `set_master_volume`, `settle_to_public_deck`, `snapshot_playback_state`, `start_crossfade_with_backend`, `start_crossfade`, `start_default_output_monitor`, `start_volume_fade`, `stress_diagnostic_details`, `toggle_all`, `total_duration`, `total_duration`, `warm_waveform_cache_for_public_path`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `DecoderBackend`, `EndNotifySource`, `FfmpegAudioSource`, `OutputSinkConfig`, `OutputSink`, `PendingEdit`, `PlaybackDeck`, `PlayerController`, `PrefetchSource`, `SpeedSource`, `SpeedState`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_receiver_is_total_eq`, `channels`, `channels`, `channels`, `channels`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_span_len`, `current_span_len`, `current_span_len`, `current_span_len`, `drop`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `next`, `next`, `next`, `next`, `sample_rate`, `sample_rate`, `sample_rate`, `sample_rate`, `size_hint`, `total_duration`, `total_duration`, `total_duration`, `total_duration`, `try_seek`, `try_seek`, `try_seek`, `try_seek`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `channels`, `channels`, `channels`, `channels`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_span_len`, `current_span_len`, `current_span_len`, `current_span_len`, `drop`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `next`, `next`, `next`, `next`, `sample_rate`, `sample_rate`, `sample_rate`, `sample_rate`, `size_hint`, `total_duration`, `total_duration`, `total_duration`, `total_duration`, `try_seek`, `try_seek`, `try_seek`, `try_seek`
 // These functions are ignored (category: IgnoreBecauseOwnerTyShouldIgnore): `new`
 
 Future<Float32List> getAudioPcm({String? path, required BigInt sampleStride}) =>
@@ -79,6 +80,14 @@ Future<void> setAudioEqualizerConfig({required EqualizerConfig config}) =>
     RustLib.instance.api.crateApiSimpleControllerSetAudioEqualizerConfig(
       config: config,
     );
+
+Future<ReverbConfig> getAudioReverbConfig() =>
+    RustLib.instance.api.crateApiSimpleControllerGetAudioReverbConfig();
+
+Future<void> setAudioReverbConfig({required ReverbConfig config}) => RustLib
+    .instance
+    .api
+    .crateApiSimpleControllerSetAudioReverbConfig(config: config);
 
 Future<void> disposeAudio() =>
     RustLib.instance.api.crateApiSimpleControllerDisposeAudio();
@@ -215,18 +224,6 @@ enum AudioOutputMode {
 
 enum FadeMode { sequential, crossfade }
 
-/// 播放错误归属的层级。
-///
-/// 输出设备错误（切默认设备、拔耳机、独占流被抢占）由内核的设备监视器自行恢复，
-/// **不能**当成曲目问题上报，否则上层会把「音乐还在放」的情况显示成「歌曲已损坏」。
-enum PlaybackErrorKind {
-  /// 曲目层面的错误（解码失败、文件不存在/无法打开）。
-  track,
-
-  /// 输出设备层面的错误，可由 `poll_output_device` / `play_all` 自动恢复。
-  outputDevice,
-}
-
 class FadeSettings {
   final bool fadeOnSwitch;
   final bool fadeOnPauseResume;
@@ -259,6 +256,21 @@ class FadeSettings {
           fadeOnPauseResume == other.fadeOnPauseResume &&
           durationMs == other.durationMs &&
           mode == other.mode;
+}
+
+/// 播放错误归属的层级。
+///
+/// 输出设备错误（切默认设备、拔耳机、独占流被抢占）由内核的设备监视器自行恢复，
+/// **不能**当成曲目问题上报，否则上层会把「音乐还在放」的情况显示成「歌曲已损坏」。
+enum PlaybackErrorKind {
+  /// 曲目层面的错误（解码失败、文件不存在/无法打开）。
+  track,
+
+  /// 输出设备层面的错误，可由 `poll_output_device` / `play_all` 自动恢复。
+  outputDevice;
+
+  static Future<PlaybackErrorKind> default_() =>
+      RustLib.instance.api.crateApiSimpleControllerPlaybackErrorKindDefault();
 }
 
 class PlaybackState {

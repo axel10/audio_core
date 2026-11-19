@@ -6,6 +6,7 @@ import '../fft_processor.dart';
 import '../rust/api/simple_api.dart' as rust;
 import '../rust/api/simple/controller.dart' show PlaybackErrorKind;
 import '../rust/api/simple/equalizer.dart';
+import '../rust/api/simple/reverb.dart';
 import '../track_metadata.dart';
 import '../track_metadata_update.dart';
 import '../audio_details.dart';
@@ -295,6 +296,13 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
   @override
   Future<EqualizerConfig> getEqualizerConfig() =>
       rust.getAudioEqualizerConfig();
+
+  @override
+  Future<void> setReverbConfig(ReverbConfig config) =>
+      rust.setAudioReverbConfig(config: config);
+
+  @override
+  Future<ReverbConfig> getReverbConfig() => rust.getAudioReverbConfig();
 
   @override
   bool get supportsCrossfade => true;

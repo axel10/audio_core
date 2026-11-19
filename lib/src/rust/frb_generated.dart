@@ -10,6 +10,7 @@ import 'api/simple/controller.dart';
 import 'api/simple/equalizer.dart';
 import 'api/simple/metadata.dart';
 import 'api/simple/palette.dart';
+import 'api/simple/reverb.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'frb_generated.dart';
@@ -72,7 +73,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => 499563580;
+  int get rustContentHash => 627184992;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -200,6 +201,8 @@ abstract class RustLibApi extends BaseApi {
 
   Future<PlatformInt64> crateApiSimpleControllerGetAudioPositionMs();
 
+  Future<ReverbConfig> crateApiSimpleControllerGetAudioReverbConfig();
+
   Future<Float64List> crateApiSimpleControllerGetAudioWaveform({
     String? path,
     required BigInt expectedChunks,
@@ -242,11 +245,23 @@ abstract class RustLibApi extends BaseApi {
     required PlatformInt64 fadeDurationMs,
   });
 
+  Future<PlaybackErrorKind> crateApiSimpleControllerPlaybackErrorKindDefault();
+
   Future<PlaybackState> crateApiSimpleControllerPlaybackStateDefault();
 
   Future<void> crateApiSimpleControllerPrepareForFileWrite();
 
   Future<void> crateApiSimpleMetadataRemoveAllTags({required String path});
+
+  Future<int> crateApiSimpleReverbReverbAlgorithmAsI32({
+    required ReverbAlgorithm that,
+  });
+
+  Future<ReverbAlgorithm> crateApiSimpleReverbReverbAlgorithmFromI32({
+    required int value,
+  });
+
+  Future<ReverbConfig> crateApiSimpleReverbReverbConfigDefault();
 
   Future<void> crateApiSimpleControllerSeekAudioMs({
     required PlatformInt64 positionMs,
@@ -261,6 +276,10 @@ abstract class RustLibApi extends BaseApi {
     String? deviceId,
     required bool releaseOnPause,
     required bool bitPerfect,
+  });
+
+  Future<void> crateApiSimpleControllerSetAudioReverbConfig({
+    required ReverbConfig config,
   });
 
   Future<void> crateApiSimpleControllerSetAudioVolume({required double volume});
@@ -1373,6 +1392,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "get_audio_position_ms", argNames: []);
 
   @override
+  Future<ReverbConfig> crateApiSimpleControllerGetAudioReverbConfig() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 32,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_reverb_config,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSimpleControllerGetAudioReverbConfigConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSimpleControllerGetAudioReverbConfigConstMeta =>
+      const TaskConstMeta(debugName: "get_audio_reverb_config", argNames: []);
+
+  @override
   Future<Float64List> crateApiSimpleControllerGetAudioWaveform({
     String? path,
     required BigInt expectedChunks,
@@ -1388,7 +1434,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 32,
+            funcId: 33,
             port: port_,
           );
         },
@@ -1415,7 +1461,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 33)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 34)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -1437,7 +1483,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 34)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 35)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -1462,7 +1508,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 35,
+            funcId: 36,
             port: port_,
           );
         },
@@ -1489,7 +1535,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 36,
+            funcId: 37,
             port: port_,
           );
         },
@@ -1516,7 +1562,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 37,
+            funcId: 38,
             port: port_,
           );
         },
@@ -1546,7 +1592,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 38,
+            funcId: 39,
             port: port_,
           );
         },
@@ -1571,7 +1617,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(name, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 39)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 40)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -1594,7 +1640,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(name, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 40)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 41)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -1619,7 +1665,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 41,
+            funcId: 42,
             port: port_,
           );
         },
@@ -1646,7 +1692,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 42,
+            funcId: 43,
             port: port_,
           );
         },
@@ -1673,7 +1719,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 43,
+            funcId: 44,
             port: port_,
           );
         },
@@ -1700,7 +1746,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 44,
+            funcId: 45,
             port: port_,
           );
         },
@@ -1728,7 +1774,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 45,
+            funcId: 46,
             port: port_,
           );
         },
@@ -1758,7 +1804,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 46,
+            funcId: 47,
             port: port_,
           );
         },
@@ -1791,7 +1837,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 47,
+            funcId: 48,
             port: port_,
           );
         },
@@ -1813,6 +1859,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<PlaybackErrorKind> crateApiSimpleControllerPlaybackErrorKindDefault() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 49,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_playback_error_kind,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSimpleControllerPlaybackErrorKindDefaultConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateApiSimpleControllerPlaybackErrorKindDefaultConstMeta =>
+      const TaskConstMeta(
+        debugName: "playback_error_kind_default",
+        argNames: [],
+      );
+
+  @override
   Future<PlaybackState> crateApiSimpleControllerPlaybackStateDefault() {
     return handler.executeNormal(
       NormalTask(
@@ -1821,7 +1898,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 48,
+            funcId: 50,
             port: port_,
           );
         },
@@ -1848,7 +1925,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 49,
+            funcId: 51,
             port: port_,
           );
         },
@@ -1876,7 +1953,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 50,
+            funcId: 52,
             port: port_,
           );
         },
@@ -1895,6 +1972,99 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "remove_all_tags", argNames: ["path"]);
 
   @override
+  Future<int> crateApiSimpleReverbReverbAlgorithmAsI32({
+    required ReverbAlgorithm that,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_reverb_algorithm(that, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 53,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_i_32,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSimpleReverbReverbAlgorithmAsI32ConstMeta,
+        argValues: [that],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSimpleReverbReverbAlgorithmAsI32ConstMeta =>
+      const TaskConstMeta(
+        debugName: "reverb_algorithm_as_i32",
+        argNames: ["that"],
+      );
+
+  @override
+  Future<ReverbAlgorithm> crateApiSimpleReverbReverbAlgorithmFromI32({
+    required int value,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_32(value, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 54,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_reverb_algorithm,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSimpleReverbReverbAlgorithmFromI32ConstMeta,
+        argValues: [value],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSimpleReverbReverbAlgorithmFromI32ConstMeta =>
+      const TaskConstMeta(
+        debugName: "reverb_algorithm_from_i32",
+        argNames: ["value"],
+      );
+
+  @override
+  Future<ReverbConfig> crateApiSimpleReverbReverbConfigDefault() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 55,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_reverb_config,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSimpleReverbReverbConfigDefaultConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSimpleReverbReverbConfigDefaultConstMeta =>
+      const TaskConstMeta(debugName: "reverb_config_default", argNames: []);
+
+  @override
   Future<void> crateApiSimpleControllerSeekAudioMs({
     required PlatformInt64 positionMs,
   }) {
@@ -1906,7 +2076,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 51,
+            funcId: 56,
             port: port_,
           );
         },
@@ -1936,7 +2106,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 52,
+            funcId: 57,
             port: port_,
           );
         },
@@ -1975,7 +2145,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 53,
+            funcId: 58,
             port: port_,
           );
         },
@@ -1997,6 +2167,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiSimpleControllerSetAudioReverbConfig({
+    required ReverbConfig config,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_reverb_config(config, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 59,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiSimpleControllerSetAudioReverbConfigConstMeta,
+        argValues: [config],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSimpleControllerSetAudioReverbConfigConstMeta =>
+      const TaskConstMeta(
+        debugName: "set_audio_reverb_config",
+        argNames: ["config"],
+      );
+
+  @override
   Future<void> crateApiSimpleControllerSetAudioVolume({
     required double volume,
   }) {
@@ -2008,7 +2211,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 54,
+            funcId: 60,
             port: port_,
           );
         },
@@ -2038,7 +2241,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 55,
+            funcId: 61,
             port: port_,
           );
         },
@@ -2064,7 +2267,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_StreamSink_playback_state_Sse(sink, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 56)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 62)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_unit,
@@ -2093,7 +2296,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 57,
+            funcId: 63,
             port: port_,
           );
         },
@@ -2120,7 +2323,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 58,
+            funcId: 64,
             port: port_,
           );
         },
@@ -2151,7 +2354,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 59,
+            funcId: 65,
             port: port_,
           );
         },
@@ -2182,7 +2385,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 60,
+            funcId: 66,
             port: port_,
           );
         },
@@ -2214,7 +2417,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 61,
+            funcId: 67,
             port: port_,
           );
         },
@@ -2405,18 +2608,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  PlaybackErrorKind dco_decode_playback_error_kind(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return PlaybackErrorKind.values[raw as int];
-  }
-
-  @protected
-  PlaybackErrorKind? dco_decode_opt_playback_error_kind(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return raw == null ? null : dco_decode_playback_error_kind(raw);
-  }
-
-  @protected
   bool dco_decode_bool(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as bool;
@@ -2451,6 +2642,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   int dco_decode_box_autoadd_i_32(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as int;
+  }
+
+  @protected
+  PlaybackErrorKind dco_decode_box_autoadd_playback_error_kind(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_playback_error_kind(raw);
+  }
+
+  @protected
+  ReverbConfig dco_decode_box_autoadd_reverb_config(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_reverb_config(raw);
   }
 
   @protected
@@ -2605,6 +2808,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlaybackErrorKind? dco_decode_opt_box_autoadd_playback_error_kind(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_playback_error_kind(raw);
+  }
+
+  @protected
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_u_32(raw);
@@ -2614,6 +2825,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Uint8List? dco_decode_opt_list_prim_u_8_strict(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_list_prim_u_8_strict(raw);
+  }
+
+  @protected
+  PlaybackErrorKind dco_decode_playback_error_kind(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return PlaybackErrorKind.values[raw as int];
   }
 
   @protected
@@ -2630,7 +2847,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       volume: dco_decode_f_32(arr[4]),
       path: dco_decode_opt_String(arr[5]),
       error: dco_decode_opt_String(arr[6]),
-      errorKind: dco_decode_opt_playback_error_kind(arr[7]),
+      errorKind: dco_decode_opt_box_autoadd_playback_error_kind(arr[7]),
+    );
+  }
+
+  @protected
+  ReverbAlgorithm dco_decode_reverb_algorithm(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return ReverbAlgorithm.values[raw as int];
+  }
+
+  @protected
+  ReverbConfig dco_decode_reverb_config(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    return ReverbConfig(
+      enabled: dco_decode_bool(arr[0]),
+      algorithm: dco_decode_reverb_algorithm(arr[1]),
+      dryMix: dco_decode_f_32(arr[2]),
+      wetMix: dco_decode_f_32(arr[3]),
+      roomSize: dco_decode_f_32(arr[4]),
+      damping: dco_decode_f_32(arr[5]),
+      width: dco_decode_f_32(arr[6]),
+      timeSeconds: dco_decode_f_32(arr[7]),
+      freeze: dco_decode_bool(arr[8]),
     );
   }
 
@@ -2904,27 +3146,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  PlaybackErrorKind sse_decode_playback_error_kind(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var inner = sse_decode_i_32(deserializer);
-    return PlaybackErrorKind.values[inner];
-  }
-
-  @protected
-  PlaybackErrorKind? sse_decode_opt_playback_error_kind(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    if (sse_decode_bool(deserializer)) {
-      return (sse_decode_playback_error_kind(deserializer));
-    } else {
-      return null;
-    }
-  }
-
-  @protected
   bool sse_decode_bool(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint8() != 0;
@@ -2961,6 +3182,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   int sse_decode_box_autoadd_i_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_i_32(deserializer));
+  }
+
+  @protected
+  PlaybackErrorKind sse_decode_box_autoadd_playback_error_kind(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_playback_error_kind(deserializer));
+  }
+
+  @protected
+  ReverbConfig sse_decode_box_autoadd_reverb_config(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_reverb_config(deserializer));
   }
 
   @protected
@@ -3167,6 +3404,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlaybackErrorKind? sse_decode_opt_box_autoadd_playback_error_kind(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_playback_error_kind(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -3189,6 +3439,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlaybackErrorKind sse_decode_playback_error_kind(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return PlaybackErrorKind.values[inner];
+  }
+
+  @protected
   PlaybackState sse_decode_playback_state(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_playbackState = sse_decode_opt_String(deserializer);
@@ -3198,7 +3457,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_volume = sse_decode_f_32(deserializer);
     var var_path = sse_decode_opt_String(deserializer);
     var var_error = sse_decode_opt_String(deserializer);
-    var var_errorKind = sse_decode_opt_playback_error_kind(deserializer);
+    var var_errorKind = sse_decode_opt_box_autoadd_playback_error_kind(
+      deserializer,
+    );
     return PlaybackState(
       playbackState: var_playbackState,
       positionMs: var_positionMs,
@@ -3208,6 +3469,38 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       path: var_path,
       error: var_error,
       errorKind: var_errorKind,
+    );
+  }
+
+  @protected
+  ReverbAlgorithm sse_decode_reverb_algorithm(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return ReverbAlgorithm.values[inner];
+  }
+
+  @protected
+  ReverbConfig sse_decode_reverb_config(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_enabled = sse_decode_bool(deserializer);
+    var var_algorithm = sse_decode_reverb_algorithm(deserializer);
+    var var_dryMix = sse_decode_f_32(deserializer);
+    var var_wetMix = sse_decode_f_32(deserializer);
+    var var_roomSize = sse_decode_f_32(deserializer);
+    var var_damping = sse_decode_f_32(deserializer);
+    var var_width = sse_decode_f_32(deserializer);
+    var var_timeSeconds = sse_decode_f_32(deserializer);
+    var var_freeze = sse_decode_bool(deserializer);
+    return ReverbConfig(
+      enabled: var_enabled,
+      algorithm: var_algorithm,
+      dryMix: var_dryMix,
+      wetMix: var_wetMix,
+      roomSize: var_roomSize,
+      damping: var_damping,
+      width: var_width,
+      timeSeconds: var_timeSeconds,
+      freeze: var_freeze,
     );
   }
 
@@ -3512,28 +3805,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_playback_error_kind(
-    PlaybackErrorKind self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.index, serializer);
-  }
-
-  @protected
-  void sse_encode_opt_playback_error_kind(
-    PlaybackErrorKind? self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    sse_encode_bool(self != null, serializer);
-    if (self != null) {
-      sse_encode_playback_error_kind(self, serializer);
-    }
-  }
-
-  @protected
   void sse_encode_bool(bool self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint8(self ? 1 : 0);
@@ -3574,6 +3845,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_box_autoadd_i_32(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_playback_error_kind(
+    PlaybackErrorKind self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_playback_error_kind(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_reverb_config(
+    ReverbConfig self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_reverb_config(self, serializer);
   }
 
   @protected
@@ -3771,6 +4060,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_playback_error_kind(
+    PlaybackErrorKind? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_playback_error_kind(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -3794,6 +4096,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_playback_error_kind(
+    PlaybackErrorKind self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
   void sse_encode_playback_state(PlaybackState self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_opt_String(self.playbackState, serializer);
@@ -3803,7 +4114,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_f_32(self.volume, serializer);
     sse_encode_opt_String(self.path, serializer);
     sse_encode_opt_String(self.error, serializer);
-    sse_encode_opt_playback_error_kind(self.errorKind, serializer);
+    sse_encode_opt_box_autoadd_playback_error_kind(self.errorKind, serializer);
+  }
+
+  @protected
+  void sse_encode_reverb_algorithm(
+    ReverbAlgorithm self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_reverb_config(ReverbConfig self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.enabled, serializer);
+    sse_encode_reverb_algorithm(self.algorithm, serializer);
+    sse_encode_f_32(self.dryMix, serializer);
+    sse_encode_f_32(self.wetMix, serializer);
+    sse_encode_f_32(self.roomSize, serializer);
+    sse_encode_f_32(self.damping, serializer);
+    sse_encode_f_32(self.width, serializer);
+    sse_encode_f_32(self.timeSeconds, serializer);
+    sse_encode_bool(self.freeze, serializer);
   }
 
   @protected

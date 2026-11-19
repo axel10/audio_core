@@ -407,6 +407,7 @@ where
 
 /// Helper function to normalize audio source to `target_channels` and `target_sample_rate`
 /// using high-fidelity downmix and Rubato resampling.
+#[flutter_rust_bridge::frb(ignore)]
 pub fn normalize_audio_source(
     source: Box<dyn Source<Item = f32> + Send>,
     target_channels: ChannelCount,

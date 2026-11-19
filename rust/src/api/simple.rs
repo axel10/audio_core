@@ -2,10 +2,11 @@ pub mod audio_fingerprint;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
 pub mod controller;
 pub mod equalizer;
+pub mod reverb;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
 pub mod fft;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
-pub mod resampler;
+pub(crate) mod resampler;
 
 #[cfg(target_os = "windows")]
 pub(crate) mod wasapi_sink;
@@ -19,6 +20,7 @@ use std::path::Path;
 #[cfg(target_os = "android")]
 pub mod controller {
     use super::equalizer::EqualizerConfig;
+    use super::reverb::ReverbConfig;
     use ffmpeg_core::AudioSource;
     use std::cmp;
     use std::path::Path;
@@ -377,6 +379,12 @@ pub mod controller {
     pub fn get_audio_equalizer_config() -> EqualizerConfig {
         EqualizerConfig::default()
     }
+    pub fn set_audio_reverb_config(_config: ReverbConfig) -> Result<(), String> {
+        Ok(())
+    }
+    pub fn get_audio_reverb_config() -> ReverbConfig {
+        ReverbConfig::default()
+    }
     pub fn set_playback_speed(_speed: f32) -> Result<(), String> {
         Ok(())
     }
@@ -551,10 +559,11 @@ use std::time::Duration;
 pub use audio_fingerprint::get_audio_fingerprint;
 pub use controller::{
     crossfade_to_audio_file, dispose_audio, get_audio_decode_engine, get_audio_duration_ms,
-    get_audio_equalizer_config, get_audio_pcm, get_audio_position_ms, get_audio_waveform,
-    get_latest_fft, get_loaded_audio_path, init_app, is_audio_playing, load_audio_file,
-    pause_audio, play_audio, seek_audio_ms, set_audio_equalizer_config, set_audio_volume,
-    set_playback_speed, get_playback_speed, toggle_audio, FadeMode, FadeSettings, PlaybackState,
+    get_audio_equalizer_config, get_audio_pcm, get_audio_position_ms, get_audio_reverb_config,
+    get_audio_waveform, get_latest_fft, get_loaded_audio_path, init_app, is_audio_playing,
+    load_audio_file, pause_audio, play_audio, seek_audio_ms, set_audio_equalizer_config,
+    set_audio_reverb_config, set_audio_volume, set_playback_speed, get_playback_speed,
+    toggle_audio, FadeMode, FadeSettings, PlaybackState,
 };
 pub use metadata::{
     generate_track_artwork, get_audio_details, get_track_metadata, remove_all_tags,
