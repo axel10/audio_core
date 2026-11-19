@@ -47,3 +47,19 @@ build
 
 .cache
 *.mp3
+
+# Local external checkouts / non-submodule directories (prevent accidental gitlink commits)
+/DSPFilters/
+/JUCE/
+/SFBAudioEngine/
+/flutter-media-session/
+/flutter_taglib/
+/rust/cpal/
+/rust/fundsp/
+/rust/mpv/
+/rust/rodio/
+/rust/rodio-wsola/
+/rust/rubato/
+/rust/rust-ffmpeg/
+/rust/timestretch-rs/
+
