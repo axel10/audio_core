@@ -1,6 +1,9 @@
 pub mod api;
 mod frb_generated;
 
+#[cfg(target_os = "android")]
+pub mod usb_audio;
+
 #[cfg(target_os = "linux")]
 #[no_mangle]
 pub extern "C" fn log10f(x: f32) -> f32 {

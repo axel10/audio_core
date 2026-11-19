@@ -228,6 +228,10 @@ class MyExoplayerPlugin :
     private lateinit var mediaLibraryChannel: MethodChannel
     private lateinit var fftEventChannel: EventChannel
     private lateinit var safChannel: MethodChannel
+    private lateinit var usbExclusiveChannel: MethodChannel
+    private lateinit var usbExclusiveEventChannel: EventChannel
+    private var usbExclusiveEventSink: EventChannel.EventSink? = null
+    private var usbExclusiveManager: UsbExclusiveManager? = null
     private var pendingDirectoryResult: Result? = null
     private var context: Context? = null
     private var activity: Activity? = null
@@ -317,7 +321,42 @@ class MyExoplayerPlugin :
         
         safChannel = MethodChannel(flutterPluginBinding.binaryMessenger, "com.example.audio_converter/saf")
         safChannel.setMethodCallHandler(safMethodCallHandler)
-        
+
+        val usbManager = UsbExclusiveManager(flutterPluginBinding.applicationContext) { eventType, statusJson ->
+            usbExclusiveEventSink?.success(
+                mapOf(
+                    "event" to eventType,
+                    "statusJson" to statusJson,
+                )
+            )
+            if (eventType == "device_detached") {
+                reloadActivePlayersForAudioRouteChange(pauseInsteadOfResume = true)
+            }
+        }
+        usbManager.startListening()
+        usbExclusiveManager = usbManager
+
+        usbExclusiveChannel = MethodChannel(
+            flutterPluginBinding.binaryMessenger,
+            "audio_core.usb_exclusive",
+        )
+        usbExclusiveChannel.setMethodCallHandler { call, result ->
+            handleUsbExclusiveMethodCall(call, result)
+        }
+        usbExclusiveEventChannel = EventChannel(
+            flutterPluginBinding.binaryMessenger,
+            "audio_core.usb_exclusive/events",
+        )
+        usbExclusiveEventChannel.setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                usbExclusiveEventSink = events
+            }
+
+            override fun onCancel(arguments: Any?) {
+                usbExclusiveEventSink = null
+            }
+        })
+
         // Initialize default player
         getOrCreatePlayerContext("main")
     }
@@ -381,9 +420,15 @@ class MyExoplayerPlugin :
                 enableFloatOutput: Boolean,
                 enableAudioTrackPlaybackParams: Boolean
             ): AudioSink? {
-                return DefaultAudioSink.Builder(context)
+                val defaultSink = DefaultAudioSink.Builder(context)
                     .setAudioProcessors(arrayOf(cppEqualizerProcessor, fftProcessor))
                     .build()
+                val usbMgr = usbExclusiveManager
+                return if (usbMgr != null) {
+                    SwitchableUsbAudioSink(defaultSink, usbMgr, fftProcessor)
+                } else {
+                    defaultSink
+                }
             }
         }
 
@@ -2159,6 +2204,11 @@ class MyExoplayerPlugin :
         channel.setMethodCallHandler(null)
         safChannel.setMethodCallHandler(null)
         mediaLibraryChannel.setMethodCallHandler(null)
+        usbExclusiveChannel.setMethodCallHandler(null)
+        usbExclusiveEventChannel.setStreamHandler(null)
+        usbExclusiveEventSink = null
+        usbExclusiveManager?.stopListening()
+        usbExclusiveManager = null
         fftEventChannel.setStreamHandler(null)
         fftEventSink = null
         instance = null
@@ -2300,5 +2350,79 @@ class MyExoplayerPlugin :
             "values" to magnitudes.map { it.toDouble() },
         )
         sink.success(payload)
+    }
+
+    private fun handleUsbExclusiveMethodCall(call: MethodCall, result: Result) {
+        val manager = usbExclusiveManager
+        if (manager == null) {
+            result.error("USB_UNAVAILABLE", "UsbExclusiveManager is not initialized", null)
+            return
+        }
+        when (call.method) {
+            "listDevices" -> {
+                result.success(manager.listUsbAudioDevices())
+            }
+
+            "getStatus" -> {
+                result.success(manager.getStatusJson())
+            }
+
+            "setExclusiveMode" -> {
+                val enabled = call.argument<Boolean>("enabled") ?: false
+                val deviceName = call.argument<String>("deviceName")
+                if (enabled) {
+                    manager.enableExclusiveMode(deviceName) { ok, error ->
+                        Handler(Looper.getMainLooper()).post {
+                            if (ok) {
+                                reloadActivePlayersForAudioRouteChange(pauseInsteadOfResume = false)
+                                result.success(
+                                    mapOf(
+                                        "ok" to true,
+                                        "statusJson" to manager.getStatusJson(),
+                                    )
+                                )
+                            } else {
+                                result.success(
+                                    mapOf(
+                                        "ok" to false,
+                                        "error" to (error ?: "Failed to enable USB exclusive mode"),
+                                        "statusJson" to manager.getStatusJson(),
+                                    )
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    manager.disableExclusiveMode()
+                    reloadActivePlayersForAudioRouteChange(pauseInsteadOfResume = false)
+                    result.success(
+                        mapOf(
+                            "ok" to true,
+                            "statusJson" to manager.getStatusJson(),
+                        )
+                    )
+                }
+            }
+
+            else -> result.notImplemented()
+        }
+    }
+
+    /**
+     * Re-prepares active ExoPlayer instances so that `AudioSink.configure()` runs
+     * again with the newly switched route (USB exclusive <-> DefaultAudioSink).
+     */
+    private fun reloadActivePlayersForAudioRouteChange(pauseInsteadOfResume: Boolean) {
+        for (ctx in playerContexts.values) {
+            val player = ctx.player
+            if (player.mediaItemCount == 0) continue
+            val wasPlaying = player.playWhenReady && player.playbackState != Player.STATE_ENDED
+            val currentPos = player.currentPosition.coerceAtLeast(0L)
+            val currentIdx = player.currentMediaItemIndex
+            player.stop()
+            player.seekTo(currentIdx, currentPos)
+            player.prepare()
+            player.playWhenReady = if (pauseInsteadOfResume) false else wasPlaying
+        }
     }
 }

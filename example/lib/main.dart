@@ -15,6 +15,7 @@ import 'transcode_tab.dart';
 import 'media_session_adapter.dart';
 import 'android_media_library_picker.dart';
 import 'apple_directory_tab.dart';
+import 'usb_exclusive_tab.dart';
 import 'package:flutter_media_session/flutter_media_session.dart';
 
 const List<String> _audioFileExtensions = <String>[
@@ -402,14 +403,16 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 8,
+      length: 9,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Audio Visualizer Player Plugin Demo'),
           backgroundColor: Theme.of(context).colorScheme.inversePrimary,
           bottom: const TabBar(
+            isScrollable: true,
             tabs: [
               Tab(icon: Icon(Icons.music_note), text: 'Player'),
+              Tab(icon: Icon(Icons.usb), text: 'USB DAC'),
               Tab(icon: Icon(Icons.info_outline), text: 'Metadata'),
               Tab(icon: Icon(Icons.tune), text: 'Fade Demo'),
               Tab(icon: Icon(Icons.blur_on), text: 'Mesh'),
@@ -474,7 +477,12 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                 ],
               ),
             ),
-            // 第二页: 当前曲目信息 / 封面编辑
+            // 第二页: Android USB 独占输出演示
+            UsbExclusiveTab(
+              controller: _controller,
+              onPickAudio: () => _pickAudio(),
+            ),
+            // 第三页: 当前曲目信息 / 封面编辑
             MetadataTab(controller: _controller),
             // 第三页: 淡入淡出控制演示
             FadeDemoTab(
