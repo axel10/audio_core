@@ -45,7 +45,8 @@ if (Test-Path -LiteralPath $targetDir) {
     Remove-Item -LiteralPath $targetDir -Recurse -Force
 }
 New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
-Expand-Archive -Path $tempFile -DestinationPath $targetDir -Force
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::ExtractToDirectory($tempFile, $targetDir)
 Set-Content -LiteralPath $versionFile -Value $ffmpegVersion -Force
 Remove-Item -LiteralPath $tempFile -Force
 
