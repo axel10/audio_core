@@ -65,7 +65,7 @@ class _ReverbDemoTabState extends State<ReverbDemoTab> {
       const ReverbConfig(
         enabled: true,
         algorithm: ReverbAlgorithm.fundspStereo,
-        dryMix: 0.76,
+        dryMix: 0.90,
         wetMix: 1.00,
         roomSize: 0.88,
         damping: 1.00,

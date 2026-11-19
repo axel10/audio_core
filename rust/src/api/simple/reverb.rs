@@ -70,7 +70,7 @@ impl ReverbConfig {
         Self {
             enabled: false,
             algorithm: ReverbAlgorithm::FundspStereo,
-            dry_mix: 0.76,
+            dry_mix: 0.90,
             wet_mix: 1.00,
             room_size: 0.88,
             damping: 1.00,
