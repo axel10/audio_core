@@ -10,7 +10,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // These functions have error during generation (see debug logs or enable `stop_on_error: true` for more details): `sanitized`
 
 enum ReverbAlgorithm {
-  /// Jezar Freeverb (matches Salt Player MAX Audio Concert Hall preset)
+  /// Jezar Freeverb (Concert Hall preset)
   freeverb,
 
   /// FunDSP 32-channel FDN stereo reverb (`reverb_stereo`)
@@ -32,19 +32,19 @@ class ReverbConfig {
   final bool enabled;
   final ReverbAlgorithm algorithm;
 
-  /// Dry signal mix (0.0..=2.0). Salt Player preset: 0.85
+  /// Dry signal mix (0.0..=2.0). Default: 0.85
   final double dryMix;
 
-  /// Wet reverb mix (0.0..=2.0). Salt Player preset: 0.75
+  /// Wet reverb mix (0.0..=2.0). Default: 0.75
   final double wetMix;
 
-  /// Normalized room size (0.0..=1.0). Salt Player preset: 0.9
+  /// Normalized room size (0.0..=1.0). Default: 0.9
   final double roomSize;
 
-  /// High-frequency damping (0.0..=1.0). Salt Player preset: 0.4
+  /// High-frequency damping (0.0..=1.0). Default: 0.4
   final double damping;
 
-  /// Stereo width for Freeverb (0.0..=1.0). Salt Player preset: 0.75
+  /// Stereo width for Freeverb (0.0..=1.0). Default: 0.75
   final double width;
 
   /// Reverberation time RT60 in seconds for FunDSP (0.3..=10.0)
@@ -65,7 +65,7 @@ class ReverbConfig {
     required this.freeze,
   });
 
-  /// Defaults to Salt Player's "MAX Audio 音乐厅氛围" preset.
+  /// Defaults to the Concert Hall preset.
   static Future<ReverbConfig> default_() =>
       RustLib.instance.api.crateApiSimpleReverbReverbConfigDefault();
 

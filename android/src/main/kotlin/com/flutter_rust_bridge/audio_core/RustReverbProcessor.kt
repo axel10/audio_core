@@ -27,7 +27,7 @@ class RustReverbProcessor : BaseAudioProcessor() {
     private var isInitialized = false
     private var nativeHandle: Long = 0
 
-    // Default to Salt Player MAX Audio Concert Hall preset (disabled initially).
+    // Default to Concert Hall preset (disabled initially).
     private var enabled = false
     private var algorithm = 0
     private var dryMix = 0.85f

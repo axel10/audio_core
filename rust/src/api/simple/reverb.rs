@@ -1,6 +1,6 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReverbAlgorithm {
-    /// Jezar Freeverb (matches Salt Player MAX Audio Concert Hall preset)
+    /// Jezar Freeverb (Concert Hall preset)
     Freeverb,
     /// FunDSP 32-channel FDN stereo reverb (`reverb_stereo`)
     FundspStereo,
@@ -30,15 +30,15 @@ impl ReverbAlgorithm {
 pub struct ReverbConfig {
     pub enabled: bool,
     pub algorithm: ReverbAlgorithm,
-    /// Dry signal mix (0.0..=2.0). Salt Player preset: 0.85
+    /// Dry signal mix (0.0..=2.0). Default: 0.85
     pub dry_mix: f32,
-    /// Wet reverb mix (0.0..=2.0). Salt Player preset: 0.75
+    /// Wet reverb mix (0.0..=2.0). Default: 0.75
     pub wet_mix: f32,
-    /// Normalized room size (0.0..=1.0). Salt Player preset: 0.9
+    /// Normalized room size (0.0..=1.0). Default: 0.9
     pub room_size: f32,
-    /// High-frequency damping (0.0..=1.0). Salt Player preset: 0.4
+    /// High-frequency damping (0.0..=1.0). Default: 0.4
     pub damping: f32,
-    /// Stereo width for Freeverb (0.0..=1.0). Salt Player preset: 0.75
+    /// Stereo width for Freeverb (0.0..=1.0). Default: 0.75
     pub width: f32,
     /// Reverberation time RT60 in seconds for FunDSP (0.3..=10.0)
     pub time_seconds: f32,
@@ -47,7 +47,7 @@ pub struct ReverbConfig {
 }
 
 impl Default for ReverbConfig {
-    /// Defaults to Salt Player's "MAX Audio 音乐厅氛围" preset.
+    /// Defaults to the Concert Hall preset.
     fn default() -> Self {
         Self {
             enabled: false,

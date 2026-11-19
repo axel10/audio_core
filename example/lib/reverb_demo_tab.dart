@@ -35,7 +35,7 @@ class _ReverbDemoTabState extends State<ReverbDemoTab> {
       if (!mounted) return;
       setState(() => _config = loaded);
     } catch (_) {
-      // Keep default Salt Player preset if engine hasn't initialized yet.
+      // Keep default Concert Hall preset if engine hasn't initialized yet.
     }
   }
 
@@ -44,7 +44,7 @@ class _ReverbDemoTabState extends State<ReverbDemoTab> {
     await widget.controller.setReverbConfig(next);
   }
 
-  void _applySaltPlayerPreset() {
+  void _applyConcertHallPreset() {
     _updateConfig(
       const ReverbConfig(
         enabled: true,
@@ -107,7 +107,7 @@ class _ReverbDemoTabState extends State<ReverbDemoTab> {
                         const SizedBox(height: 4),
                         Text(
                           isFreeverb
-                              ? 'Rust Freeverb (Salt Player BASS_BFX_FREEVERB parity)'
+                              ? 'Rust Freeverb (Concert Hall)'
                               : isFundspStereo
                               ? 'FunDSP 32-ch FDN Stereo Reverb'
                               : 'FunDSP Slow Fade-In Hall Reverb (reverb4_stereo)',
@@ -161,9 +161,9 @@ class _ReverbDemoTabState extends State<ReverbDemoTab> {
                 runSpacing: 8,
                 children: [
                   FilledButton.tonalIcon(
-                    onPressed: _applySaltPlayerPreset,
+                    onPressed: _applyConcertHallPreset,
                     icon: const Icon(Icons.restore),
-                    label: const Text('Salt Player 音乐厅预设'),
+                    label: const Text('Freeverb 音乐厅预设'),
                   ),
                   OutlinedButton.icon(
                     onPressed: _applyFundspHallPreset,
