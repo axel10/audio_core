@@ -1740,10 +1740,11 @@ class MyExoplayerPlugin :
             addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                putExtra(
-                    DocumentsContract.EXTRA_INITIAL_URI,
-                    Uri.parse("content://com.android.externalstorage.documents/root/primary")
+                val initialUri = DocumentsContract.buildDocumentUri(
+                    "com.android.externalstorage.documents",
+                    "primary:${Environment.DIRECTORY_MUSIC}"
                 )
+                putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri)
             }
         }
 
