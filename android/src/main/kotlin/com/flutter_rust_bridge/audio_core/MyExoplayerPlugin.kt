@@ -254,7 +254,59 @@ class MyExoplayerPlugin :
         val aggregationMode: String = "peak",
     )
 
+    private data class ReverbConfigState(
+        val enabled: Boolean = false,
+        val algorithm: Int = 0,
+        val dryMix: Float = 0.90f,
+        val wetMix: Float = 0.22f,
+        val roomSize: Float = 0.70f,
+        val damping: Float = 0.50f,
+        val width: Float = 0.85f,
+        val timeSeconds: Float = 3.02f,
+        val freeze: Boolean = false,
+    )
+
+    private data class CppEqualizerConfigState(
+        val enabled: Boolean = false,
+        val bandCount: Int = 10,
+        val preAmpDb: Float = 0f,
+        val bassBoostGainDb: Float = 0f,
+        val bassBoostFreqHz: Float = 80f,
+        val bassBoostQ: Float = 0.75f,
+        val bandGains: FloatArray = FloatArray(0),
+    )
+
     private var fftGroupingConfig = FftGroupingConfig()
+    private var reverbConfig = ReverbConfigState()
+    private var cppEqualizerConfig = CppEqualizerConfigState()
+
+    private fun applyReverbConfig(processor: RustReverbProcessor, config: ReverbConfigState) {
+        processor.setConfig(
+            enabled = config.enabled,
+            algorithm = config.algorithm,
+            dryMix = config.dryMix,
+            wetMix = config.wetMix,
+            roomSize = config.roomSize,
+            damping = config.damping,
+            width = config.width,
+            timeSeconds = config.timeSeconds,
+            freeze = config.freeze,
+        )
+    }
+
+    private fun applyCppEqualizerConfig(processor: CppEqualizerProcessor, config: CppEqualizerConfigState) {
+        processor.setNumBands(config.bandCount)
+        for (i in config.bandGains.indices) {
+            processor.setBandGain(i, config.bandGains[i])
+        }
+        processor.setPreAmp(config.preAmpDb)
+        processor.setBassBoost(
+            config.bassBoostGainDb,
+            config.bassBoostFreqHz,
+            config.bassBoostQ,
+        )
+        processor.setEnabled(config.enabled)
+    }
 
     /**
      * Dart 侧的 FFT 分析跑在 30Hz（analysisFrequencyHz），而这里的推送由 FFT hop
@@ -460,7 +512,8 @@ class MyExoplayerPlugin :
         )
         
         player.addAnalyticsListener(EventLogger())
-        cppEqualizerProcessor.setNumBands(10)
+        applyCppEqualizerConfig(cppEqualizerProcessor, cppEqualizerConfig)
+        applyReverbConfig(rustReverbProcessor, reverbConfig)
         
         val ctx = PlayerContext(id, player, fftProcessor, cppEqualizerProcessor, rustReverbProcessor)
         fftProcessor.updateGroupingOptions(
@@ -906,34 +959,54 @@ class MyExoplayerPlugin :
                 val gainDb = call.argument<Double>("gainDb")?.toFloat() ?: 0f
                 val freqHz = call.argument<Double>("freqHz")?.toFloat() ?: 80f
                 val q = call.argument<Double>("q")?.toFloat() ?: 0.75f
-                ctx.cppEqualizerProcessor.setBassBoost(gainDb, freqHz, q)
+                cppEqualizerConfig = cppEqualizerConfig.copy(
+                    bassBoostGainDb = gainDb,
+                    bassBoostFreqHz = freqHz,
+                    bassBoostQ = q,
+                )
+                playerContexts.values.forEach { playerContext ->
+                    playerContext.cppEqualizerProcessor.setBassBoost(gainDb, freqHz, q)
+                }
                 result.success(null)
             }
             "setCppEqualizerConfig" -> {
                 val bandGains = call.argument<List<Double>>("bandGains")
                 if (bandGains != null) {
-                    for (i in 0 until bandGains.size) {
-                        ctx.cppEqualizerProcessor.setBandGain(i, bandGains[i].toFloat())
+                    val gains = FloatArray(bandGains.size) { bandGains[it].toFloat() }
+                    cppEqualizerConfig = cppEqualizerConfig.copy(bandGains = gains)
+                    playerContexts.values.forEach { playerContext ->
+                        for (i in gains.indices) {
+                            playerContext.cppEqualizerProcessor.setBandGain(i, gains[i])
+                        }
                     }
                 }
                 result.success(null)
             }
             "setCppEqualizerPreAmp" -> {
                 val gainDb = call.argument<Double>("gainDb")?.toFloat() ?: 0f
-                ctx.cppEqualizerProcessor.setPreAmp(gainDb)
+                cppEqualizerConfig = cppEqualizerConfig.copy(preAmpDb = gainDb)
+                playerContexts.values.forEach { playerContext ->
+                    playerContext.cppEqualizerProcessor.setPreAmp(gainDb)
+                }
                 result.success(null)
             }
             "setCppEqualizerBandCount" -> {
                 val count = call.argument<Int>("count") ?: 10
-                ctx.cppEqualizerProcessor.setNumBands(count)
+                cppEqualizerConfig = cppEqualizerConfig.copy(bandCount = count)
+                playerContexts.values.forEach { playerContext ->
+                    playerContext.cppEqualizerProcessor.setNumBands(count)
+                }
                 result.success(null)
             }
             "setCppEqualizerEnabled" -> {
                 val enabled = call.argument<Boolean>("enabled") ?: false
-                ctx.cppEqualizerProcessor.setEnabled(enabled)
-                if (enabled) {
-                    ctx.equalizer?.enabled = false
-                    ctx.bassBoost?.enabled = false
+                cppEqualizerConfig = cppEqualizerConfig.copy(enabled = enabled)
+                playerContexts.values.forEach { playerContext ->
+                    playerContext.cppEqualizerProcessor.setEnabled(enabled)
+                    if (enabled) {
+                        playerContext.equalizer?.enabled = false
+                        playerContext.bassBoost?.enabled = false
+                    }
                 }
                 result.success(null)
             }
@@ -947,7 +1020,7 @@ class MyExoplayerPlugin :
                 val width = call.argument<Double>("width")?.toFloat() ?: 0.85f
                 val timeSeconds = call.argument<Double>("timeSeconds")?.toFloat() ?: 3.02f
                 val freeze = call.argument<Boolean>("freeze") ?: false
-                ctx.rustReverbProcessor.setConfig(
+                reverbConfig = ReverbConfigState(
                     enabled = enabled,
                     algorithm = algorithm,
                     dryMix = dryMix,
@@ -958,6 +1031,9 @@ class MyExoplayerPlugin :
                     timeSeconds = timeSeconds,
                     freeze = freeze,
                 )
+                playerContexts.values.forEach { playerContext ->
+                    applyReverbConfig(playerContext.rustReverbProcessor, reverbConfig)
+                }
                 result.success(null)
             }
             "getSystemEqualizerParams" -> {
