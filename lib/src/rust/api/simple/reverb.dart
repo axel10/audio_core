@@ -14,10 +14,7 @@ enum ReverbAlgorithm {
   freeverb,
 
   /// FunDSP 32-channel FDN stereo reverb (`reverb_stereo`)
-  fundspStereo,
-
-  /// FunDSP slow fade-in hall stereo reverb (`reverb4_stereo`)
-  fundspHall;
+  fundspStereo;
 
   Future<int> asI32() =>
       RustLib.instance.api.crateApiSimpleReverbReverbAlgorithmAsI32(that: this);
@@ -32,22 +29,22 @@ class ReverbConfig {
   final bool enabled;
   final ReverbAlgorithm algorithm;
 
-  /// Dry signal mix (0.0..=2.0). Default: 0.85
+  /// Dry signal mix (0.0..=2.0). Default: 0.90
   final double dryMix;
 
-  /// Wet reverb mix (0.0..=2.0). Default: 0.75
+  /// Wet reverb mix (0.0..=2.0). Default: 0.22
   final double wetMix;
 
-  /// Normalized room size (0.0..=1.0). Default: 0.9
+  /// Normalized room size (0.0..=1.0). Default: 0.70
   final double roomSize;
 
-  /// High-frequency damping (0.0..=1.0). Default: 0.4
+  /// High-frequency damping (0.0..=1.0). Default: 0.50
   final double damping;
 
-  /// Stereo width for Freeverb (0.0..=1.0). Default: 0.75
+  /// Stereo width for Freeverb (0.0..=1.0). Default: 0.85
   final double width;
 
-  /// Reverberation time RT60 in seconds for FunDSP (0.3..=10.0)
+  /// Reverberation time RT60 in seconds for FunDSP (0.3..=10.0). Default: 3.02
   final double timeSeconds;
 
   /// Freeze mode for Freeverb
@@ -65,9 +62,17 @@ class ReverbConfig {
     required this.freeze,
   });
 
-  /// Defaults to the Concert Hall preset.
+  /// Defaults to the Freeverb Concert Hall preset.
   static Future<ReverbConfig> default_() =>
       RustLib.instance.api.crateApiSimpleReverbReverbConfigDefault();
+
+  /// Default parameters for Freeverb.
+  static Future<ReverbConfig> freeverbDefault() =>
+      RustLib.instance.api.crateApiSimpleReverbReverbConfigFreeverbDefault();
+
+  /// Default parameters for FunDSP 32-ch FDN Stereo Reverb.
+  static Future<ReverbConfig> fundspFdnDefault() =>
+      RustLib.instance.api.crateApiSimpleReverbReverbConfigFundspFdnDefault();
 
   @override
   int get hashCode =>

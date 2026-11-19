@@ -365,7 +365,7 @@ impl ReverbProcessor {
                 self.fundsp_unit = None;
                 self.fundsp_built_for = None;
             }
-            ReverbAlgorithm::FundspStereo | ReverbAlgorithm::FundspHall => {
+            ReverbAlgorithm::FundspStereo => {
                 let key = (
                     self.config.algorithm,
                     self.sample_rate,
@@ -375,21 +375,12 @@ impl ReverbProcessor {
                 );
                 if force_rebuild || self.fundsp_built_for != Some(key) || self.fundsp_unit.is_none()
                 {
-                    let mut unit: Box<dyn AudioUnit> = match self.config.algorithm {
-                        ReverbAlgorithm::FundspStereo => {
-                            let meters = 10.0 + self.config.room_size as f64 * 22.0;
-                            Box::new(reverb_stereo(
-                                meters,
-                                self.config.time_seconds as f64,
-                                self.config.damping as f64,
-                            ))
-                        }
-                        ReverbAlgorithm::FundspHall => {
-                            let meters = 15.0 + self.config.room_size as f64 * 25.0;
-                            Box::new(reverb4_stereo(meters, self.config.time_seconds as f64))
-                        }
-                        ReverbAlgorithm::Freeverb => unreachable!(),
-                    };
+                    let meters = 10.0 + self.config.room_size as f64 * 22.0;
+                    let mut unit: Box<dyn AudioUnit> = Box::new(reverb_stereo(
+                        meters,
+                        self.config.time_seconds as f64,
+                        self.config.damping as f64,
+                    ));
                     unit.set_sample_rate(self.sample_rate as f64);
                     self.fundsp_unit = Some(unit);
                     self.fundsp_built_for = Some(key);
@@ -416,7 +407,7 @@ impl ReverbProcessor {
 
         let (wet_l, wet_r) = match self.config.algorithm {
             ReverbAlgorithm::Freeverb => self.freeverb.tick(left, right),
-            ReverbAlgorithm::FundspStereo | ReverbAlgorithm::FundspHall => {
+            ReverbAlgorithm::FundspStereo => {
                 if let Some(unit) = self.fundsp_unit.as_mut() {
                     let mut out = [0.0f32; 2];
                     unit.tick(&[left, right], &mut out);
@@ -706,16 +697,12 @@ mod tests {
 
     #[test]
     fn test_freeverb_and_fundsp_reverb_produce_tail() {
-        for algo in [
-            ReverbAlgorithm::Freeverb,
-            ReverbAlgorithm::FundspStereo,
-            ReverbAlgorithm::FundspHall,
+        for mut config in [
+            ReverbConfig::freeverb_default(),
+            ReverbConfig::fundsp_fdn_default(),
         ] {
-            let config = ReverbConfig {
-                enabled: true,
-                algorithm: algo,
-                ..Default::default()
-            };
+            let algo = config.algorithm;
+            config.enabled = true;
             let shared = ReverbShared::new(config);
             let mut proc = ReverbProcessor::new(shared, 2, 44100);
 

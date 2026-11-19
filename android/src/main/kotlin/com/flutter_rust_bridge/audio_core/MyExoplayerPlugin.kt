@@ -940,12 +940,12 @@ class MyExoplayerPlugin :
             "setReverbConfig" -> {
                 val enabled = call.argument<Boolean>("enabled") ?: false
                 val algorithm = call.argument<Int>("algorithm") ?: 0
-                val dryMix = call.argument<Double>("dryMix")?.toFloat() ?: 0.85f
-                val wetMix = call.argument<Double>("wetMix")?.toFloat() ?: 0.75f
-                val roomSize = call.argument<Double>("roomSize")?.toFloat() ?: 0.9f
-                val damping = call.argument<Double>("damping")?.toFloat() ?: 0.4f
-                val width = call.argument<Double>("width")?.toFloat() ?: 0.75f
-                val timeSeconds = call.argument<Double>("timeSeconds")?.toFloat() ?: 2.8f
+                val dryMix = call.argument<Double>("dryMix")?.toFloat() ?: 0.90f
+                val wetMix = call.argument<Double>("wetMix")?.toFloat() ?: 0.22f
+                val roomSize = call.argument<Double>("roomSize")?.toFloat() ?: 0.70f
+                val damping = call.argument<Double>("damping")?.toFloat() ?: 0.50f
+                val width = call.argument<Double>("width")?.toFloat() ?: 0.85f
+                val timeSeconds = call.argument<Double>("timeSeconds")?.toFloat() ?: 3.02f
                 val freeze = call.argument<Boolean>("freeze") ?: false
                 ctx.rustReverbProcessor.setConfig(
                     enabled = enabled,

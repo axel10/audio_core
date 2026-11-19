@@ -14,12 +14,12 @@ class _ReverbDemoTabState extends State<ReverbDemoTab> {
   ReverbConfig _config = const ReverbConfig(
     enabled: false,
     algorithm: ReverbAlgorithm.freeverb,
-    dryMix: 0.85,
-    wetMix: 0.75,
-    roomSize: 0.9,
-    damping: 0.4,
-    width: 0.75,
-    timeSeconds: 2.8,
+    dryMix: 0.90,
+    wetMix: 0.22,
+    roomSize: 0.70,
+    damping: 0.50,
+    width: 0.85,
+    timeSeconds: 3.02,
     freeze: false,
   );
 
@@ -49,28 +49,28 @@ class _ReverbDemoTabState extends State<ReverbDemoTab> {
       const ReverbConfig(
         enabled: true,
         algorithm: ReverbAlgorithm.freeverb,
-        dryMix: 0.85,
-        wetMix: 0.75,
-        roomSize: 0.9,
-        damping: 0.4,
-        width: 0.75,
-        timeSeconds: 2.8,
+        dryMix: 0.90,
+        wetMix: 0.22,
+        roomSize: 0.70,
+        damping: 0.50,
+        width: 0.85,
+        timeSeconds: 3.02,
         freeze: false,
       ),
     );
   }
 
-  void _applyFundspHallPreset() {
+  void _applyFundspFdnPreset() {
     _updateConfig(
       const ReverbConfig(
         enabled: true,
-        algorithm: ReverbAlgorithm.fundspHall,
-        dryMix: 0.85,
-        wetMix: 0.45,
-        roomSize: 0.75,
-        damping: 0.4,
-        width: 0.75,
-        timeSeconds: 2.6,
+        algorithm: ReverbAlgorithm.fundspStereo,
+        dryMix: 0.76,
+        wetMix: 1.00,
+        roomSize: 0.88,
+        damping: 1.00,
+        width: 0.85,
+        timeSeconds: 3.02,
         freeze: false,
       ),
     );
@@ -79,7 +79,6 @@ class _ReverbDemoTabState extends State<ReverbDemoTab> {
   @override
   Widget build(BuildContext context) {
     final isFreeverb = _config.algorithm == ReverbAlgorithm.freeverb;
-    final isFundspStereo = _config.algorithm == ReverbAlgorithm.fundspStereo;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -108,9 +107,7 @@ class _ReverbDemoTabState extends State<ReverbDemoTab> {
                         Text(
                           isFreeverb
                               ? 'Rust Freeverb (Concert Hall)'
-                              : isFundspStereo
-                              ? 'FunDSP 32-ch FDN Stereo Reverb'
-                              : 'FunDSP Slow Fade-In Hall Reverb (reverb4_stereo)',
+                              : 'FunDSP 32-ch FDN Stereo Reverb',
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: Theme.of(context).colorScheme.primary,
                           ),
@@ -144,11 +141,6 @@ class _ReverbDemoTabState extends State<ReverbDemoTab> {
                     label: Text('FunDSP FDN'),
                     icon: Icon(Icons.surround_sound),
                   ),
-                  ButtonSegment(
-                    value: ReverbAlgorithm.fundspHall,
-                    label: Text('FunDSP Hall'),
-                    icon: Icon(Icons.spatial_audio),
-                  ),
                 ],
                 selected: {_config.algorithm},
                 onSelectionChanged: (selection) {
@@ -166,9 +158,9 @@ class _ReverbDemoTabState extends State<ReverbDemoTab> {
                     label: const Text('Freeverb 音乐厅预设'),
                   ),
                   OutlinedButton.icon(
-                    onPressed: _applyFundspHallPreset,
+                    onPressed: _applyFundspFdnPreset,
                     icon: const Icon(Icons.auto_awesome),
-                    label: const Text('FunDSP 大厅预设'),
+                    label: const Text('FunDSP FDN 预设'),
                   ),
                 ],
               ),
@@ -194,14 +186,13 @@ class _ReverbDemoTabState extends State<ReverbDemoTab> {
                 max: 1.0,
                 onChanged: (v) => _updateConfig(_copyConfig(roomSize: v)),
               ),
-              if (isFreeverb || isFundspStereo)
-                _buildSlider(
-                  label: 'Damping (高频阻尼)',
-                  value: _config.damping,
-                  min: 0.0,
-                  max: 1.0,
-                  onChanged: (v) => _updateConfig(_copyConfig(damping: v)),
-                ),
+              _buildSlider(
+                label: 'Damping (高频阻尼)',
+                value: _config.damping,
+                min: 0.0,
+                max: 1.0,
+                onChanged: (v) => _updateConfig(_copyConfig(damping: v)),
+              ),
               if (isFreeverb) ...[
                 _buildSlider(
                   label: 'Stereo Width (立体声宽度)',

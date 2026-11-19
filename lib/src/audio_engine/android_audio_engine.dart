@@ -457,12 +457,12 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
         const ReverbConfig(
           enabled: false,
           algorithm: ReverbAlgorithm.freeverb,
-          dryMix: 0.85,
-          wetMix: 0.75,
-          roomSize: 0.9,
-          damping: 0.4,
-          width: 0.75,
-          timeSeconds: 2.8,
+          dryMix: 0.90,
+          wetMix: 0.22,
+          roomSize: 0.70,
+          damping: 0.50,
+          width: 0.85,
+          timeSeconds: 3.02,
           freeze: false,
         );
   }

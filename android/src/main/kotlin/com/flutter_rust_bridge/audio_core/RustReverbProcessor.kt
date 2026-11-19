@@ -30,12 +30,12 @@ class RustReverbProcessor : BaseAudioProcessor() {
     // Default to Concert Hall preset (disabled initially).
     private var enabled = false
     private var algorithm = 0
-    private var dryMix = 0.85f
-    private var wetMix = 0.75f
-    private var roomSize = 0.9f
-    private var damping = 0.4f
-    private var width = 0.75f
-    private var timeSeconds = 2.8f
+    private var dryMix = 0.90f
+    private var wetMix = 0.22f
+    private var roomSize = 0.70f
+    private var damping = 0.50f
+    private var width = 0.85f
+    private var timeSeconds = 3.02f
     private var freeze = false
 
     init {
