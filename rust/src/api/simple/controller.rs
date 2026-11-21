@@ -395,9 +395,62 @@ struct PlayerController {
     last_error: Option<String>,
     last_error_kind: Option<PlaybackErrorKind>,
     sink_invalidated: bool,
+    shared_sink_buffer: SharedSinkBufferState,
     /// `dispose_audio` 显式释放过输出流。设备监视器必须尊重这个状态，
     /// 否则轮询会把「刻意释放」当成「流挂了」，1 秒后又开一条 paused 流。
     audio_disposed: bool,
+}
+
+/// 跟踪共享模式输出流（`OutputSink::Shared`）在暂停期间的底层音频缓冲状态。
+///
+/// Windows WASAPI 共享模式下 `cpal::Stream::pause()` 仅调用 `IAudioClient::Stop()`
+/// 而不会清空 endpoint buffer。若在暂停期间执行了 seek 或切换曲目，恢复播放前必须
+/// 重建共享输出流，否则会先播出滞留在系统缓冲区内的旧音频片段。
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct SharedSinkBufferState {
+    /// 共享流是在正在播放的状态下被暂停的，系统缓冲区内可能残留未播完的旧音频帧。
+    has_stale_buffer: bool,
+    /// 暂停期间已替换播放源（seek 或切歌），下次恢复播放前需要重建共享流以清空缓冲。
+    needs_reset_on_play: bool,
+}
+
+impl SharedSinkBufferState {
+    fn clear(&mut self) {
+        self.has_stale_buffer = false;
+        self.needs_reset_on_play = false;
+    }
+
+    /// 共享流进入暂停态时调用；仅当此前确实处于播放状态，缓冲区才可能残留旧数据。
+    fn mark_paused(&mut self, was_playing: bool) {
+        if was_playing {
+            self.has_stale_buffer = true;
+        }
+    }
+
+    /// 在暂停状态下替换当前播放源（如暂停后 seek 或加载新曲目）时调用。
+    fn mark_paused_deck_replaced(&mut self) {
+        if self.has_stale_buffer {
+            self.needs_reset_on_play = true;
+            self.has_stale_buffer = false;
+        }
+    }
+
+    /// 即将以 `auto_play = true` 打开新曲目时，是否需要先销毁并重建共享流。
+    fn take_needs_rebuild_for_auto_play(&mut self) -> bool {
+        let should_rebuild = self.needs_reset_on_play || self.has_stale_buffer;
+        self.clear();
+        should_rebuild
+    }
+
+    /// 恢复播放（`play_all`）时，是否需要先重建共享流。
+    fn needs_reset_on_play(&self) -> bool {
+        self.needs_reset_on_play
+    }
+
+    /// 共享流直接恢复播放（无需重建）时，清空残留标记。
+    fn mark_resumed(&mut self) {
+        self.has_stale_buffer = false;
+    }
 }
 
 struct PendingEdit {
@@ -713,6 +766,7 @@ impl PlayerController {
             last_error: None,
             last_error_kind: None,
             sink_invalidated: false,
+            shared_sink_buffer: SharedSinkBufferState::default(),
             audio_disposed: false,
         }
     }
@@ -937,6 +991,16 @@ impl PlayerController {
             }
         }
 
+        if auto_play && self.shared_sink_buffer.take_needs_rebuild_for_auto_play() {
+            if matches!(self.sink, Some(OutputSink::Shared(_))) {
+                info!(
+                    "[AudioOutput] Rebuilding shared sink before auto_play to flush stale paused buffer"
+                );
+                self.sink = None;
+                self.active_output_device_name = None;
+            }
+        }
+
         self.ensure_audio_output()?;
 
         let player = self.create_player()?;
@@ -1040,6 +1104,9 @@ impl PlayerController {
             player.pause();
             if let Some(sink) = self.sink.as_ref() {
                 sink.pause();
+                if matches!(sink, OutputSink::Shared(_)) {
+                    self.shared_sink_buffer.mark_paused_deck_replaced();
+                }
             }
             #[cfg(target_os = "windows")]
             if self.output_mode == AudioOutputMode::WasapiExclusive && self.release_on_pause {
@@ -1183,14 +1250,21 @@ impl PlayerController {
             }
         }
 
-        if self.sink_invalidated || self.sink.is_none() {
+        if self.sink_invalidated
+            || self.sink.is_none()
+            || self.shared_sink_buffer.needs_reset_on_play()
+        {
             if let Some(path) = self.public_path().map(str::to_string) {
                 let pos = self.public_position();
                 info!(
-                    "[AudioOutput] Re-acquiring sink on play at pos {:?}",
-                    pos
+                    "[AudioOutput] Re-acquiring sink on play at pos {:?} (invalidated={}, missing={}, reset_shared={})",
+                    pos,
+                    self.sink_invalidated,
+                    self.sink.is_none(),
+                    self.shared_sink_buffer.needs_reset_on_play()
                 );
                 self.sink_invalidated = false;
+                self.shared_sink_buffer.clear();
                 self.sink = None;
                 self.active_output_device_name = None;
                 return self.replace_current_from_path(&path, pos, true);
@@ -1199,6 +1273,9 @@ impl PlayerController {
 
         if let Some(sink) = self.sink.as_ref() {
             sink.play();
+            if matches!(sink, OutputSink::Shared(_)) {
+                self.shared_sink_buffer.mark_resumed();
+            }
         }
         if let Some(current) = self.current_deck.as_ref() {
             current.player.play();
@@ -1210,6 +1287,7 @@ impl PlayerController {
     }
 
     fn pause_all(&mut self) {
+        let was_playing = self.any_deck_playing();
         if let Some(current) = self.current_deck.as_ref() {
             current.player.pause();
         }
@@ -1218,6 +1296,9 @@ impl PlayerController {
         }
         if let Some(sink) = self.sink.as_ref() {
             sink.pause();
+            if matches!(sink, OutputSink::Shared(_)) {
+                self.shared_sink_buffer.mark_paused(was_playing);
+            }
         }
         #[cfg(target_os = "windows")]
         if self.output_mode == AudioOutputMode::WasapiExclusive && self.release_on_pause {
@@ -1355,6 +1436,7 @@ impl PlayerController {
         self.sink = None;
         self.active_output_device_name = None;
         self.sink_invalidated = false;
+        self.shared_sink_buffer.clear();
 
         // Attempt to open new output
         // 这一支只在共享模式下走，独占模式由 poll_exclusive_output_device 处理，
@@ -1421,6 +1503,7 @@ impl PlayerController {
         self.sink = None;
         self.active_output_device_name = None;
         self.sink_invalidated = false;
+        self.shared_sink_buffer.clear();
 
         let Some(p) = path else {
             return;
@@ -1459,6 +1542,7 @@ impl PlayerController {
         self.active_output_device_name = None;
         self.sink = None;
         self.sink_invalidated = false;
+        self.shared_sink_buffer.clear();
         self.cached_path = None;
         self.cached_pcm = None;
         self.cached_channels = 0;
@@ -2523,6 +2607,7 @@ pub fn set_audio_output_mode(
     c.sink = None;
     c.active_output_device_name = None;
     c.sink_invalidated = false;
+    c.shared_sink_buffer.clear();
     if let Some(d) = c.current_deck.take() {
         d.clear();
     }
@@ -2808,6 +2893,65 @@ mod tests {
         assert_eq!(normalize_playback_speed(f32::INFINITY), 1.0);
         assert_eq!(normalize_playback_speed(0.1), 0.25);
         assert_eq!(normalize_playback_speed(8.0), 4.0);
+    }
+
+    #[test]
+    fn shared_sink_buffer_state_pause_then_seek_resets_on_play() {
+        let mut state = SharedSinkBufferState::default();
+
+        // 正在播放时暂停，缓冲区可能残留旧帧
+        state.mark_paused(true);
+        assert!(!state.needs_reset_on_play());
+
+        // 暂停态连续拖动进度条多次：仅标记待重置，不立即清除
+        state.mark_paused_deck_replaced();
+        assert!(state.needs_reset_on_play());
+        state.mark_paused_deck_replaced();
+        assert!(state.needs_reset_on_play());
+
+        // 恢复播放重建 sink 后复位
+        state.clear();
+        assert!(!state.needs_reset_on_play());
+    }
+
+    #[test]
+    fn shared_sink_buffer_state_pause_then_direct_resume_keeps_sink() {
+        let mut state = SharedSinkBufferState::default();
+
+        state.mark_paused(true);
+        assert!(!state.needs_reset_on_play());
+
+        // 未经 seek/切歌直接恢复播放，不需要重建 sink
+        state.mark_resumed();
+        assert!(!state.needs_reset_on_play());
+        assert!(!state.take_needs_rebuild_for_auto_play());
+    }
+
+    #[test]
+    fn shared_sink_buffer_state_pause_then_auto_play_rebuilds_sink() {
+        let mut state = SharedSinkBufferState::default();
+
+        // 场景 A：暂停后直接切歌并自动播放
+        state.mark_paused(true);
+        assert!(state.take_needs_rebuild_for_auto_play());
+        assert!(!state.take_needs_rebuild_for_auto_play());
+
+        // 场景 B：暂停 -> seek -> 未点播放，直接切歌并自动播放
+        state.mark_paused(true);
+        state.mark_paused_deck_replaced();
+        assert!(state.take_needs_rebuild_for_auto_play());
+        assert!(!state.needs_reset_on_play());
+    }
+
+    #[test]
+    fn shared_sink_buffer_state_never_played_load_does_not_reset() {
+        let mut state = SharedSinkBufferState::default();
+
+        // 从未播放过时触发暂停态加载，不应误触发重建
+        state.mark_paused(false);
+        state.mark_paused_deck_replaced();
+        assert!(!state.needs_reset_on_play());
+        assert!(!state.take_needs_rebuild_for_auto_play());
     }
 
     #[test]
