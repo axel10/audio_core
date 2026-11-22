@@ -716,7 +716,8 @@ class MyExoplayerPlugin :
 
         when (call.method) {
             "play" -> {
-                val fadeDurationMs = call.argument<Int>("fadeDurationMs")?.toLong() ?: 0L
+                val requestedFadeDurationMs = call.argument<Int>("fadeDurationMs")?.toLong() ?: 0L
+                val fadeDurationMs = if (isUsbExclusiveActive()) 0L else requestedFadeDurationMs
                 val targetVolume = call.argument<Double>("targetVolume")?.toFloat() ?: ctx.player.volume
                 val activeCrossfade = playerId == MAIN_PLAYER_ID && activeCrossfadeSession != null
                 if (!activeCrossfade) {
@@ -739,6 +740,9 @@ class MyExoplayerPlugin :
                     ctx.player.play()
                     fadeVolumeTo(ctx, targetVolume, fadeDurationMs, commandGeneration)
                 } else {
+                    if (requestedFadeDurationMs > 0L) {
+                        ctx.player.volume = targetVolume
+                    }
                     ctx.player.play()
                 }
                 NativeLog.d(
@@ -750,7 +754,8 @@ class MyExoplayerPlugin :
                 result.success(null)
             }
             "pause" -> {
-                val fadeDurationMs = call.argument<Int>("fadeDurationMs")?.toLong() ?: 0L
+                val requestedFadeDurationMs = call.argument<Int>("fadeDurationMs")?.toLong() ?: 0L
+                val fadeDurationMs = if (isUsbExclusiveActive()) 0L else requestedFadeDurationMs
                 val activeCrossfade = playerId == MAIN_PLAYER_ID && activeCrossfadeSession != null
                 if (!activeCrossfade) {
                     cancelActiveCrossfade()
@@ -828,7 +833,8 @@ class MyExoplayerPlugin :
             }
             "setVolume" -> {
                 val volume = call.argument<Double>("volume")?.toFloat() ?: 1.0f
-                val fadeDurationMs = call.argument<Int>("fadeDurationMs")?.toLong() ?: 0L
+                val requestedFadeDurationMs = call.argument<Int>("fadeDurationMs")?.toLong() ?: 0L
+                val fadeDurationMs = if (isUsbExclusiveActive()) 0L else requestedFadeDurationMs
                 val activeCrossfade = playerId == MAIN_PLAYER_ID && activeCrossfadeSession != null
                 if (!activeCrossfade) {
                     cancelActiveCrossfade()
@@ -1373,11 +1379,17 @@ class MyExoplayerPlugin :
             // playing. `playWhenReady` is a better signal here because it
             // stays true for active playback and avoids downgrading to an
             // abrupt swap when the state lags by a frame.
-            if (durationMs <= 0L || !mainCtx.player.playWhenReady) {
+            val usbExclusive = isUsbExclusiveActive()
+            if (usbExclusive || durationMs <= 0L || !mainCtx.player.playWhenReady) {
+                val reason = when {
+                    usbExclusive -> "usbExclusive"
+                    durationMs <= 0L -> "zeroDuration"
+                    else -> "playWhenReadyFalse"
+                }
                 NativeLog.d(
                     "AudioCore",
                     "handleCrossfade fallback immediate path=$path durationMs=$durationMs " +
-                        "reason=${if (durationMs <= 0L) "zeroDuration" else "playWhenReadyFalse"}",
+                        "reason=$reason",
                 )
                 cancelActiveCrossfade()
                 val mediaItem = MediaItem.fromUri(Uri.parse(path))
@@ -1494,7 +1506,7 @@ class MyExoplayerPlugin :
             cancelActiveCrossfade()
 
             val mediaItem = MediaItem.fromUri(Uri.parse(path))
-            val shouldFade = durationMs > 0L
+            val shouldFade = !isUsbExclusiveActive() && durationMs > 0L
             val commandGeneration = beginVolumeCommand(mainCtx)
 
             fun loadReplacement() {
@@ -2511,11 +2523,16 @@ class MyExoplayerPlugin :
         }
     }
 
+    private fun isUsbExclusiveActive(): Boolean = usbExclusiveManager?.isExclusiveActive == true
+
     /**
      * Re-prepares active ExoPlayer instances so that `AudioSink.configure()` runs
      * again with the newly switched route (USB exclusive <-> DefaultAudioSink).
      */
     private fun reloadActivePlayersForAudioRouteChange(pauseInsteadOfResume: Boolean) {
+        if (activeCrossfadeSession != null) {
+            settleActiveCrossfadeIfNeeded()
+        }
         for (ctx in playerContexts.values) {
             val player = ctx.player
             if (player.mediaItemCount == 0) continue

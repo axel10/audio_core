@@ -8,6 +8,7 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.ForwardingAudioSink
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Media3 [AudioSink] wrapper that transparently switches between:
@@ -25,7 +26,13 @@ class SwitchableUsbAudioSink(
     private val fftProcessor: FFTAudioProcessor,
 ) : ForwardingAudioSink(delegate) {
 
+    companion object {
+        private val nextStreamToken = AtomicLong(0L)
+        private val activeStreamToken = AtomicLong(0L)
+    }
+
     private var usingUsbForCurrentConfig: Boolean = false
+    private var ownedStreamToken: Long = 0L
     private var configuredSampleRate: Int = 44100
     private var configuredChannels: Int = 2
     private var configuredEncoding: Int = C.ENCODING_PCM_16BIT
@@ -39,6 +46,19 @@ class SwitchableUsbAudioSink(
     // Reusable DirectByteBuffer holding Float32 PCM awaiting write to Rust ring buffer.
     private var pendingFloatBuffer: ByteBuffer =
         ByteBuffer.allocateDirect(64 * 1024).order(ByteOrder.nativeOrder()).apply { limit(0) }
+
+    private fun isActiveUsbOwner(): Boolean =
+        usingUsbForCurrentConfig &&
+            ownedStreamToken != 0L &&
+            activeStreamToken.get() == ownedStreamToken
+
+    private fun releaseUsbOwnershipAndStopIfOwned() {
+        val token = ownedStreamToken
+        ownedStreamToken = 0L
+        if (token != 0L && activeStreamToken.compareAndSet(token, 0L)) {
+            UsbExclusiveNative.nativeStopStream()
+        }
+    }
 
     override fun supportsFormat(format: Format): Boolean {
         if (usbManager.isExclusiveActive && isSupportedPcmFormat(format)) {
@@ -74,6 +94,9 @@ class SwitchableUsbAudioSink(
                 UsbExclusiveNative.nativeStartStream()
 
             if (ok) {
+                val token = nextStreamToken.incrementAndGet()
+                ownedStreamToken = token
+                activeStreamToken.set(token)
                 usingUsbForCurrentConfig = true
                 configuredSampleRate = sr
                 configuredChannels = ch
@@ -113,14 +136,19 @@ class SwitchableUsbAudioSink(
             }
         }
 
-        usingUsbForCurrentConfig = false
+        if (usingUsbForCurrentConfig) {
+            usingUsbForCurrentConfig = false
+            releaseUsbOwnershipAndStopIfOwned()
+        }
         super.configure(inputFormat, specifiedBufferSize, outputChannels)
     }
 
     override fun play() {
         isPlayingUsb = true
         if (usingUsbForCurrentConfig) {
-            UsbExclusiveNative.nativeSetPaused(false)
+            if (isActiveUsbOwner()) {
+                UsbExclusiveNative.nativeSetPaused(false)
+            }
             return
         }
         super.play()
@@ -129,7 +157,9 @@ class SwitchableUsbAudioSink(
     override fun pause() {
         isPlayingUsb = false
         if (usingUsbForCurrentConfig) {
-            UsbExclusiveNative.nativeSetPaused(true)
+            if (isActiveUsbOwner()) {
+                UsbExclusiveNative.nativeSetPaused(true)
+            }
             return
         }
         super.pause()
@@ -152,8 +182,8 @@ class SwitchableUsbAudioSink(
             return super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
         }
 
-        // If USB DAC was detached mid-playback, drain gracefully.
-        if (!usbManager.isExclusiveActive) {
+        // If USB DAC was detached mid-playback or another sink took ownership, drain gracefully.
+        if (!usbManager.isExclusiveActive || !isActiveUsbOwner()) {
             buffer.position(buffer.limit())
             return true
         }
@@ -221,6 +251,9 @@ class SwitchableUsbAudioSink(
 
     override fun isEnded(): Boolean {
         if (usingUsbForCurrentConfig) {
+            if (!isActiveUsbOwner()) {
+                return handledEndOfStream
+            }
             return handledEndOfStream &&
                 !pendingFloatBuffer.hasRemaining() &&
                 UsbExclusiveNative.nativeGetBufferedFrames() == 0L
@@ -230,6 +263,9 @@ class SwitchableUsbAudioSink(
 
     override fun hasPendingData(): Boolean {
         if (usingUsbForCurrentConfig) {
+            if (!isActiveUsbOwner()) {
+                return false
+            }
             return pendingFloatBuffer.hasRemaining() ||
                 UsbExclusiveNative.nativeGetBufferedFrames() > 0L
         }
@@ -238,7 +274,7 @@ class SwitchableUsbAudioSink(
 
     override fun getCurrentPositionUs(sourceEnded: Boolean): Long {
         if (usingUsbForCurrentConfig) {
-            if (startPresentationTimeUs == C.TIME_UNSET || configuredSampleRate <= 0) {
+            if (!isActiveUsbOwner() || startPresentationTimeUs == C.TIME_UNSET || configuredSampleRate <= 0) {
                 return AudioSink.CURRENT_POSITION_NOT_SET
             }
             val playedFrames = UsbExclusiveNative.nativeGetPlayedFrames()
@@ -251,7 +287,9 @@ class SwitchableUsbAudioSink(
     override fun setVolume(volume: Float) {
         currentVolume = volume.coerceIn(0f, 1f)
         if (usingUsbForCurrentConfig) {
-            UsbExclusiveNative.nativeSetVolume(currentVolume)
+            if (isActiveUsbOwner()) {
+                UsbExclusiveNative.nativeSetVolume(currentVolume)
+            }
             return
         }
         super.setVolume(volume)
@@ -264,7 +302,9 @@ class SwitchableUsbAudioSink(
             startPresentationTimeUs = C.TIME_UNSET
             lastSubmittedPresentationTimeUs = C.TIME_UNSET
             handledEndOfStream = false
-            UsbExclusiveNative.nativeFlushStream()
+            if (isActiveUsbOwner()) {
+                UsbExclusiveNative.nativeFlushStream()
+            }
             return
         }
         super.flush()
@@ -278,7 +318,7 @@ class SwitchableUsbAudioSink(
             lastSubmittedPresentationTimeUs = C.TIME_UNSET
             handledEndOfStream = false
             usingUsbForCurrentConfig = false
-            UsbExclusiveNative.nativeStopStream()
+            releaseUsbOwnershipAndStopIfOwned()
             return
         }
         super.reset()
@@ -287,7 +327,7 @@ class SwitchableUsbAudioSink(
     override fun release() {
         if (usingUsbForCurrentConfig) {
             usingUsbForCurrentConfig = false
-            UsbExclusiveNative.nativeStopStream()
+            releaseUsbOwnershipAndStopIfOwned()
         }
         super.release()
     }
