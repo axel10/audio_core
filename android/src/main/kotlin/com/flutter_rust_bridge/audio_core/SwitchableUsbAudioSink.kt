@@ -17,7 +17,8 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * When USB exclusive mode is active, decoded PCM bypasses Android's AudioTrack
  * and AudioFlinger completely, keeping native sample rates and feeding the USB
- * DAC directly while still driving [cppEqualizerProcessor] and [fftProcessor].
+ * DAC directly while still driving [fftProcessor] for visualization (bypassing
+ * [cppEqualizerProcessor], [rustReverbProcessor], and playback speed DSP).
  */
 @UnstableApi
 class SwitchableUsbAudioSink(
@@ -178,6 +179,29 @@ class SwitchableUsbAudioSink(
         super.handleDiscontinuity()
     }
 
+    private fun drainPendingFloatBuffer(): Boolean {
+        if (!pendingFloatBuffer.hasRemaining()) {
+            return true
+        }
+        if (!usbManager.isExclusiveActive || !isActiveUsbOwner()) {
+            pendingFloatBuffer.position(pendingFloatBuffer.limit())
+            return true
+        }
+        if (pendingFloatBuffer.remaining() < 4) {
+            pendingFloatBuffer.position(pendingFloatBuffer.limit())
+            return true
+        }
+        val written = UsbExclusiveNative.nativeWriteFloatPcm(
+            pendingFloatBuffer,
+            pendingFloatBuffer.position(),
+            pendingFloatBuffer.remaining(),
+        )
+        if (written > 0) {
+            pendingFloatBuffer.position(pendingFloatBuffer.position() + written)
+        }
+        return !pendingFloatBuffer.hasRemaining()
+    }
+
     override fun handleBuffer(
         buffer: ByteBuffer,
         presentationTimeUs: Long,
@@ -194,18 +218,8 @@ class SwitchableUsbAudioSink(
         }
 
         // First drain any leftover samples from the previous call.
-        if (pendingFloatBuffer.hasRemaining()) {
-            val written = UsbExclusiveNative.nativeWriteFloatPcm(
-                pendingFloatBuffer,
-                pendingFloatBuffer.position(),
-                pendingFloatBuffer.remaining(),
-            )
-            if (written > 0) {
-                pendingFloatBuffer.position(pendingFloatBuffer.position() + written)
-            }
-            if (pendingFloatBuffer.hasRemaining()) {
-                return false
-            }
+        if (!drainPendingFloatBuffer()) {
+            return false
         }
 
         val remainingBytes = buffer.remaining()
@@ -238,24 +252,19 @@ class SwitchableUsbAudioSink(
         } catch (_: Throwable) {
         }
 
-        val written = UsbExclusiveNative.nativeWriteFloatPcm(
-            pendingFloatBuffer,
-            pendingFloatBuffer.position(),
-            pendingFloatBuffer.remaining(),
-        )
-        if (written > 0) {
-            pendingFloatBuffer.position(pendingFloatBuffer.position() + written)
-        }
+        drainPendingFloatBuffer()
 
         // We already consumed `buffer` into `pendingFloatBuffer`; return true so
         // ExoPlayer advances, and any remainder in `pendingFloatBuffer` will apply
-        // backpressure on the very next `handleBuffer` call.
+        // backpressure on the very next `handleBuffer` call or be drained during
+        // EOS polling in `playToEndOfStream` / `isEnded` / `hasPendingData`.
         return true
     }
 
     override fun playToEndOfStream() {
         if (usingUsbForCurrentConfig) {
             handledEndOfStream = true
+            drainPendingFloatBuffer()
             return
         }
         super.playToEndOfStream()
@@ -263,8 +272,11 @@ class SwitchableUsbAudioSink(
 
     override fun isEnded(): Boolean {
         if (usingUsbForCurrentConfig) {
-            if (!isActiveUsbOwner()) {
+            if (!usbManager.isExclusiveActive || !isActiveUsbOwner()) {
                 return handledEndOfStream
+            }
+            if (handledEndOfStream) {
+                drainPendingFloatBuffer()
             }
             return handledEndOfStream &&
                 !pendingFloatBuffer.hasRemaining() &&
@@ -275,8 +287,11 @@ class SwitchableUsbAudioSink(
 
     override fun hasPendingData(): Boolean {
         if (usingUsbForCurrentConfig) {
-            if (!isActiveUsbOwner()) {
+            if (!usbManager.isExclusiveActive || !isActiveUsbOwner()) {
                 return false
+            }
+            if (handledEndOfStream) {
+                drainPendingFloatBuffer()
             }
             return pendingFloatBuffer.hasRemaining() ||
                 UsbExclusiveNative.nativeGetBufferedFrames() > 0L
