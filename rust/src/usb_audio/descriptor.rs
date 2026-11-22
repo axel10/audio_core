@@ -181,8 +181,11 @@ fn query_uac2_clock_rates(
 }
 
 /// Inspect active USB configuration descriptor and collect all PCM playback candidates.
+///
+/// Pure descriptor inspection (no control transfers). For UAC 2.0 devices, call
+/// [`refresh_uac2_clock_rates`] after claiming the AudioControl interface so the
+/// kernel `snd-usb-audio` driver cannot interfere with the `RANGE` control transfer.
 pub fn parse_usb_audio_device(
-    handle: &DeviceHandle<Context>,
     config: &ConfigDescriptor,
     speed: Speed,
 ) -> Result<ParsedUsbAudioDevice, String> {
@@ -227,14 +230,6 @@ pub fn parse_usb_audio_device(
 
     let control_interface =
         control_interface.ok_or_else(|| "No USB AudioControl interface found".to_string())?;
-
-    let uac2_clock_rates = if uac_version == UacVersion::Uac2 {
-        clock_source_id
-            .map(|cs_id| query_uac2_clock_rates(handle, control_interface, cs_id))
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
 
     // Pass 2: enumerate AudioStreaming OUT alt-settings.
     let mut candidates = Vec::new();
@@ -365,11 +360,9 @@ pub fn parse_usb_audio_device(
             }
 
             if iface_uac == UacVersion::Uac2 {
-                sample_rates = if !uac2_clock_rates.is_empty() {
-                    uac2_clock_rates.clone()
-                } else {
-                    vec![44_100, 48_000, 88_200, 96_000, 176_400, 192_000]
-                };
+                // Populated with hardware-reported rates in `refresh_uac2_clock_rates()`
+                // once the AudioControl interface is claimed.
+                sample_rates = vec![44_100, 48_000, 88_200, 96_000, 176_400, 192_000];
             } else if sample_rates.is_empty() {
                 sample_rates = vec![44_100, 48_000];
             }
@@ -410,6 +403,29 @@ pub fn parse_usb_audio_device(
         feature_unit_id,
         candidates,
     })
+}
+
+/// Query hardware-supported sample rates for a UAC 2.0 Clock Source after the
+/// AudioControl interface has been claimed, updating all UAC 2.0 candidates.
+pub fn refresh_uac2_clock_rates(
+    handle: &DeviceHandle<Context>,
+    parsed: &mut ParsedUsbAudioDevice,
+) {
+    if parsed.uac_version != UacVersion::Uac2 {
+        return;
+    }
+    let Some(cs_id) = parsed.clock_source_id else {
+        return;
+    };
+    let rates = query_uac2_clock_rates(handle, parsed.control_interface, cs_id);
+    if rates.is_empty() {
+        return;
+    }
+    for candidate in &mut parsed.candidates {
+        if candidate.uac_version == UacVersion::Uac2 {
+            candidate.sample_rates = rates.clone();
+        }
+    }
 }
 
 /// Select the best PCM alt-setting for the requested `(sample_rate, channels, preferred_bit_depth)`.

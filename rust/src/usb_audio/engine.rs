@@ -6,8 +6,8 @@
 //! buffer to the DAC via asynchronous `libusb` isochronous transfers.
 
 use crate::usb_audio::descriptor::{
-    parse_usb_audio_device, select_best_candidate, AudioStreamCandidate, ParsedUsbAudioDevice,
-    UacVersion,
+    parse_usb_audio_device, refresh_uac2_clock_rates, select_best_candidate, AudioStreamCandidate,
+    ParsedUsbAudioDevice, UacVersion, USB_CLASS_AUDIO,
 };
 use crate::usb_audio::iso_scheduler::IsoPacketScheduler;
 use libusb1_sys::{
@@ -131,9 +131,10 @@ impl Default for UsbExclusiveStatus {
 }
 
 struct RegisteredDevice {
-    _owned_fd: OwnedFd,
-    context: Context,
+    // Drop order matters: release libusb handle before context and before closing dup_fd.
     handle: DeviceHandle<Context>,
+    context: Context,
+    _owned_fd: OwnedFd,
     vendor_id: u16,
     product_id: u16,
     device_name: String,
@@ -217,20 +218,138 @@ static USB_STATE: Lazy<Mutex<GlobalUsbState>> = Lazy::new(|| Mutex::new(GlobalUs
 /// contends with status queries or control calls.
 static PCM_PRODUCER: Lazy<Mutex<Option<rtrb::Producer<f32>>>> = Lazy::new(|| Mutex::new(None));
 
-fn claim_interface_force(handle: &DeviceHandle<Context>, iface: u8) -> Result<(), String> {
-    if supports_detach_kernel_driver() {
+#[repr(C)]
+struct UsbdevfsGetDriver {
+    interface: c_uint,
+    driver: [u8; 256],
+}
+
+#[repr(C)]
+struct UsbdevfsIoctl {
+    ifno: c_int,
+    ioctl_code: c_int,
+    data: *mut c_void,
+}
+
+const fn usbdevfs_iow(nr: u32, size: usize) -> u32 {
+    0x4000_0000 | ((size as u32) << 16) | ((b'U' as u32) << 8) | nr
+}
+
+const fn usbdevfs_iowr(nr: u32, size: usize) -> u32 {
+    0xC000_0000 | ((size as u32) << 16) | ((b'U' as u32) << 8) | nr
+}
+
+// Linux <linux/usbdevice_fs.h>
+const USBDEVFS_GETDRIVER: u32 = usbdevfs_iow(8, std::mem::size_of::<UsbdevfsGetDriver>());
+const USBDEVFS_IOCTL: u32 = usbdevfs_iowr(18, std::mem::size_of::<UsbdevfsIoctl>());
+const USBDEVFS_DISCONNECT: c_int = ((b'U' as c_int) << 8) | 22;
+const USBDEVFS_CONNECT: c_int = ((b'U' as c_int) << 8) | 23;
+
+fn query_usbfs_driver_name(fd: RawFd, iface: u8) -> Result<String, std::io::Error> {
+    let mut info = UsbdevfsGetDriver {
+        interface: iface as c_uint,
+        driver: [0u8; 256],
+    };
+    let rc = unsafe {
+        libc::ioctl(
+            fd,
+            USBDEVFS_GETDRIVER as _,
+            &mut info as *mut UsbdevfsGetDriver,
+        )
+    };
+    if rc == 0 {
+        let nul_pos = info
+            .driver
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(info.driver.len());
+        Ok(String::from_utf8_lossy(&info.driver[..nul_pos]).into_owned())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+fn format_usbfs_driver(res: &Result<String, std::io::Error>) -> String {
+    match res {
+        Ok(name) => format!("driver=\"{}\"", name),
+        Err(err) => format!("ioctl_err={} (raw_os_error={:?})", err, err.raw_os_error()),
+    }
+}
+
+/// Directly sends `USBDEVFS_IOCTL(USBDEVFS_DISCONNECT)` to detach any driver
+/// currently bound to `iface`, including a stale `"usbfs"` claim that `libusb`
+/// intentionally skips in `detach_kernel_driver()` / `auto_detach_kernel_driver`.
+fn force_disconnect_usbfs_driver(fd: RawFd, iface: u8) -> Result<(), std::io::Error> {
+    let mut ctl = UsbdevfsIoctl {
+        ifno: iface as c_int,
+        ioctl_code: USBDEVFS_DISCONNECT,
+        data: std::ptr::null_mut(),
+    };
+    let rc = unsafe { libc::ioctl(fd, USBDEVFS_IOCTL as _, &mut ctl as *mut UsbdevfsIoctl) };
+    if rc >= 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+/// Directly sends `USBDEVFS_IOCTL(USBDEVFS_CONNECT)` to re-attach the Linux
+/// kernel driver (e.g. `snd-usb-audio`) to an unbound USB interface.
+fn force_connect_usbfs_driver(fd: RawFd, iface: u8) -> Result<(), std::io::Error> {
+    let mut ctl = UsbdevfsIoctl {
+        ifno: iface as c_int,
+        ioctl_code: USBDEVFS_CONNECT,
+        data: std::ptr::null_mut(),
+    };
+    let rc = unsafe { libc::ioctl(fd, USBDEVFS_IOCTL as _, &mut ctl as *mut UsbdevfsIoctl) };
+    if rc >= 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+fn claim_interface_force(
+    handle: &DeviceHandle<Context>,
+    fd: RawFd,
+    iface: u8,
+) -> Result<(), String> {
+    let supports_detach = supports_detach_kernel_driver();
+    let initial_drv = query_usbfs_driver_name(fd, iface);
+
+    if let Ok(ref drv) = initial_drv {
+        if drv == "usbfs" {
+            let res = force_disconnect_usbfs_driver(fd, iface);
+            log::warn!(
+                "[UsbAudio] iface={} held by stale usbfs; force USBDEVFS_DISCONNECT -> {:?}",
+                iface,
+                res,
+            );
+        } else if supports_detach {
+            let _ = handle.detach_kernel_driver(iface);
+        }
+    } else if supports_detach {
         if let Ok(true) = handle.kernel_driver_active(iface) {
             let _ = handle.detach_kernel_driver(iface);
         }
     }
+
     for attempt in 0..6 {
         match handle.claim_interface(iface) {
             Ok(()) => return Ok(()),
             Err(err) => {
+                let drv_now = query_usbfs_driver_name(fd, iface);
                 if attempt == 5 {
-                    return Err(format!("claim_interface({}) failed: {}", iface, err));
+                    return Err(format!(
+                        "claim_interface({}) failed: {} [{}]",
+                        iface,
+                        err,
+                        format_usbfs_driver(&drv_now)
+                    ));
                 }
-                if supports_detach_kernel_driver() {
+                if matches!(drv_now.as_deref(), Ok("usbfs")) {
+                    let _ = force_disconnect_usbfs_driver(fd, iface);
+                } else if supports_detach {
                     let _ = handle.detach_kernel_driver(iface);
                 }
                 thread::sleep(Duration::from_millis(50));
@@ -650,19 +769,24 @@ pub fn register_device(
         .active_config_descriptor()
         .map_err(|e| format!("Failed to read USB active config descriptor: {}", e))?;
 
-    let parsed = parse_usb_audio_device(&handle, &config, speed)?;
+    let mut parsed = parse_usb_audio_device(&config, speed)?;
 
     // Claim all AudioControl & AudioStreaming interfaces right away so kernel
-    // `snd-usb-audio` is detached immediately upon enabling exclusive mode.
+    // `snd-usb-audio` (or any stale `usbfs` claim) is detached before issuing
+    // class-specific control transfers.
     let mut claimed = Vec::new();
     for &iface in &parsed.all_audio_interfaces {
-        if let Err(err) = claim_interface_force(&handle, iface) {
+        if let Err(err) = claim_interface_force(&handle, owned_fd.raw(), iface) {
             release_interfaces_and_restore_kernel(&handle, &claimed);
             state.last_error = Some(err.clone());
             return Err(err);
         }
         claimed.push(iface);
     }
+
+    // Query UAC 2.0 clock rates after claiming AudioControl so `snd-usb-audio`
+    // does not interfere with the RANGE control transfer.
+    refresh_uac2_clock_rates(&handle, &mut parsed);
 
     log::info!(
         "[UsbAudio] Registered exclusive USB DAC: {} ({:04x}:{:04x}) {:?}, {} candidates, claimed={:?}",
@@ -708,6 +832,88 @@ pub fn clear_device() {
     state.active_candidate = None;
     state.configured_sample_rate = 0;
     state.configured_channels = 0;
+}
+
+/// Recover a USB Audio DAC left without `snd-usb-audio` (or with a stale
+/// `"usbfs"` claim) after the previous app process was force-stopped while in
+/// exclusive mode.
+///
+/// Returns `Ok(true)` if at least one audio interface was re-attached to the
+/// kernel audio driver.
+pub fn restore_kernel_driver(fd: RawFd) -> Result<bool, String> {
+    init_libusb_for_android();
+
+    let owned_fd = OwnedFd::duplicate(fd)?;
+    let context =
+        Context::new().map_err(|e| format!("Failed to create libusb context: {}", e))?;
+    let handle = unsafe { context.open_device_with_fd(owned_fd.raw()) }
+        .map_err(|e| format!("libusb open_device_with_fd({}) failed: {}", owned_fd.raw(), e))?;
+
+    let config = handle
+        .device()
+        .active_config_descriptor()
+        .map_err(|e| format!("Failed to read USB active config descriptor: {}", e))?;
+
+    let mut audio_interfaces = Vec::new();
+    for interface in config.interfaces() {
+        let iface_num = interface.number();
+        if interface
+            .descriptors()
+            .any(|d| d.class_code() == USB_CLASS_AUDIO)
+        {
+            audio_interfaces.push(iface_num);
+        }
+    }
+    audio_interfaces.sort_unstable();
+    audio_interfaces.dedup();
+
+    if audio_interfaces.is_empty() {
+        drop(handle);
+        drop(context);
+        return Ok(false);
+    }
+
+    // Pass 1: disconnect any stale `usbfs` claims across all audio interfaces
+    // before re-attaching `snd-usb-audio`, since probing AudioControl (iface 0)
+    // also claims the associated AudioStreaming interfaces.
+    for &iface in &audio_interfaces {
+        if matches!(
+            query_usbfs_driver_name(owned_fd.raw(), iface).as_deref(),
+            Ok("usbfs")
+        ) {
+            let res = force_disconnect_usbfs_driver(owned_fd.raw(), iface);
+            log::info!(
+                "[UsbAudio] restore_kernel_driver: disconnected stale usbfs on iface={} -> {:?}",
+                iface,
+                res,
+            );
+        }
+    }
+
+    // Pass 2: re-attach kernel driver (`snd-usb-audio`) on any unbound audio interface.
+    let mut restored_any = false;
+    for &iface in &audio_interfaces {
+        match query_usbfs_driver_name(owned_fd.raw(), iface) {
+            Ok(drv) if drv != "usbfs" => {
+                // Already bound to a kernel driver (e.g. `snd-usb-audio`).
+            }
+            _ => {
+                let res = force_connect_usbfs_driver(owned_fd.raw(), iface);
+                log::info!(
+                    "[UsbAudio] restore_kernel_driver: USBDEVFS_CONNECT iface={} -> {:?}",
+                    iface,
+                    res,
+                );
+                if res.is_ok() {
+                    restored_any = true;
+                }
+            }
+        }
+    }
+
+    drop(handle);
+    drop(context);
+    Ok(restored_any)
 }
 
 /// Configure DAC alt-setting and clock rate for the incoming ExoPlayer PCM format.

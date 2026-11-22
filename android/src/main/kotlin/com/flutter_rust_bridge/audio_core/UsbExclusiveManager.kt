@@ -26,10 +26,14 @@ class UsbExclusiveManager(
     companion object {
         private const val ACTION_USB_PERMISSION =
             "com.flutter_rust_bridge.audio_core.USB_EXCLUSIVE_PERMISSION"
+        private const val PREFS_NAME = "vynody_usb_exclusive_prefs"
+        private const val KEY_WAS_EXCLUSIVE_ACTIVE = "was_exclusive_active"
+        private const val KEY_LAST_EXCLUSIVE_VID_PID = "last_exclusive_vid_pid"
     }
 
     private val usbManager: UsbManager? =
         context.getSystemService(Context.USB_SERVICE) as? UsbManager
+    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val audioKeepAlive = UsbExclusiveAudioKeepAlive()
 
@@ -98,6 +102,7 @@ class UsbExclusiveManager(
             context.registerReceiver(usbReceiver, filter)
         }
         receiversRegistered = true
+        restoreKernelDriverIfUncleanExit()
     }
 
     fun stopListening() {
@@ -252,6 +257,7 @@ class UsbExclusiveManager(
         activeConnection = connection
         activeDeviceName = device.deviceName
         isExclusiveActive = true
+        persistExclusiveSessionFlag(active = true, device = device)
         notifyStateChanged("exclusive_enabled")
         return Pair(true, null)
     }
@@ -271,9 +277,70 @@ class UsbExclusiveManager(
         } catch (_: Throwable) {
         }
         activeConnection = null
+        if (wasActive) {
+            persistExclusiveSessionFlag(active = false, device = null)
+        }
         if (wasActive && notifyEvent != null) {
             notifyStateChanged(notifyEvent)
         }
+    }
+
+    private fun deviceVidPidKey(device: UsbDevice): String =
+        String.format("%04X:%04X", device.vendorId, device.productId)
+
+    private fun persistExclusiveSessionFlag(active: Boolean, device: UsbDevice?) {
+        prefs.edit().apply {
+            putBoolean(KEY_WAS_EXCLUSIVE_ACTIVE, active)
+            if (active && device != null) {
+                putString(KEY_LAST_EXCLUSIVE_VID_PID, deviceVidPidKey(device))
+            }
+            apply()
+        }
+    }
+
+    /**
+     * If the previous process was force-stopped or crashed while USB exclusive
+     * mode was active, `snd-usb-audio` could not be re-attached on exit, leaving
+     * normal system audio playback silent until the DAC is replugged.
+     *
+     * On next startup, silently disconnect any stale `usbfs` claim and re-attach
+     * `snd-usb-audio` for the previously owned DAC (only when permission is
+     * already granted, so no permission prompt is shown and other apps' active
+     * exclusive sessions are never disturbed).
+     */
+    private fun restoreKernelDriverIfUncleanExit() {
+        if (!prefs.getBoolean(KEY_WAS_EXCLUSIVE_ACTIVE, false)) return
+        val lastVidPid = prefs.getString(KEY_LAST_EXCLUSIVE_VID_PID, null)
+        persistExclusiveSessionFlag(active = false, device = null)
+
+        val manager = usbManager ?: return
+        val targetDevice = manager.deviceList.values.firstOrNull { dev ->
+            isUsbAudioDevice(dev) &&
+                manager.hasPermission(dev) &&
+                (lastVidPid == null || deviceVidPidKey(dev) == lastVidPid)
+        } ?: return
+
+        Thread({
+            if (isExclusiveActive) return@Thread
+            var conn: UsbDeviceConnection? = null
+            try {
+                conn = manager.openDevice(targetDevice) ?: return@Thread
+                val fd = conn.fileDescriptor
+                if (fd < 0 || isExclusiveActive) return@Thread
+                val restored = UsbExclusiveNative.nativeRestoreKernelDriver(fd)
+                NativeLog.d(
+                    "UsbExclusive",
+                    "Recovered USB DAC after unclean exit (${displayName(targetDevice)}): restored=$restored",
+                )
+            } catch (t: Throwable) {
+                NativeLog.d("UsbExclusive", "restoreKernelDriverIfUncleanExit error: ${t.message}")
+            } finally {
+                try {
+                    conn?.close()
+                } catch (_: Throwable) {
+                }
+            }
+        }, "UsbExclusiveRestore").start()
     }
 
     private fun notifyStateChanged(eventType: String) {

@@ -51,6 +51,27 @@ pub extern "system" fn Java_com_flutter_1rust_1bridge_audio_1core_UsbExclusiveNa
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_flutter_1rust_1bridge_audio_1core_UsbExclusiveNative_nativeRestoreKernelDriver(
+    _env: JNIEnv,
+    _class: JClass,
+    fd: jint,
+) -> jboolean {
+    match engine::restore_kernel_driver(fd) {
+        Ok(restored) => {
+            if restored {
+                JNI_TRUE
+            } else {
+                JNI_FALSE
+            }
+        }
+        Err(err) => {
+            log::warn!("[UsbAudio] nativeRestoreKernelDriver error: {}", err);
+            JNI_FALSE
+        }
+    }
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_flutter_1rust_1bridge_audio_1core_UsbExclusiveNative_nativeConfigureStream(
     _env: JNIEnv,
     _class: JClass,

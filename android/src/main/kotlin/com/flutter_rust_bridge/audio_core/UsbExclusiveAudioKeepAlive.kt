@@ -24,7 +24,7 @@ import kotlin.math.roundToInt
  *   audible level on speakers or other outputs.
  * - Non-blocking writes never stall or backpressure the USB exclusive clock.
  */
-internal class UsbExclusiveAudioKeepAlive {
+class UsbExclusiveAudioKeepAlive {
     companion object {
         private const val MAX_KEEP_ALIVE_SAMPLE_RATE = 48000
         private const val MIN_KEEP_ALIVE_SAMPLE_RATE = 8000

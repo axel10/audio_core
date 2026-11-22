@@ -23,6 +23,8 @@ object UsbExclusiveNative {
 
     external fun nativeClearDevice()
 
+    external fun nativeRestoreKernelDriver(fd: Int): Boolean
+
     external fun nativeConfigureStream(
         sampleRate: Int,
         channels: Int,
