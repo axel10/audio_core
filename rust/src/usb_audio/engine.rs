@@ -300,6 +300,22 @@ fn configure_sample_rate(
     Ok(())
 }
 
+/// Dynamic range (in dB) of the perceptual logarithmic volume curve for USB
+/// exclusive output. `0.0` is hard-muted and `1.0` is bit-perfect unity gain.
+const USB_VOLUME_MIN_DB: f32 = 60.0;
+
+/// Map a linear UI volume in `[0.0, 1.0]` to a perceptual logarithmic gain
+/// spanning `-60 dB .. 0 dB`.
+pub(crate) fn volume_to_perceptual_gain(volume: f32) -> f32 {
+    if !volume.is_finite() || volume <= 0.0 {
+        return 0.0;
+    }
+    if volume >= 1.0 {
+        return 1.0;
+    }
+    10.0_f32.powf((volume - 1.0) * (USB_VOLUME_MIN_DB / 20.0))
+}
+
 /// Convert interleaved f32 samples into the wire format expected by the DAC.
 fn pack_f32_to_wire(
     samples: &[f32],
@@ -308,7 +324,7 @@ fn pack_f32_to_wire(
     volume: f32,
     out: &mut [u8],
 ) {
-    let gain = volume.clamp(0.0, 1.0);
+    let gain = volume_to_perceptual_gain(volume);
     match subslot_size {
         2 => {
             for (i, &s) in samples.iter().enumerate() {
@@ -1088,4 +1104,63 @@ pub fn get_status_json() -> String {
     let state = USB_STATE.lock();
     let status = build_status_locked(&state);
     serde_json::to_string(&status).unwrap_or_else(|_| "{}".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn perceptual_gain_handles_boundaries_and_non_finite() {
+        assert_eq!(volume_to_perceptual_gain(0.0), 0.0);
+        assert_eq!(volume_to_perceptual_gain(-0.5), 0.0);
+        assert_eq!(volume_to_perceptual_gain(f32::NAN), 0.0);
+        assert_eq!(volume_to_perceptual_gain(f32::NEG_INFINITY), 0.0);
+        assert_eq!(volume_to_perceptual_gain(f32::INFINITY), 0.0);
+
+        assert_eq!(volume_to_perceptual_gain(1.0), 1.0);
+        assert_eq!(volume_to_perceptual_gain(1.5), 1.0);
+    }
+
+    #[test]
+    fn perceptual_gain_follows_60db_logarithmic_curve() {
+        // 50% -> -30 dB => 10^(-1.5) ≈ 0.03162278
+        let half = volume_to_perceptual_gain(0.5);
+        assert!((half - 10.0_f32.powf(-1.5)).abs() < 1e-5);
+
+        // 25% -> -45 dB => 10^(-2.25) ≈ 0.00562341
+        let quarter = volume_to_perceptual_gain(0.25);
+        assert!((quarter - 10.0_f32.powf(-2.25)).abs() < 1e-5);
+
+        // Strictly monotonic over (0, 1].
+        let mut prev = volume_to_perceptual_gain(0.0);
+        for step in 1..=100 {
+            let cur = volume_to_perceptual_gain(step as f32 / 100.0);
+            assert!(cur > prev, "gain must increase at step={step}");
+            prev = cur;
+        }
+    }
+
+    #[test]
+    fn pack_f32_to_wire_applies_unity_and_perceptual_scaling() {
+        let samples = [1.0_f32, -1.0_f32];
+
+        // Unity gain (100%): exact full-scale 16-bit output.
+        let mut out_full = [0u8; 4];
+        pack_f32_to_wire(&samples, 2, 16, 1.0, &mut out_full);
+        assert_eq!(i16::from_le_bytes([out_full[0], out_full[1]]), 32767);
+        assert_eq!(i16::from_le_bytes([out_full[2], out_full[3]]), -32767);
+
+        // 50% UI volume: attenuated by -30 dB (~1036 out of 32767).
+        let mut out_half = [0u8; 4];
+        pack_f32_to_wire(&samples, 2, 16, 0.5, &mut out_half);
+        let expected_half = (10.0_f32.powf(-1.5) * 32767.0).round() as i16;
+        assert_eq!(i16::from_le_bytes([out_half[0], out_half[1]]), expected_half);
+        assert_eq!(i16::from_le_bytes([out_half[2], out_half[3]]), -expected_half);
+
+        // 0% UI volume: strict digital silence.
+        let mut out_mute = [0xffu8; 4];
+        pack_f32_to_wire(&samples, 2, 16, 0.0, &mut out_mute);
+        assert_eq!(out_mute, [0, 0, 0, 0]);
+    }
 }
