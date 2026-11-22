@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import org.json.JSONObject
+import java.nio.ByteBuffer
 
 /**
  * Manages Android USB Audio device discovery, permission prompts, hotplug
@@ -30,6 +31,7 @@ class UsbExclusiveManager(
     private val usbManager: UsbManager? =
         context.getSystemService(Context.USB_SERVICE) as? UsbManager
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val audioKeepAlive = UsbExclusiveAudioKeepAlive()
 
     @Volatile
     var isExclusiveActive: Boolean = false
@@ -181,6 +183,36 @@ class UsbExclusiveManager(
 
     fun getStatusJson(): String = UsbExclusiveNative.nativeGetStatusJson()
 
+    /**
+     * Configures the source format for the low-volume real-PCM keep-alive
+     * [AudioTrack] used during active USB exclusive playback.
+     */
+    fun configureKeepAlive(sampleRate: Int, channelCount: Int) {
+        audioKeepAlive.configure(sampleRate, channelCount)
+    }
+
+    /**
+     * Toggles the low-volume [AudioTrack] keep-alive anchor used during active
+     * USB exclusive playback so OEM power managers do not freeze the process on
+     * screen-off.
+     */
+    fun setKeepAliveActive(active: Boolean) {
+        if (active && isExclusiveActive) {
+            audioKeepAlive.start()
+        } else {
+            audioKeepAlive.stop()
+        }
+    }
+
+    /**
+     * Feeds interleaved Float32 PCM (native byte order) to the keep-alive
+     * [AudioTrack] without blocking.
+     */
+    fun feedKeepAliveFloatPcm(floatPcm: ByteBuffer, sourceChannels: Int) {
+        if (!isExclusiveActive) return
+        audioKeepAlive.feedFloatPcm(floatPcm, sourceChannels)
+    }
+
     private fun attachDeviceInternal(device: UsbDevice): Pair<Boolean, String?> {
         val manager = usbManager ?: return Pair(false, "UsbManager unavailable")
 
@@ -228,6 +260,7 @@ class UsbExclusiveManager(
         val wasActive = isExclusiveActive || activeConnection != null
         isExclusiveActive = false
         activeDeviceName = null
+        audioKeepAlive.stop()
         try {
             UsbExclusiveNative.nativeClearDevice()
         } catch (t: Throwable) {

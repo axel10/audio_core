@@ -56,6 +56,7 @@ class SwitchableUsbAudioSink(
         val token = ownedStreamToken
         ownedStreamToken = 0L
         if (token != 0L && activeStreamToken.compareAndSet(token, 0L)) {
+            usbManager.setKeepAliveActive(false)
             UsbExclusiveNative.nativeStopStream()
         }
     }
@@ -109,6 +110,8 @@ class SwitchableUsbAudioSink(
 
                 UsbExclusiveNative.nativeSetVolume(currentVolume)
                 UsbExclusiveNative.nativeSetPaused(!isPlayingUsb)
+                usbManager.configureKeepAlive(sr, ch)
+                usbManager.setKeepAliveActive(isPlayingUsb)
 
                 // Keep FFT visualizer alive during USB exclusive playback.
                 try {
@@ -148,6 +151,7 @@ class SwitchableUsbAudioSink(
         if (usingUsbForCurrentConfig) {
             if (isActiveUsbOwner()) {
                 UsbExclusiveNative.nativeSetPaused(false)
+                usbManager.setKeepAliveActive(true)
             }
             return
         }
@@ -159,6 +163,7 @@ class SwitchableUsbAudioSink(
         if (usingUsbForCurrentConfig) {
             if (isActiveUsbOwner()) {
                 UsbExclusiveNative.nativeSetPaused(true)
+                usbManager.setKeepAliveActive(false)
             }
             return
         }
@@ -223,6 +228,13 @@ class SwitchableUsbAudioSink(
         try {
             val fftDup = pendingFloatBuffer.duplicate().order(ByteOrder.nativeOrder())
             fftProcessor.queueInput(fftDup)
+        } catch (_: Throwable) {
+        }
+
+        // Feed low-volume keep-alive AudioTrack with real PCM (non-blocking, best-effort).
+        try {
+            val keepAliveDup = pendingFloatBuffer.duplicate().order(ByteOrder.nativeOrder())
+            usbManager.feedKeepAliveFloatPcm(keepAliveDup, configuredChannels)
         } catch (_: Throwable) {
         }
 
