@@ -359,12 +359,41 @@ fn claim_interface_force(
     unreachable!()
 }
 
-fn release_interfaces_and_restore_kernel(handle: &DeviceHandle<Context>, interfaces: &[u8]) {
+fn release_interfaces_and_restore_kernel(
+    handle: &DeviceHandle<Context>,
+    fd: RawFd,
+    interfaces: &[u8],
+) {
+    // Pass 1: reset alternate settings and release ALL claimed interfaces
+    // before re-attaching `snd-usb-audio`, since probing AudioControl (iface 0)
+    // also claims its associated AudioStreaming interfaces.
     for &iface in interfaces.iter().rev() {
         let _ = handle.set_alternate_setting(iface, 0);
         let _ = handle.release_interface(iface);
-        if supports_detach_kernel_driver() {
+    }
+
+    // Pass 2: re-attach the kernel driver in interface order (control first).
+    let supports_detach = supports_detach_kernel_driver();
+    for &iface in interfaces.iter() {
+        if supports_detach {
             let _ = handle.attach_kernel_driver(iface);
+        }
+        // libusb's attach_kernel_driver() only re-binds interfaces it detached
+        // itself. When claim_interface_force() had to fall back to a raw
+        // USBDEVFS_DISCONNECT (stale "usbfs" claim, or auto-detach already
+        // consumed the libusb detach path), attach_kernel_driver() is a no-op
+        // and snd-usb-audio stays unbound. Force a USBDEVFS_CONNECT when the
+        // interface is still unbound or held by usbfs.
+        if !matches!(
+            query_usbfs_driver_name(fd, iface).as_deref(),
+            Ok(drv) if drv != "usbfs"
+        ) {
+            let res = force_connect_usbfs_driver(fd, iface);
+            log::info!(
+                "[UsbAudio] release: USBDEVFS_CONNECT iface={} -> {:?}",
+                iface,
+                res,
+            );
         }
     }
 }
@@ -748,7 +777,11 @@ pub fn register_device(
     let mut state = USB_STATE.lock();
     stop_active_stream_locked(&mut state);
     if let Some(old) = state.device.take() {
-        release_interfaces_and_restore_kernel(&old.handle, &old.claimed_interfaces);
+        release_interfaces_and_restore_kernel(
+            &old.handle,
+            old._owned_fd.raw(),
+            &old.claimed_interfaces,
+        );
     }
 
     init_libusb_for_android();
@@ -777,7 +810,7 @@ pub fn register_device(
     let mut claimed = Vec::new();
     for &iface in &parsed.all_audio_interfaces {
         if let Err(err) = claim_interface_force(&handle, owned_fd.raw(), iface) {
-            release_interfaces_and_restore_kernel(&handle, &claimed);
+            release_interfaces_and_restore_kernel(&handle, owned_fd.raw(), &claimed);
             state.last_error = Some(err.clone());
             return Err(err);
         }
@@ -821,7 +854,11 @@ pub fn clear_device() {
     let mut state = USB_STATE.lock();
     stop_active_stream_locked(&mut state);
     if let Some(dev) = state.device.take() {
-        release_interfaces_and_restore_kernel(&dev.handle, &dev.claimed_interfaces);
+        release_interfaces_and_restore_kernel(
+            &dev.handle,
+            dev._owned_fd.raw(),
+            &dev.claimed_interfaces,
+        );
         log::info!(
             "[UsbAudio] Released exclusive USB DAC: {} ({:04x}:{:04x})",
             dev.device_name,

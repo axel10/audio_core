@@ -141,8 +141,20 @@ class SwitchableUsbAudioSink(
         }
 
         if (usingUsbForCurrentConfig) {
+            // The previous configuration routed PCM to the USB DAC and never
+            // touched the delegate. Reset the delegate before handing it this
+            // format so DefaultAudioSink starts from a clean state instead of
+            // reusing stale state from before the exclusive session (which could
+            // leave AudioTrack silent while ExoPlayer's media clock keeps the
+            // progress bar moving). reset() is idempotent, so this is also safe
+            // when ExoPlayer already routed through reset() during stop().
+            super.reset()
             usingUsbForCurrentConfig = false
             releaseUsbOwnershipAndStopIfOwned()
+            NativeLog.d(
+                "UsbExclusive",
+                "AudioSink configure: switched back to DefaultAudioSink, delegate reset",
+            )
         }
         super.configure(inputFormat, specifiedBufferSize, outputChannels)
     }
@@ -346,8 +358,17 @@ class SwitchableUsbAudioSink(
             handledEndOfStream = false
             usingUsbForCurrentConfig = false
             releaseUsbOwnershipAndStopIfOwned()
-            return
+            NativeLog.d(
+                "UsbExclusive",
+                "AudioSink reset: released USB ownership, forwarding reset to DefaultAudioSink",
+            )
         }
+        // Always forward reset to the delegate. While USB exclusive was active,
+        // DefaultAudioSink was never configured (configure() returned early on the
+        // USB branch), so it kept stale state from before the exclusive session.
+        // Returning early here meant switching back to normal output reconfigured
+        // the delegate without ever resetting it, leaving AudioTrack without any
+        // PCM to play: silent playback while the progress bar kept moving.
         super.reset()
     }
 

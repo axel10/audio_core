@@ -1,8 +1,12 @@
 package com.flutter_rust_bridge.audio_core
 
+import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioTrack
+import android.os.Build
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.roundToInt
@@ -24,7 +28,9 @@ import kotlin.math.roundToInt
  *   audible level on speakers or other outputs.
  * - Non-blocking writes never stall or backpressure the USB exclusive clock.
  */
-class UsbExclusiveAudioKeepAlive {
+class UsbExclusiveAudioKeepAlive(
+    private val context: Context? = null,
+) {
     companion object {
         private const val MAX_KEEP_ALIVE_SAMPLE_RATE = 48000
         private const val MIN_KEEP_ALIVE_SAMPLE_RATE = 8000
@@ -191,6 +197,10 @@ class UsbExclusiveAudioKeepAlive {
                 return
             }
 
+            val preferredSpeaker = findBuiltInSpeakerDevice()
+            if (preferredSpeaker != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                candidate.setPreferredDevice(preferredSpeaker)
+            }
             candidate.setVolume(KEEP_ALIVE_VOLUME)
             candidate.play()
             track = candidate
@@ -199,7 +209,8 @@ class UsbExclusiveAudioKeepAlive {
                 "UsbExclusive",
                 "UsbExclusiveAudioKeepAlive started (sessionId=${candidate.audioSessionId}, " +
                     "src=${configuredSourceSampleRate}Hz/${configuredSourceChannels}ch -> " +
-                    "dst=${targetSampleRate}Hz/${targetChannels}ch, step=$decimationFactor, vol=$KEEP_ALIVE_VOLUME)",
+                    "dst=${targetSampleRate}Hz/${targetChannels}ch, step=$decimationFactor, " +
+                    "vol=$KEEP_ALIVE_VOLUME, preferredType=${preferredSpeaker?.type})",
             )
         } catch (t: Throwable) {
             NativeLog.d("UsbExclusive", "UsbExclusiveAudioKeepAlive start error: ${t.message}")
@@ -210,6 +221,15 @@ class UsbExclusiveAudioKeepAlive {
             track = null
             isRunning = false
         }
+    }
+
+    private fun findBuiltInSpeakerDevice(): AudioDeviceInfo? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
+        val audioManager = context?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            ?: return null
+        val outputs = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+        return outputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+            ?: outputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
     }
 
     private fun stopLocked() {

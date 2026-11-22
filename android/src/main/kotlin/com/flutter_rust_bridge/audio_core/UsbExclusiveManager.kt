@@ -35,7 +35,7 @@ class UsbExclusiveManager(
         context.getSystemService(Context.USB_SERVICE) as? UsbManager
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val audioKeepAlive = UsbExclusiveAudioKeepAlive()
+    private val audioKeepAlive = UsbExclusiveAudioKeepAlive(context)
 
     @Volatile
     var isExclusiveActive: Boolean = false
