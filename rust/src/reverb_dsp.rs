@@ -292,6 +292,27 @@ mod freeverb_dsp {
     }
 }
 
+/// Exact linear pass-through in [-0.98, 0.98], with smooth tanh saturation
+/// above threshold to prevent >0 dBFS overshoots from triggering OS limiters.
+#[inline(always)]
+fn soft_limit(sample: f32) -> f32 {
+    const THRESHOLD: f32 = 0.98;
+    const MARGIN: f32 = 1.0 - THRESHOLD;
+
+    if sample > THRESHOLD {
+        THRESHOLD + MARGIN * ((sample - THRESHOLD) / MARGIN).tanh()
+    } else if sample < -THRESHOLD {
+        -THRESHOLD - MARGIN * ((-sample - THRESHOLD) / MARGIN).tanh()
+    } else {
+        sample
+    }
+}
+
+/// Output headroom attenuation applied per reverb algorithm so dry + wet
+/// summation on hot-mastered tracks stays below 0 dBFS without pumping.
+const FREEVERB_HEADROOM_GAIN: f32 = 0.7079458; // -3.0 dB
+const FUNDSP_HEADROOM_GAIN: f32 = 0.59566214; // -4.5 dB
+
 pub struct ReverbProcessor {
     shared: Arc<ReverbShared>,
     last_version: u64,
@@ -406,14 +427,19 @@ impl ReverbProcessor {
         }
 
         let (wet_l, wet_r) = match self.config.algorithm {
-            ReverbAlgorithm::Freeverb => self.freeverb.tick(left, right),
+            ReverbAlgorithm::Freeverb => {
+                let (l, r) = self.freeverb.tick(left, right);
+                (l * FREEVERB_HEADROOM_GAIN, r * FREEVERB_HEADROOM_GAIN)
+            }
             ReverbAlgorithm::FundspStereo => {
                 if let Some(unit) = self.fundsp_unit.as_mut() {
                     let mut out = [0.0f32; 2];
                     unit.tick(&[left, right], &mut out);
                     (
-                        left * self.config.dry_mix + out[0] * self.config.wet_mix,
-                        right * self.config.dry_mix + out[1] * self.config.wet_mix,
+                        (left * self.config.dry_mix + out[0] * self.config.wet_mix)
+                            * FUNDSP_HEADROOM_GAIN,
+                        (right * self.config.dry_mix + out[1] * self.config.wet_mix)
+                            * FUNDSP_HEADROOM_GAIN,
                     )
                 } else {
                     (left, right)
@@ -422,10 +448,9 @@ impl ReverbProcessor {
         };
 
         let w = self.fade_weight;
-        (
-            left * (1.0 - w) + wet_l * w,
-            right * (1.0 - w) + wet_r * w,
-        )
+        let out_l = left * (1.0 - w) + wet_l * w;
+        let out_r = right * (1.0 - w) + wet_r * w;
+        (soft_limit(out_l), soft_limit(out_r))
     }
 
     pub fn process_interleaved(&mut self, samples: &mut [f32], num_frames: usize) {
@@ -720,5 +745,49 @@ mod tests {
                 tail_energy
             );
         }
+    }
+
+    #[test]
+    fn test_reverb_hot_signal_stays_below_0dbfs_and_bypass_is_bit_transparent() {
+        let mut freeverb_cfg = ReverbConfig::freeverb_default();
+        freeverb_cfg.enabled = true;
+
+        let mut fundsp_cfg = ReverbConfig::fundsp_fdn_default();
+        fundsp_cfg.enabled = true;
+        fundsp_cfg.dry_mix = 0.76;
+        fundsp_cfg.wet_mix = 1.00;
+
+        let frames = 8192;
+        let sample_rate = 44100;
+        let mut input = vec![0.0f32; frames * 2];
+        for i in 0..frames {
+            let phase = (i as f32 * 440.0 * 2.0 * std::f32::consts::PI) / sample_rate as f32;
+            let sample = 0.99 * phase.sin();
+            input[i * 2] = sample;
+            input[i * 2 + 1] = sample;
+        }
+
+        for cfg in [freeverb_cfg, fundsp_cfg] {
+            let algo = cfg.algorithm;
+            let shared = ReverbShared::new(cfg);
+            let mut proc = ReverbProcessor::new(shared, 2, sample_rate);
+            let mut buf = input.clone();
+            proc.process_interleaved(&mut buf, frames);
+
+            let peak = buf.iter().fold(0.0f32, |acc, &s| acc.max(s.abs()));
+            assert!(
+                peak < 1.0,
+                "Expected peak < 1.0 (0 dBFS) for {:?}, got {}",
+                algo,
+                peak
+            );
+        }
+
+        let off_cfg = ReverbConfig::freeverb_default();
+        let off_shared = ReverbShared::new(off_cfg);
+        let mut off_proc = ReverbProcessor::new(off_shared, 2, sample_rate);
+        let mut off_buf = input.clone();
+        off_proc.process_interleaved(&mut off_buf, frames);
+        assert_eq!(off_buf, input);
     }
 }
