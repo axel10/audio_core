@@ -76,5 +76,8 @@ codegen-units = 1
 panic = 'abort'
 strip = true
 
+[profile.release.build-override]
+strip = false
+
 [patch.crates-io]
 rodio = { git = "https://github.com/axel10/rodio" }
