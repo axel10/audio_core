@@ -222,15 +222,53 @@ Future<bool> updateTrackMetadataWithFlutterTaglib({
 Future<List<bool>> updateTrackMetadataBatchWithFlutterTaglib({
   required List<TrackMetadataWriteRequest> requests,
 }) async {
+  if (requests.isEmpty) return const <bool>[];
+
+  Map<String, String?>? batchPermissions;
+  if (Platform.isAndroid &&
+      taglib.TagLibFile.isSupported &&
+      requests.length > 1) {
+    final candidatePaths = <String>{
+      for (final request in requests)
+        ..._metadataPathCandidates(request.path, request.fallbackMediaUri),
+    }.toList(growable: false);
+    if (candidatePaths.isNotEmpty) {
+      batchPermissions = await taglib.TagLibFile.requestWritePermissions(
+        candidatePaths,
+      );
+    }
+  }
+
   final results = <bool>[];
   for (final request in requests) {
     try {
+      String? resolvedFallback = request.fallbackMediaUri;
+      if (batchPermissions != null) {
+        final candidates = _metadataPathCandidates(
+          request.path,
+          request.fallbackMediaUri,
+        );
+        final granted = candidates
+            .map((c) => batchPermissions![c])
+            .whereType<String>()
+            .firstOrNull;
+        if (granted == null &&
+            candidates.every((c) => batchPermissions!.containsKey(c))) {
+          // Batch permission was explicitly denied/unavailable for all candidates.
+          results.add(false);
+          continue;
+        }
+        if (granted != null) {
+          resolvedFallback = granted;
+        }
+      }
+
       final success = await updateTrackMetadataWithFlutterTaglib(
         path: request.path,
         metadata: request.metadata.toMap(
           includeEmptyCollections: request.clearBeforeWrite,
         ),
-        fallbackMediaUri: request.fallbackMediaUri,
+        fallbackMediaUri: resolvedFallback,
       );
       results.add(success);
     } catch (_) {
