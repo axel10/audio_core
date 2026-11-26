@@ -23,15 +23,19 @@ set(AUDIO_CONVERTER_FFMPEG_ROOT
         CACHE PATH "FFmpeg root directory for Android fallback"
 )
 set(FFMPEG_AVCODEC_LIB ${AUDIO_CONVERTER_FFMPEG_ROOT}/lib/libavcodec.so)
+set(FFMPEG_AVFORMAT_LIB ${AUDIO_CONVERTER_FFMPEG_ROOT}/lib/libavformat.so)
 set(FFMPEG_AVUTIL_LIB ${AUDIO_CONVERTER_FFMPEG_ROOT}/lib/libavutil.so)
 set(FFMPEG_SWRESAMPLE_LIB ${AUDIO_CONVERTER_FFMPEG_ROOT}/lib/libswresample.so)
 
 set(MEDIA3_FFMPEG_JNI_SOURCE
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../media3-src/decoder_ffmpeg/src/main/jni/ffmpeg_jni.cc)
+set(FFMPEG_EXTRACTOR_JNI_SOURCE
+        ${CMAKE_CURRENT_SOURCE_DIR}/ffmpeg_extractor_jni.cc)
 if(EXISTS "${MEDIA3_FFMPEG_JNI_SOURCE}"
         AND EXISTS "${AUDIO_CONVERTER_FFMPEG_ROOT}/include/libavcodec/avcodec.h"
-        AND EXISTS "${AUDIO_CONVERTER_FFMPEG_ROOT}/lib/libavcodec.so")
-    add_library(ffmpegJNI SHARED ${MEDIA3_FFMPEG_JNI_SOURCE})
+        AND EXISTS "${AUDIO_CONVERTER_FFMPEG_ROOT}/lib/libavcodec.so"
+        AND EXISTS "${AUDIO_CONVERTER_FFMPEG_ROOT}/lib/libavformat.so")
+    add_library(ffmpegJNI SHARED ${MEDIA3_FFMPEG_JNI_SOURCE} ${FFMPEG_EXTRACTOR_JNI_SOURCE})
     set_target_properties(ffmpegJNI PROPERTIES CXX_STANDARD 11 CXX_STANDARD_REQUIRED YES)
     target_include_directories(ffmpegJNI PRIVATE ${AUDIO_CONVERTER_FFMPEG_ROOT}/include)
 
@@ -39,6 +43,7 @@ if(EXISTS "${MEDIA3_FFMPEG_JNI_SOURCE}"
             PRIVATE
             android
             ${FFMPEG_AVCODEC_LIB}
+            ${FFMPEG_AVFORMAT_LIB}
             ${FFMPEG_AVUTIL_LIB}
             ${FFMPEG_SWRESAMPLE_LIB}
             ${log-lib})

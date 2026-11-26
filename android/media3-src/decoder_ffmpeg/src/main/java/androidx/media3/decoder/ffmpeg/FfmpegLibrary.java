@@ -157,6 +157,9 @@ public final class FfmpegLibrary {
       case MimeTypes.VIDEO_H265:
         return "hevc";
       default:
+        if (mimeType.startsWith("audio/x-ffmpeg-")) {
+          return mimeType.substring("audio/x-ffmpeg-".length());
+        }
         return null;
     }
   }

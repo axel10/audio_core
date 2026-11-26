@@ -252,7 +252,7 @@ import java.util.List;
     switch (mimeType) {
       case MimeTypes.AUDIO_AAC:
       case MimeTypes.AUDIO_OPUS:
-        return initializationData.get(0);
+        return initializationData.isEmpty() ? null : initializationData.get(0);
       case MimeTypes.AUDIO_ALAC:
         return getAlacExtraData(initializationData);
       case MimeTypes.AUDIO_VORBIS:
@@ -260,6 +260,9 @@ import java.util.List;
       case MimeTypes.AUDIO_FLAC:
         return getFlacExtraData(initializationData);
       default:
+        if (mimeType.startsWith("audio/x-ffmpeg-") && !initializationData.isEmpty()) {
+          return initializationData.get(0);
+        }
         // Other codecs do not require extra data.
         return null;
     }

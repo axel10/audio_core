@@ -60,6 +60,7 @@ import io.flutter.plugin.common.MethodChannel.Result
 import io.flutter.plugin.common.PluginRegistry.ActivityResultListener
 import io.flutter.plugin.common.PluginRegistry.RequestPermissionsResultListener
 import com.flutter_rust_bridge.audio_core.extractor.DsfExtractor
+import com.flutter_rust_bridge.audio_core.extractor.FfmpegExtractor
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.ExtractorsFactory
 
@@ -494,7 +495,9 @@ class MyExoplayerPlugin :
         val extractorsFactory = ExtractorsFactory {
             arrayOf(
                 DsfExtractor(),
+                FfmpegExtractor(onlyInterceptAbnormalWav = true),
                 *DefaultExtractorsFactory().createExtractors(),
+                FfmpegExtractor(onlyInterceptAbnormalWav = false),
             )
         }
         val mediaSourceFactory = DefaultMediaSourceFactory(safeContext, extractorsFactory)
