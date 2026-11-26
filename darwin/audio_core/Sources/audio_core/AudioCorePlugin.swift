@@ -204,6 +204,13 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     case "listPersistentAccessPaths":
       result(fileAccess.listPersistentAccessPaths())
 
+    case "resolveBookmarkPath":
+      guard let path = Self.readString(call.arguments, key: "path") else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "Path is null", details: nil))
+        return
+      }
+      result(fileAccess.resolveBookmarkPath(for: path))
+
     case "getPendingOpenedFiles":
       // 冷启动阶段由 scene 回调攒下的外部打开路径，Dart 就绪后主动拉取。
       result(Self.drainPendingOpenedPaths())

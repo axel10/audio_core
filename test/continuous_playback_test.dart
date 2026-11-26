@@ -62,6 +62,9 @@ class MockAudioEngine implements AudioEngine {
   }
 
   @override
+  Future<String?> resolveBookmarkPath(String path) async => null;
+
+  @override
   Future<bool> beginScopedAccess(String path, {String? holder}) async {
     scopedAccessPaths.add(path);
     return true;

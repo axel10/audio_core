@@ -547,6 +547,9 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
   Future<List<String>> listPersistentAccessPaths() async => const <String>[];
 
   @override
+  Future<String?> resolveBookmarkPath(String path) async => null;
+
+  @override
   Future<bool> beginScopedAccess(String path, {String? holder}) async => true;
 
   @override

@@ -1376,6 +1376,13 @@ class AudioCoreController extends ChangeNotifier
     return _engine.listPersistentAccessPaths();
   }
 
+  /// Resolves the current filesystem path for a stored Apple bookmark.
+  Future<String?> resolveBookmarkPath({String? path}) async {
+    final targetPath = _resolvePersistentAccessPath(path);
+    if (targetPath == null) return null;
+    return _engine.resolveBookmarkPath(targetPath);
+  }
+
   /// Begins an Apple security-scoped access session for [path].
   ///
   /// [holder] 决定这份授权记在谁名下，缺省 `default`；同一次会话的 end 必须

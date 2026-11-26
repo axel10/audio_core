@@ -399,6 +399,16 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
     return const <String>[];
   }
 
+  @override
+  Future<String?> resolveBookmarkPath(String path) async {
+    if (_isApple) {
+      return await _amberInvokeMethod<String>('resolveBookmarkPath', {
+        'path': path,
+      });
+    }
+    return null;
+  }
+
   /// 已向原生申请、尚未释放的占用：holder → 路径集合。仅苹果平台使用。
   ///
   /// 原生只能计数，分不清「第二次 begin 是同一次占用的重入」。播放链路

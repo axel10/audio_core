@@ -130,6 +130,7 @@ abstract class AudioEngine {
   Future<void> forgetPersistentAccess(String path);
   Future<bool> hasPersistentAccess(String path);
   Future<List<String>> listPersistentAccessPaths();
+  Future<String?> resolveBookmarkPath(String path);
 
   /// 打开 [path] 的安全作用域授权，记在 [holder] 名下。
   ///

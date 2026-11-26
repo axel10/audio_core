@@ -428,6 +428,42 @@ final class SecurityScopedFileAccessCoordinator {
     bookmarkStore.storedPaths()
   }
 
+  /// Resolves a stored security-scoped bookmark for [path] and returns its
+  /// current filesystem path when accessible.
+  ///
+  /// When an external app updates in place and iOS rotates its container UUID,
+  /// `URL(resolvingBookmarkData:)` still resolves to the new container path.
+  /// Re-remembering the resolved URL also ensures the new path key has an
+  /// active bookmark for subsequent `beginScopedAccess` / `registerPersistentAccess`
+  /// calls.
+  func resolveBookmarkPath(for path: String) -> String? {
+    if Self.resolveSandboxInternalPath(path) != nil {
+      return nil
+    }
+    guard bookmarkStore.hasBookmark(for: path) || bookmarkStore.hasParentBookmark(for: path) else {
+      return nil
+    }
+    guard let (url, parentScopeURL) = try? bookmarkStore.resolveURL(for: path) else {
+      return nil
+    }
+    let scopeTarget = parentScopeURL ?? url
+    let started = scopeTarget.startAccessingSecurityScopedResource()
+    defer {
+      if started {
+        scopeTarget.stopAccessingSecurityScopedResource()
+      }
+    }
+    guard started, FileManager.default.fileExists(atPath: url.path) else {
+      return nil
+    }
+    if parentScopeURL == nil {
+      _ = bookmarkStore.remember(url: url)
+    } else if let parentScopeURL {
+      _ = bookmarkStore.remember(url: parentScopeURL)
+    }
+    return url.path
+  }
+
   func releaseAccess(
     for path: String,
     holder: String = SecurityScopedFileAccessCoordinator.defaultAccessHolder
