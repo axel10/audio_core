@@ -15,6 +15,7 @@ import 'random_lab_tab.dart';
 import 'transcode_tab.dart';
 import 'media_session_adapter.dart';
 import 'android_media_library_picker.dart';
+import 'ios_media_library_picker.dart';
 import 'apple_directory_tab.dart';
 import 'usb_exclusive_tab.dart';
 import 'package:flutter_media_session/flutter_media_session.dart';
@@ -120,6 +121,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
   late final AudioCoreController _controller;
   final AudioConverter _audioConverter = AudioConverter();
   AudioLibraryFolder? _mediaLibraryRoot;
+  List<IosMediaLibraryEntry>? _iosMediaEntries;
   bool _mediaLibraryLoading = false;
   String? _mediaLibraryError;
   String? _playbackDecodeEngine;
@@ -204,16 +206,30 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
   }
 
   Future<void> _bootstrapAudioLibrary() async {
-    if (!Platform.isAndroid) return;
+    if (!Platform.isAndroid && !Platform.isIOS) return;
 
-    // 启动时先拿权限，然后从 Android 侧读取系统媒体库。
-    // 这里拿到的是平面列表，后面会在 Dart 侧构建成文件夹树。
+    // 启动时先拿权限，然后从系统侧读取系统媒体库。
     setState(() {
       _mediaLibraryLoading = true;
       _mediaLibraryError = null;
     });
 
     try {
+      if (Platform.isIOS) {
+        final scanResult = await _controller.scanIosMediaLibrary();
+        if (!mounted) return;
+        setState(() {
+          _mediaLibraryLoading = false;
+          _mediaLibraryError = scanResult.isSuccessful
+              ? null
+              : scanResult.errorMessage ?? scanResult.errorCode;
+          _iosMediaEntries = scanResult.permissionGranted
+              ? scanResult.entries
+              : null;
+        });
+        return;
+      }
+
       final scanResult = await _controller.scanAndroidMediaLibrary();
       if (!mounted) return;
       setState(() {
@@ -260,6 +276,33 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
       }
 
       final selected = await _openAndroidMediaLibraryPicker(refreshedRoot);
+      if (selected == null) return;
+
+      await _handleImportedTracks([
+        selected.toAudioTrack(),
+      ], fadeSetting: fadeSetting);
+      return;
+    }
+
+    if (Platform.isIOS) {
+      if (_iosMediaEntries == null) {
+        await _bootstrapAudioLibrary();
+      }
+
+      final entries = _iosMediaEntries;
+      if (entries == null) {
+        if (!mounted) return;
+        _showMediaLibrarySnack(
+          _mediaLibraryError ?? 'iOS media library is not ready yet.',
+        );
+        return;
+      }
+
+      if (!mounted) return;
+      final selected = await showIosMediaLibraryPicker(
+        context,
+        entries: entries,
+      );
       if (selected == null) return;
 
       await _handleImportedTracks([
@@ -441,7 +484,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
                   _buildEngineInfo(context),
                   const SizedBox(height: 8),
                   _buildAudioDetailsControls(context),
-                  if (Platform.isAndroid)
+                  if (Platform.isAndroid || Platform.isIOS)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
                       child: Align(

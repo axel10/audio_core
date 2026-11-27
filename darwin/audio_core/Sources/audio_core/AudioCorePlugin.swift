@@ -255,6 +255,51 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       self.logMessage(level: level, message: message)
       result(nil)
 
+    case "ensureIosMediaLibraryPermission":
+      #if os(iOS)
+      IosMediaLibraryService.shared.ensurePermission { granted in
+        result(granted)
+      }
+      #else
+      result(false)
+      #endif
+
+    case "scanIosMediaLibrary":
+      #if os(iOS)
+      DispatchQueue.global(qos: .userInitiated).async {
+        let items = IosMediaLibraryService.shared.scanAudioLibrary()
+        DispatchQueue.main.async {
+          result(items)
+        }
+      }
+      #else
+      result([])
+      #endif
+
+    case "resolveIosMediaStreamUrl":
+      #if os(iOS)
+      guard let uri = Self.readString(call.arguments, key: "uri") else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "URI is null", details: nil))
+        return
+      }
+      IosMediaStreamProxy.shared.resolveStreamURL(for: uri) { outcome in
+        DispatchQueue.main.async {
+          switch outcome {
+          case .success(let streamUrl):
+            result(streamUrl)
+          case .failure(let error):
+            result(FlutterError(
+              code: "IOS_MEDIA_STREAM_PROXY_FAILED",
+              message: error.localizedDescription,
+              details: nil
+            ))
+          }
+        }
+      }
+      #else
+      result(nil)
+      #endif
+
     default:
       result(FlutterMethodNotImplemented)
     }

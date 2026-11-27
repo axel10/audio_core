@@ -25,6 +25,7 @@ export 'src/track_metadata.dart';
 export 'src/audio_details.dart';
 export 'src/track_artwork.dart';
 export 'src/android_media_library.dart';
+export 'src/ios_media_library.dart';
 export 'src/android_usb_exclusive.dart';
 export 'src/app_log.dart';
 export 'src/waveform_pcm_processor.dart';

@@ -23,6 +23,7 @@ import 'audio_engine/audio_engine_interface.dart';
 import 'audio_engine/android_audio_engine.dart';
 import 'audio_engine/rust_audio_engine.dart';
 import 'android_media_library.dart';
+import 'ios_media_library.dart';
 import 'track_artwork.dart';
 import 'track_metadata.dart';
 import 'track_metadata_update.dart';
@@ -41,6 +42,7 @@ export 'equalizer_controller.dart';
 export 'playlist_models.dart';
 export 'player_state_snapshot.dart';
 export 'android_media_library.dart';
+export 'ios_media_library.dart';
 
 @visibleForTesting
 bool shouldAutoAdvanceFromStatus(AudioStatus status) {
@@ -52,6 +54,9 @@ class AudioCoreController extends ChangeNotifier
     implements AudioVisualizerParent {
   static const MethodChannel _androidMediaLibraryChannel = MethodChannel(
     'audio_core.media_library',
+  );
+  static const MethodChannel _applePlayerChannel = MethodChannel(
+    'audio_core.player',
   );
   static AudioCoreController? _instance;
 
@@ -507,6 +512,14 @@ class AudioCoreController extends ChangeNotifier
       uri = resolved;
     } else {
       uri = rawUri;
+    }
+
+    // Resolve iOS ipod-library:// URIs into local loopback HTTP WAV streams
+    if (Platform.isIOS && uri.startsWith('ipod-library://')) {
+      final streamUrl = await resolveIosMediaStreamUrl(uri);
+      if (streamUrl != null && streamUrl.isNotEmpty) {
+        uri = streamUrl;
+      }
     }
 
     // Pass remote HTTP/HTTPS streams through the local progressive cache proxy
@@ -1494,6 +1507,100 @@ class AudioCoreController extends ChangeNotifier
         errorCode: 'SCAN_FAILED',
         errorMessage: e.toString(),
       );
+    }
+  }
+
+  /// Requests iOS `MPMediaLibrary` permission through the platform bridge.
+  Future<bool> ensureIosMediaLibraryPermission() async {
+    if (!Platform.isIOS) return false;
+    try {
+      final granted = await _applePlayerChannel.invokeMethod<bool>(
+        'ensureIosMediaLibraryPermission',
+      );
+      return granted ?? false;
+    } catch (e) {
+      debugPrint(
+        '[AudioCore][IosMediaLibrary] ensureIosMediaLibraryPermission failed: $e',
+      );
+      return false;
+    }
+  }
+
+  /// Scans iOS `MPMediaLibrary` for locally synced non-DRM audio tracks.
+  Future<IosMediaLibraryScanResult> scanIosMediaLibrary() async {
+    if (!Platform.isIOS) {
+      return const IosMediaLibraryScanResult(
+        permissionGranted: false,
+        entries: <IosMediaLibraryEntry>[],
+        errorCode: 'UNSUPPORTED_PLATFORM',
+        errorMessage: 'iOS media library scan is only available on iOS.',
+      );
+    }
+
+    final granted = await ensureIosMediaLibraryPermission();
+    if (!granted) {
+      return const IosMediaLibraryScanResult(
+        permissionGranted: false,
+        entries: <IosMediaLibraryEntry>[],
+        errorCode: 'PERMISSION_DENIED',
+        errorMessage: 'Apple Music / Media Library permission was not granted.',
+      );
+    }
+
+    try {
+      final rawResult = await _applePlayerChannel.invokeMethod<List<Object?>>(
+        'scanIosMediaLibrary',
+      );
+      final entries = <IosMediaLibraryEntry>[];
+      for (final item in rawResult ?? const <Object?>[]) {
+        if (item is Map<Object?, Object?>) {
+          entries.add(IosMediaLibraryEntry.fromMap(item));
+        } else if (item is Map) {
+          entries.add(
+            IosMediaLibraryEntry.fromMap(item.cast<Object?, Object?>()),
+          );
+        }
+      }
+      return IosMediaLibraryScanResult(
+        permissionGranted: true,
+        entries: entries,
+      );
+    } on PlatformException catch (e) {
+      debugPrint(
+        '[AudioCore][IosMediaLibrary] scanIosMediaLibrary failed: ${e.code} ${e.message}',
+      );
+      return IosMediaLibraryScanResult(
+        permissionGranted: true,
+        entries: const <IosMediaLibraryEntry>[],
+        errorCode: e.code,
+        errorMessage: e.message,
+      );
+    } catch (e) {
+      debugPrint('[AudioCore][IosMediaLibrary] scanIosMediaLibrary failed: $e');
+      return IosMediaLibraryScanResult(
+        permissionGranted: true,
+        entries: const <IosMediaLibraryEntry>[],
+        errorCode: 'SCAN_FAILED',
+        errorMessage: e.toString(),
+      );
+    }
+  }
+
+  /// Resolves an `ipod-library://` URI to a loopback HTTP WAV stream URL.
+  Future<String?> resolveIosMediaStreamUrl(String uri) async {
+    if (!Platform.isIOS || !uri.startsWith('ipod-library://')) {
+      return null;
+    }
+    try {
+      return await _applePlayerChannel.invokeMethod<String>(
+        'resolveIosMediaStreamUrl',
+        <String, Object?>{'uri': uri},
+      );
+    } catch (e) {
+      debugPrint(
+        '[AudioCore][IosMediaLibrary] resolveIosMediaStreamUrl failed: $e',
+      );
+      return null;
     }
   }
 
