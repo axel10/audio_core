@@ -255,6 +255,13 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       self.logMessage(level: level, message: message)
       result(nil)
 
+    case "hasIosMediaLibraryPermission":
+      #if os(iOS)
+      result(IosMediaLibraryService.shared.hasPermission())
+      #else
+      result(false)
+      #endif
+
     case "ensureIosMediaLibraryPermission":
       #if os(iOS)
       IosMediaLibraryService.shared.ensurePermission { granted in
@@ -294,6 +301,26 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
               details: nil
             ))
           }
+        }
+      }
+      #else
+      result(nil)
+      #endif
+
+    case "extractIosMediaArtwork":
+      #if os(iOS)
+      guard let id = Self.readString(call.arguments, key: "id") else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "id is null", details: nil))
+        return
+      }
+      let maxSize = (call.arguments as? [String: Any])?["maxSize"] as? Int ?? 500
+      DispatchQueue.global(qos: .userInitiated).async {
+        let data = IosMediaLibraryService.shared.extractArtwork(
+          persistentId: id,
+          maxSize: max(64, maxSize)
+        )
+        DispatchQueue.main.async {
+          result(data.map { FlutterStandardTypedData(bytes: $0) })
         }
       }
       #else

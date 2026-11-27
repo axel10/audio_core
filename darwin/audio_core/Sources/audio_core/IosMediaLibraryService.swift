@@ -7,6 +7,10 @@ final class IosMediaLibraryService {
 
   private init() {}
 
+  func hasPermission() -> Bool {
+    return MPMediaLibrary.authorizationStatus() == .authorized
+  }
+
   func ensurePermission(completion: @escaping (Bool) -> Void) {
     let status = MPMediaLibrary.authorizationStatus()
     switch status {
@@ -75,6 +79,27 @@ final class IosMediaLibraryService {
     }
 
     return results
+  }
+
+  func extractArtwork(persistentId: String, maxSize: Int) -> Data? {
+    guard let numericId = UInt64(persistentId) else {
+      return nil
+    }
+    let predicate = MPMediaPropertyPredicate(
+      value: NSNumber(value: numericId),
+      forProperty: MPMediaItemPropertyPersistentID
+    )
+    let query = MPMediaQuery.songs()
+    query.addFilterPredicate(predicate)
+    guard let item = query.items?.first,
+          let artwork = item.artwork else {
+      return nil
+    }
+    let targetSize = CGSize(width: maxSize, height: maxSize)
+    guard let image = artwork.image(at: targetSize) else {
+      return nil
+    }
+    return image.jpegData(compressionQuality: 0.85)
   }
 }
 #endif

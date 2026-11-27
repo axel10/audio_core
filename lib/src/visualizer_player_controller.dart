@@ -1510,6 +1510,22 @@ class AudioCoreController extends ChangeNotifier
     }
   }
 
+  /// Checks iOS `MPMediaLibrary` permission without prompting the user.
+  Future<bool> hasIosMediaLibraryPermission() async {
+    if (!Platform.isIOS) return false;
+    try {
+      final granted = await _applePlayerChannel.invokeMethod<bool>(
+        'hasIosMediaLibraryPermission',
+      );
+      return granted ?? false;
+    } catch (e) {
+      debugPrint(
+        '[AudioCore][IosMediaLibrary] hasIosMediaLibraryPermission failed: $e',
+      );
+      return false;
+    }
+  }
+
   /// Requests iOS `MPMediaLibrary` permission through the platform bridge.
   Future<bool> ensureIosMediaLibraryPermission() async {
     if (!Platform.isIOS) return false;
@@ -1599,6 +1615,27 @@ class AudioCoreController extends ChangeNotifier
     } catch (e) {
       debugPrint(
         '[AudioCore][IosMediaLibrary] resolveIosMediaStreamUrl failed: $e',
+      );
+      return null;
+    }
+  }
+
+  /// Extracts JPEG artwork bytes for an iOS `MPMediaItem` by persistent ID.
+  Future<Uint8List?> extractIosMediaArtwork(
+    String persistentId, {
+    int maxSize = 500,
+  }) async {
+    if (!Platform.isIOS || persistentId.isEmpty) {
+      return null;
+    }
+    try {
+      return await _applePlayerChannel.invokeMethod<Uint8List>(
+        'extractIosMediaArtwork',
+        <String, Object?>{'id': persistentId, 'maxSize': maxSize},
+      );
+    } catch (e) {
+      debugPrint(
+        '[AudioCore][IosMediaLibrary] extractIosMediaArtwork failed: $e',
       );
       return null;
     }
