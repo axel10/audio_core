@@ -327,6 +327,22 @@ public final class AudioCorePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       result(nil)
       #endif
 
+    case "getIosMediaAudioDetails":
+      #if os(iOS)
+      guard let uri = Self.readString(call.arguments, key: "uri") else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "URI is null", details: nil))
+        return
+      }
+      DispatchQueue.global(qos: .userInitiated).async {
+        let details = IosMediaLibraryService.shared.extractAudioDetails(assetURLString: uri)
+        DispatchQueue.main.async {
+          result(details)
+        }
+      }
+      #else
+      result(nil)
+      #endif
+
     default:
       result(FlutterMethodNotImplemented)
     }

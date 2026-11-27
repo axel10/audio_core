@@ -534,10 +534,49 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
     required String path,
     String? fallbackMediaUri,
   }) async {
+    if (Platform.isIOS && path.startsWith('ipod-library://')) {
+      final iosDetails = await _getIosMediaAudioDetails(path);
+      if (iosDetails != null) {
+        return iosDetails;
+      }
+      throw StateError('Failed to inspect iOS media library audio details: $path');
+    }
     return getAudioDetailsWithFlutterTaglib(
       path: path,
       fallbackMediaUri: fallbackMediaUri,
     );
+  }
+
+  Future<AudioDetails?> _getIosMediaAudioDetails(String uri) async {
+    try {
+      final raw = await _appleChannel.invokeMethod<Map<Object?, Object?>>(
+        'getIosMediaAudioDetails',
+        <String, Object?>{'uri': uri},
+      );
+      if (raw == null) return null;
+
+      final durationMs = (raw['durationMs'] as num?)?.toInt() ?? 0;
+      final bitrate = (raw['bitrate'] as num?)?.toInt() ?? 0;
+      final sampleRate = (raw['sampleRate'] as num?)?.toInt() ?? 0;
+      final channels = (raw['channels'] as num?)?.toInt() ?? 0;
+      final rawBitDepth = (raw['bitDepth'] as num?)?.toInt();
+      final bitDepth = (rawBitDepth != null && rawBitDepth > 0) ? rawBitDepth : null;
+
+      return AudioDetails(
+        formatName: (raw['formatName'] as String?) ?? '',
+        codecName: (raw['codecName'] as String?) ?? '',
+        duration: durationMs > 0 ? Duration(milliseconds: durationMs) : Duration.zero,
+        bitrate: bitrate,
+        sampleRate: sampleRate,
+        channels: channels,
+        bitDepth: bitDepth,
+        bitrateMode: '',
+        fileSize: 0,
+      );
+    } catch (e) {
+      debugPrint('[RustAudioEngine] getIosMediaAudioDetails failed for "$uri": $e');
+      return null;
+    }
   }
 
   @override

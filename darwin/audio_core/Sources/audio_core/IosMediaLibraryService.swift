@@ -1,4 +1,6 @@
 #if os(iOS)
+import AVFoundation
+import CoreMedia
 import Foundation
 import MediaPlayer
 
@@ -100,6 +102,114 @@ final class IosMediaLibraryService {
       return nil
     }
     return image.jpegData(compressionQuality: 0.85)
+  }
+
+  func extractAudioDetails(assetURLString: String) -> [String: Any]? {
+    guard let assetURL = URL(string: assetURLString), assetURL.scheme == "ipod-library" else {
+      return nil
+    }
+
+    let asset = AVURLAsset(url: assetURL)
+    guard let track = asset.tracks(withMediaType: .audio).first else {
+      return nil
+    }
+
+    var sampleRate = 0
+    var channels = 0
+    var bitDepth: Int?
+    var formatId: AudioFormatID = 0
+
+    if let formatDescs = track.formatDescriptions as? [CMFormatDescription],
+       let firstDesc = formatDescs.first,
+       let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(firstDesc)?.pointee {
+      formatId = asbd.mFormatID
+      if asbd.mSampleRate.isFinite && asbd.mSampleRate > 0 {
+        sampleRate = Int(asbd.mSampleRate.rounded())
+      }
+      if asbd.mChannelsPerFrame > 0 {
+        channels = Int(asbd.mChannelsPerFrame)
+      }
+      if asbd.mBitsPerChannel > 0 {
+        bitDepth = Int(asbd.mBitsPerChannel)
+      } else if formatId == kAudioFormatAppleLossless {
+        switch asbd.mFormatFlags {
+        case kAppleLosslessFormatFlag_16BitSourceData:
+          bitDepth = 16
+        case kAppleLosslessFormatFlag_20BitSourceData:
+          bitDepth = 20
+        case kAppleLosslessFormatFlag_24BitSourceData:
+          bitDepth = 24
+        case kAppleLosslessFormatFlag_32BitSourceData:
+          bitDepth = 32
+        default:
+          break
+        }
+      }
+    }
+
+    let ext = assetURL.pathExtension.lowercased()
+    var formatName = ""
+    var codecName = ""
+
+    switch formatId {
+    case kAudioFormatMPEG4AAC,
+         kAudioFormatMPEG4AAC_HE,
+         kAudioFormatMPEG4AAC_HE_V2,
+         kAudioFormatMPEG4AAC_LD,
+         kAudioFormatMPEG4AAC_ELD,
+         kAudioFormatMPEG4AAC_Spatial:
+      formatName = "m4a"
+      codecName = "aac"
+    case kAudioFormatAppleLossless:
+      formatName = "m4a"
+      codecName = "alac"
+    case kAudioFormatMPEGLayer3, kAudioFormatMPEGLayer1, kAudioFormatMPEGLayer2:
+      formatName = "mp3"
+      codecName = "mp3"
+    case kAudioFormatLinearPCM:
+      formatName = (ext == "aif" || ext == "aiff") ? "aiff" : "wav"
+      codecName = "pcm"
+    case kAudioFormatFLAC:
+      formatName = "flac"
+      codecName = "flac"
+    case kAudioFormatOpus:
+      formatName = "opus"
+      codecName = "opus"
+    default:
+      if !ext.isEmpty {
+        formatName = (ext == "mpeg") ? "mp3" : (ext == "mp4" ? "m4a" : ext)
+        if ext == "mp3" || ext == "mpeg" {
+          codecName = "mp3"
+        } else if ext == "m4a" || ext == "mp4" {
+          codecName = "aac"
+        } else {
+          codecName = formatName
+        }
+      }
+    }
+
+    let estimatedRate = track.estimatedDataRate
+    let bitrate = (estimatedRate.isFinite && estimatedRate > 0)
+      ? Int(estimatedRate.rounded())
+      : 0
+
+    let durationSeconds = CMTimeGetSeconds(asset.duration)
+    let durationMs = (durationSeconds.isFinite && durationSeconds > 0)
+      ? Int((durationSeconds * 1000.0).rounded())
+      : 0
+
+    var result: [String: Any] = [
+      "formatName": formatName,
+      "codecName": codecName,
+      "durationMs": durationMs,
+      "bitrate": bitrate,
+      "sampleRate": sampleRate,
+      "channels": channels,
+    ]
+    if let bitDepth = bitDepth, bitDepth > 0 {
+      result["bitDepth"] = bitDepth
+    }
+    return result
   }
 }
 #endif
