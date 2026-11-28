@@ -100,6 +100,7 @@ abstract class RustLibApi extends BaseApi {
 
   Future<AlbumLoudnessResult> crateApiSimpleLoudnessAnalyzeAlbumLoudness({
     required List<String> paths,
+    int? threads,
   });
 
   Future<TrackLoudnessResult> crateApiSimpleLoudnessAnalyzeTrackLoudness({
@@ -464,12 +465,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @override
   Future<AlbumLoudnessResult> crateApiSimpleLoudnessAnalyzeAlbumLoudness({
     required List<String> paths,
+    int? threads,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_list_String(paths, serializer);
+          sse_encode_opt_box_autoadd_u_32(threads, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -482,7 +485,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_AnyhowException,
         ),
         constMeta: kCrateApiSimpleLoudnessAnalyzeAlbumLoudnessConstMeta,
-        argValues: [paths],
+        argValues: [paths, threads],
         apiImpl: this,
       ),
     );
@@ -491,7 +494,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiSimpleLoudnessAnalyzeAlbumLoudnessConstMeta =>
       const TaskConstMeta(
         debugName: "analyze_album_loudness",
-        argNames: ["paths"],
+        argNames: ["paths", "threads"],
       );
 
   @override

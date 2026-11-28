@@ -211,12 +211,15 @@ fn wire__crate__api__simple__loudness__analyze_album_loudness_impl(
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_paths = <Vec<String>>::sse_decode(&mut deserializer);
+            let api_threads = <Option<u32>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                     (move || {
-                        let output_ok =
-                            crate::api::simple::loudness::analyze_album_loudness(api_paths)?;
+                        let output_ok = crate::api::simple::loudness::analyze_album_loudness(
+                            api_paths,
+                            api_threads,
+                        )?;
                         Ok(output_ok)
                     })(),
                 )

@@ -15,10 +15,15 @@ Future<TrackLoudnessResult> analyzeTrackLoudness({required String path}) =>
 
 /// Analyzes each track individually and computes the combined album loudness
 /// via `EbuR128::loudness_global_multiple`.
+///
+/// `threads` controls the maximum number of worker threads used to decode and
+/// analyze tracks concurrently (defaults to `1` when `None` or `<= 1`).
 Future<AlbumLoudnessResult> analyzeAlbumLoudness({
   required List<String> paths,
+  int? threads,
 }) => RustLib.instance.api.crateApiSimpleLoudnessAnalyzeAlbumLoudness(
   paths: paths,
+  threads: threads,
 );
 
 class AlbumLoudnessResult {

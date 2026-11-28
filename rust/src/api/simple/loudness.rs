@@ -1,4 +1,6 @@
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 use std::time::Instant;
 
 use ebur128::{EbuR128, Mode};
@@ -37,23 +39,64 @@ pub fn analyze_track_loudness(path: String) -> anyhow::Result<TrackLoudnessResul
 
 /// Analyzes each track individually and computes the combined album loudness
 /// via `EbuR128::loudness_global_multiple`.
-pub fn analyze_album_loudness(paths: Vec<String>) -> anyhow::Result<AlbumLoudnessResult> {
+///
+/// `threads` controls the maximum number of worker threads used to decode and
+/// analyze tracks concurrently (defaults to `1` when `None` or `<= 1`).
+pub fn analyze_album_loudness(
+    paths: Vec<String>,
+    threads: Option<u32>,
+) -> anyhow::Result<AlbumLoudnessResult> {
     if paths.is_empty() {
         return Err(anyhow::anyhow!("paths must not be empty"));
     }
 
     let started = Instant::now();
+    let worker_count = threads.unwrap_or(1).max(1).min(paths.len() as u32) as usize;
     let mut tracks = Vec::with_capacity(paths.len());
     let mut analyzers = Vec::with_capacity(paths.len());
     let mut album_true_peak = 0.0_f64;
 
-    for path in &paths {
-        let (track, analyzer) = analyze_track_internal(path)?;
-        if track.true_peak > album_true_peak {
-            album_true_peak = track.true_peak;
+    if worker_count <= 1 {
+        for path in &paths {
+            let (track, analyzer) = analyze_track_internal(path)?;
+            if track.true_peak > album_true_peak {
+                album_true_peak = track.true_peak;
+            }
+            tracks.push(track);
+            analyzers.push(analyzer);
         }
-        tracks.push(track);
-        analyzers.push(analyzer);
+    } else {
+        let slots: Vec<Mutex<Option<anyhow::Result<(TrackLoudnessResult, EbuR128)>>>> =
+            (0..paths.len()).map(|_| Mutex::new(None)).collect();
+        let next_index = AtomicUsize::new(0);
+
+        std::thread::scope(|scope| {
+            for _ in 0..worker_count {
+                scope.spawn(|| loop {
+                    let idx = next_index.fetch_add(1, Ordering::Relaxed);
+                    if idx >= paths.len() {
+                        break;
+                    }
+                    let res = analyze_track_internal(&paths[idx]);
+                    if let Ok(mut guard) = slots[idx].lock() {
+                        *guard = Some(res);
+                    }
+                });
+            }
+        });
+
+        for slot in slots {
+            let res = slot
+                .into_inner()
+                .map_err(|_| anyhow::anyhow!("loudness worker mutex poisoned"))?
+                .ok_or_else(|| anyhow::anyhow!("loudness worker missed track result"))?;
+            let (track, analyzer) = res?;
+            if track.true_peak > album_true_peak {
+                album_true_peak = track.true_peak;
+            }
+            tracks.push(track);
+            analyzers.push(analyzer);
+        }
     }
 
     let raw_album_lufs = EbuR128::loudness_global_multiple(analyzers.iter())
@@ -174,7 +217,8 @@ mod tests {
 
     #[test]
     fn empty_album_returns_error() {
-        assert!(analyze_album_loudness(Vec::new()).is_err());
+        assert!(analyze_album_loudness(Vec::new(), None).is_err());
+        assert!(analyze_album_loudness(Vec::new(), Some(4)).is_err());
     }
 
     #[test]
@@ -201,7 +245,7 @@ mod tests {
         paths.sort();
         assert_eq!(paths.len(), 15);
 
-        let album = analyze_album_loudness(paths).expect("analyze human album");
+        let album = analyze_album_loudness(paths, Some(4)).expect("analyze human album");
         for t in &album.tracks {
             let name = Path::new(&t.path)
                 .file_name()
