@@ -406,6 +406,7 @@ struct PlayerController {
 /// Windows WASAPI 共享模式下 `cpal::Stream::pause()` 仅调用 `IAudioClient::Stop()`
 /// 而不会清空 endpoint buffer。若在暂停期间执行了 seek 或切换曲目，恢复播放前必须
 /// 重建共享输出流，否则会先播出滞留在系统缓冲区内的旧音频片段。
+#[flutter_rust_bridge::frb(ignore)]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct SharedSinkBufferState {
     /// 共享流是在正在播放的状态下被暂停的，系统缓冲区内可能残留未播完的旧音频帧。

@@ -11,6 +11,7 @@ import 'api/simple.dart';
 import 'api/simple/audio_fingerprint.dart';
 import 'api/simple/controller.dart';
 import 'api/simple/equalizer.dart';
+import 'api/simple/loudness.dart';
 import 'api/simple/metadata.dart';
 import 'api/simple/palette.dart';
 import 'api/simple/reverb.dart';
@@ -101,6 +102,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  AlbumLoudnessResult dco_decode_album_loudness_result(dynamic raw);
+
+  @protected
   AudioDetails dco_decode_audio_details(dynamic raw);
 
   @protected
@@ -181,6 +185,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
   @protected
+  List<TrackLoudnessResult> dco_decode_list_track_loudness_result(dynamic raw);
+
+  @protected
   List<TrackPicture> dco_decode_list_track_picture(dynamic raw);
 
   @protected
@@ -226,6 +233,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   TrackArtworkResult dco_decode_track_artwork_result(dynamic raw);
 
   @protected
+  TrackLoudnessResult dco_decode_track_loudness_result(dynamic raw);
+
+  @protected
   TrackMetadataUpdate dco_decode_track_metadata_update(dynamic raw);
 
   @protected
@@ -236,6 +246,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   int dco_decode_u_32(dynamic raw);
+
+  @protected
+  BigInt dco_decode_u_64(dynamic raw);
 
   @protected
   int dco_decode_u_8(dynamic raw);
@@ -306,6 +319,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ActiveAudioHardwareFormat sse_decode_active_audio_hardware_format(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  AlbumLoudnessResult sse_decode_album_loudness_result(
     SseDeserializer deserializer,
   );
 
@@ -400,6 +418,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
+  List<TrackLoudnessResult> sse_decode_list_track_loudness_result(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<TrackPicture> sse_decode_list_track_picture(
     SseDeserializer deserializer,
   );
@@ -453,6 +476,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  TrackLoudnessResult sse_decode_track_loudness_result(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   TrackMetadataUpdate sse_decode_track_metadata_update(
     SseDeserializer deserializer,
   );
@@ -465,6 +493,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   int sse_decode_u_32(SseDeserializer deserializer);
+
+  @protected
+  BigInt sse_decode_u_64(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_8(SseDeserializer deserializer);
@@ -548,6 +579,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_active_audio_hardware_format(
     ActiveAudioHardwareFormat self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_album_loudness_result(
+    AlbumLoudnessResult self,
     SseSerializer serializer,
   );
 
@@ -667,6 +704,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_track_loudness_result(
+    List<TrackLoudnessResult> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_track_picture(
     List<TrackPicture> self,
     SseSerializer serializer,
@@ -731,6 +774,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_track_loudness_result(
+    TrackLoudnessResult self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_track_metadata_update(
     TrackMetadataUpdate self,
     SseSerializer serializer,
@@ -744,6 +793,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_u_32(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_u_64(BigInt self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_8(int self, SseSerializer serializer);

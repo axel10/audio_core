@@ -192,6 +192,7 @@ dependencies = [
  "base64",
  "chrono",
  "cpal",
+ "ebur128",
  "env_logger",
  "fast_image_resize",
  "ffmpeg_core",
@@ -588,6 +589,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dasp_frame"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2a3937f5fe2135702897535c8d4a5553f8b116f76c1529088797f2eee7c5cd6"
+dependencies = [
+ "dasp_sample",
+]
+
+[[package]]
 name = "dasp_sample"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -669,6 +679,16 @@ name = "dyn-clone"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
+
+[[package]]
+name = "ebur128"
+version = "0.1.11"
+dependencies = [
+ "bitflags 2.13.1",
+ "dasp_frame",
+ "dasp_sample",
+ "smallvec",
+]
 
 [[package]]
 name = "either"

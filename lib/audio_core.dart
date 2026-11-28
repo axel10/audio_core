@@ -13,6 +13,7 @@ export 'src/audio_uri_resolver.dart';
 export 'src/fft_frame.dart';
 export 'src/fft_processor.dart';
 export 'src/rust/api/simple/equalizer.dart';
+export 'src/rust/api/simple/loudness.dart';
 export 'src/rust/api/simple/reverb.dart';
 export 'src/player_models.dart' hide AudioVisualizerParent;
 export 'src/playlist_models.dart';

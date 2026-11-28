@@ -1,4 +1,5 @@
 pub mod audio_fingerprint;
+pub mod loudness;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))]
 pub mod controller;
 pub mod equalizer;
@@ -557,6 +558,9 @@ use std::thread;
 use std::time::Duration;
 
 pub use audio_fingerprint::get_audio_fingerprint;
+pub use loudness::{
+    analyze_album_loudness, analyze_track_loudness, AlbumLoudnessResult, TrackLoudnessResult,
+};
 pub use controller::{
     crossfade_to_audio_file, dispose_audio, get_audio_decode_engine, get_audio_duration_ms,
     get_audio_equalizer_config, get_audio_pcm, get_audio_position_ms, get_audio_reverb_config,

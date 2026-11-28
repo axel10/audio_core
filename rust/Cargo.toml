@@ -26,6 +26,7 @@ rusty-chromaprint = "0.3.0"
 md5 = "0.7.0"
 webp = "0.3.0"
 fundsp = "0.23.0"
+ebur128 = { path = "ebur128" }
 
 
 [target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios"))'.dependencies]

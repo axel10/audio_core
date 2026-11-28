@@ -7,6 +7,7 @@ import 'package:audio_core/audio_core.dart';
 import 'package:file_picker/file_picker.dart';
 import 'equalizer_panel.dart';
 import 'reverb_demo_tab.dart';
+import 'loudness_demo_tab.dart';
 import 'fade_demo_tab.dart';
 import 'metadata_tab.dart';
 import 'mesh_demo_tab.dart';
@@ -447,7 +448,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 10,
+      length: 11,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Audio Visualizer Player Plugin Demo'),
@@ -465,6 +466,7 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
               Tab(icon: Icon(Icons.transform), text: 'Transcode'),
               Tab(icon: Icon(Icons.equalizer), text: 'Equalizer'),
               Tab(icon: Icon(Icons.surround_sound), text: 'Reverb'),
+              Tab(icon: Icon(Icons.graphic_eq), text: 'Loudness'),
             ],
           ),
         ),
@@ -552,6 +554,8 @@ class _VisualizerDemoPageState extends State<VisualizerDemoPage> {
             ),
             // 第九页: 音乐厅混响演示
             ReverbDemoTab(controller: _controller),
+            // 第十页: EBU R128 响度分析演示
+            LoudnessDemoTab(controller: _controller),
           ],
         ),
       ),
