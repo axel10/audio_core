@@ -158,10 +158,18 @@ fn smooth_config_toward(current: &mut EqualizerConfig, target: &EqualizerConfig)
     changed
 }
 
+pub(crate) fn clamp_normalization_gain_db(gain_db: f32) -> f32 {
+    if gain_db.is_finite() {
+        gain_db.clamp(-24.0, 18.0)
+    } else {
+        0.0
+    }
+}
+
 pub struct EqualizerShared {
     version: AtomicU64,
     config: Mutex<EqualizerConfig>,
-    normalization_gain_bits: AtomicU32,
+    normalization_gain_bits: Arc<AtomicU32>,
 }
 
 #[flutter_rust_bridge::frb(ignore)]
@@ -170,7 +178,7 @@ impl EqualizerShared {
         Arc::new(Self {
             version: AtomicU64::new(1),
             config: Mutex::new(config.sanitized()),
-            normalization_gain_bits: AtomicU32::new(0.0_f32.to_bits()),
+            normalization_gain_bits: Arc::new(AtomicU32::new(0.0_f32.to_bits())),
         })
     }
 
@@ -189,17 +197,17 @@ impl EqualizerShared {
     }
 
     pub fn set_normalization_gain_db(&self, gain_db: f32) {
-        let clamped = if gain_db.is_finite() {
-            gain_db.clamp(-24.0, 18.0)
-        } else {
-            0.0
-        };
+        let clamped = clamp_normalization_gain_db(gain_db);
         self.normalization_gain_bits
             .store(clamped.to_bits(), Ordering::Release);
     }
 
     pub fn normalization_gain_db(&self) -> f32 {
         f32::from_bits(self.normalization_gain_bits.load(Ordering::Acquire))
+    }
+
+    pub fn normalization_gain_arc(&self) -> Arc<AtomicU32> {
+        Arc::clone(&self.normalization_gain_bits)
     }
 
     pub fn version(&self) -> u64 {
@@ -508,6 +516,7 @@ where
 {
     inner: S,
     shared: Arc<EqualizerShared>,
+    normalization_gain_bits: Arc<AtomicU32>,
     current_version: u64,
     target_config: EqualizerConfig,
     smoothed_config: EqualizerConfig,
@@ -532,10 +541,19 @@ where
     S: Source<Item = f32>,
 {
     pub(crate) fn new(inner: S, shared: Arc<EqualizerShared>) -> Self {
+        let norm_bits = shared.normalization_gain_arc();
+        Self::new_with_normalization(inner, shared, norm_bits)
+    }
+
+    pub(crate) fn new_with_normalization(
+        inner: S,
+        shared: Arc<EqualizerShared>,
+        normalization_gain_bits: Arc<AtomicU32>,
+    ) -> Self {
         let channels = usize::from(max(inner.channels().get(), 1_u16));
         let sample_rate = inner.sample_rate().get();
         let config = shared.current_config();
-        let norm_db = shared.normalization_gain_db();
+        let norm_db = f32::from_bits(normalization_gain_bits.load(Ordering::Acquire));
         let chains = (0..channels)
             .map(|_| EqualizerChain::from_config(&config, sample_rate))
             .collect::<Vec<_>>();
@@ -545,6 +563,7 @@ where
         Self {
             inner,
             shared,
+            normalization_gain_bits,
             current_version: 0,
             target_config: config.clone(),
             smoothed_config: config,
@@ -565,7 +584,7 @@ where
             self.target_config = self.shared.current_config();
             self.current_version = version;
         }
-        self.target_norm_db = self.shared.normalization_gain_db();
+        self.target_norm_db = f32::from_bits(self.normalization_gain_bits.load(Ordering::Acquire));
         self.smoothed_norm_db = smooth_gain_db(self.smoothed_norm_db, self.target_norm_db);
 
         let config_changed = smooth_config_toward(&mut self.smoothed_config, &self.target_config);
@@ -937,6 +956,79 @@ mod tests {
             "Expected {}, got {}",
             expected_minus_12db,
             last
+        );
+    }
+
+    #[test]
+    fn test_eq_source_per_deck_normalization_gain_isolation() {
+        struct MockSource {
+            samples: Vec<f32>,
+            idx: usize,
+        }
+        impl Iterator for MockSource {
+            type Item = f32;
+            fn next(&mut self) -> Option<Self::Item> {
+                if self.idx < self.samples.len() {
+                    let s = self.samples[self.idx];
+                    self.idx += 1;
+                    Some(s)
+                } else {
+                    None
+                }
+            }
+        }
+        impl Source for MockSource {
+            fn current_span_len(&self) -> Option<usize> { None }
+            fn channels(&self) -> rodio::ChannelCount { std::num::NonZero::new(2).unwrap() }
+            fn sample_rate(&self) -> rodio::SampleRate { std::num::NonZero::new(44100).unwrap() }
+            fn total_duration(&self) -> Option<Duration> { None }
+        }
+
+        let shared = EqualizerShared::new(EqualizerConfig {
+            enabled: false,
+            ..Default::default()
+        });
+        let outgoing_norm = Arc::new(AtomicU32::new((-6.0_f32).to_bits()));
+        let incoming_norm = Arc::new(AtomicU32::new((-6.0_f32).to_bits()));
+
+        let mut outgoing = EqSource::new_with_normalization(
+            MockSource { samples: vec![0.4; 4096], idx: 0 },
+            Arc::clone(&shared),
+            Arc::clone(&outgoing_norm),
+        );
+        let mut incoming = EqSource::new_with_normalization(
+            MockSource { samples: vec![0.4; 4096], idx: 0 },
+            Arc::clone(&shared),
+            Arc::clone(&incoming_norm),
+        );
+
+        // Simulate crossfade: incoming track gets its own 0 dB gain while outgoing stays at -6 dB.
+        incoming_norm.store(0.0_f32.to_bits(), Ordering::Release);
+
+        let mut out_last = 0.0;
+        let mut in_last = 0.0;
+        for _ in 0..4000 {
+            if let Some(s) = outgoing.next() {
+                out_last = s;
+            }
+            if let Some(s) = incoming.next() {
+                in_last = s;
+            }
+        }
+
+        let expected_outgoing = 0.4 * 10.0_f32.powf(-6.0 / 20.0);
+        let expected_incoming = 0.4;
+        assert!(
+            (out_last - expected_outgoing).abs() < 1e-4,
+            "Outgoing track gain drifted: expected {}, got {}",
+            expected_outgoing,
+            out_last
+        );
+        assert!(
+            (in_last - expected_incoming).abs() < 1e-4,
+            "Incoming track gain mismatch: expected {}, got {}",
+            expected_incoming,
+            in_last
         );
     }
 }

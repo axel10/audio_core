@@ -1,4 +1,4 @@
-use super::equalizer::{EqSource, EqualizerConfig, EqualizerShared};
+use super::equalizer::{clamp_normalization_gain_db, EqSource, EqualizerConfig, EqualizerShared};
 use super::reverb::ReverbConfig;
 use crate::reverb_dsp::{ReverbShared, ReverbSource};
 use super::fft::{clear_fft_buffer, FftSource, RAW_FFT_BINS};
@@ -11,7 +11,7 @@ use rodio::{
     Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source,
 };
 use std::fs::File;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
@@ -338,6 +338,7 @@ struct PlaybackDeck {
     loaded_duration: Duration,
     source_start_offset: Duration,
     gain: f32,
+    normalization_gain_bits: Arc<AtomicU32>,
     decode_engine: String,
 }
 
@@ -378,6 +379,7 @@ struct PlayerController {
     current_deck: Option<PlaybackDeck>,
     incoming_deck: Option<PlaybackDeck>,
     equalizer: Arc<EqualizerShared>,
+    normalization_gain_db: f32,
     reverb: Arc<ReverbShared>,
     playback_speed: Arc<SpeedShared>,
     volume: f32,
@@ -750,6 +752,7 @@ impl PlayerController {
             current_deck: None,
             incoming_deck: None,
             equalizer: EqualizerShared::new(EqualizerConfig::default()),
+            normalization_gain_db: 0.0,
             reverb: ReverbShared::new(ReverbConfig::default()),
             playback_speed: Arc::new(SpeedShared::new(1.0)),
             volume: 1.0,
@@ -1061,10 +1064,15 @@ impl PlayerController {
         #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "ios")))]
         let prefetched_source: Box<dyn Source<Item = f32> + Send> = pre_seek_source;
 
+        let normalization_gain_bits = Arc::new(AtomicU32::new(self.normalization_gain_db.to_bits()));
         let post_prefetch_source: Box<dyn Source<Item = f32> + Send> = if is_bit_perfect {
             prefetched_source
         } else {
-            let eq_source = EqSource::new(prefetched_source, Arc::clone(&self.equalizer));
+            let eq_source = EqSource::new_with_normalization(
+                prefetched_source,
+                Arc::clone(&self.equalizer),
+                Arc::clone(&normalization_gain_bits),
+            );
             Box::new(ReverbSource::new(eq_source, Arc::clone(&self.reverb)))
         };
 
@@ -1124,6 +1132,7 @@ impl PlayerController {
             loaded_duration: total,
             source_start_offset: clamped_offset,
             gain,
+            normalization_gain_bits,
             decode_engine,
         })
     }
@@ -2477,11 +2486,25 @@ pub fn set_audio_equalizer_config(config: EqualizerConfig) -> Result<(), String>
 }
 
 pub fn set_audio_normalization_gain(gain_db: f32) -> Result<(), String> {
-    let c = controller()
+    let mut c = controller()
         .lock()
         .map_err(|_| "player lock poisoned".to_string())?;
 
-    c.equalizer.set_normalization_gain_db(gain_db);
+    let clamped = clamp_normalization_gain_db(gain_db);
+    c.normalization_gain_db = clamped;
+    c.equalizer.set_normalization_gain_db(clamped);
+
+    // During crossfade, only update the incoming deck so the outgoing track
+    // retains its own normalization gain while fading out.
+    if let Some(incoming) = c.incoming_deck.as_ref() {
+        incoming
+            .normalization_gain_bits
+            .store(clamped.to_bits(), Ordering::Release);
+    } else if let Some(current) = c.current_deck.as_ref() {
+        current
+            .normalization_gain_bits
+            .store(clamped.to_bits(), Ordering::Release);
+    }
     Ok(())
 }
 

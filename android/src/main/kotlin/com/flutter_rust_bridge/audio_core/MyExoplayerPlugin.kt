@@ -1004,8 +1004,16 @@ class MyExoplayerPlugin :
             "setNormalizationGain" -> {
                 val gainDb = call.argument<Double>("gainDb")?.toFloat() ?: 0f
                 cppEqualizerConfig = cppEqualizerConfig.copy(normalizationGainDb = gainDb)
-                playerContexts.values.forEach { playerContext ->
-                    playerContext.cppEqualizerProcessor.setNormalizationGain(gainDb)
+                if (activeCrossfadeSession != null) {
+                    // During crossfade, only update the incoming player so the outgoing track
+                    // keeps its own normalization gain until it finishes fading out.
+                    playerContexts[CROSSFADE_PLAYER_ID]
+                        ?.cppEqualizerProcessor
+                        ?.setNormalizationGain(gainDb)
+                } else {
+                    playerContexts.values.forEach { playerContext ->
+                        playerContext.cppEqualizerProcessor.setNormalizationGain(gainDb)
+                    }
                 }
                 result.success(null)
             }
