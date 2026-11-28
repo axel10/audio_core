@@ -81,6 +81,11 @@ Future<void> setAudioEqualizerConfig({required EqualizerConfig config}) =>
       config: config,
     );
 
+Future<void> setAudioNormalizationGain({required double gainDb}) => RustLib
+    .instance
+    .api
+    .crateApiSimpleControllerSetAudioNormalizationGain(gainDb: gainDb);
+
 Future<ReverbConfig> getAudioReverbConfig() =>
     RustLib.instance.api.crateApiSimpleControllerGetAudioReverbConfig();
 

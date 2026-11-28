@@ -9,7 +9,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // These functions are ignored because they are not marked as `pub`: `band_center_frequency`, `band_q_factor`, `from_config`, `identity`, `new`, `process_current_sample`, `process_sample`, `refresh_if_needed`, `reset`, `smooth_config_toward`, `smooth_toward`, `soft_limit`, `update_from_config`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `EqSource`, `EqualizerChain`, `EqualizerProcessor`, `EqualizerShared`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `channels`, `clone`, `clone`, `current_span_len`, `fmt`, `next`, `sample_rate`, `total_duration`, `try_seek`
-// These functions are ignored (category: IgnoreBecauseExplicitAttribute): `current_config`, `is_active`, `new`, `new`, `process_interleaved`, `reset`, `set_config`, `set_format`, `version`
+// These functions are ignored (category: IgnoreBecauseExplicitAttribute): `current_config`, `is_active`, `new`, `new`, `normalization_gain_db`, `process_interleaved`, `reset`, `set_config`, `set_format`, `set_normalization_gain_db`, `version`
 // These functions have error during generation (see debug logs or enable `stop_on_error: true` for more details): `sanitized`
 
 class EqualizerConfig {

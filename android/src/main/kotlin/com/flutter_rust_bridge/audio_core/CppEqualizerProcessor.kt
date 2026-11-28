@@ -58,6 +58,12 @@ class CppEqualizerProcessor : BaseAudioProcessor() {
         nativeSetPreAmp(nativeHandle, gainDb)
     }
 
+    fun setNormalizationGain(gainDb: Float) {
+        if (nativeHandle != 0L) {
+            nativeSetNormalizationGain(nativeHandle, gainDb)
+        }
+    }
+
     fun setBassBoost(gainDb: Float, freqHz: Float = 80f, q: Float = 0.75f) {
         if (nativeHandle != 0L) {
             nativeSetBassBoost(nativeHandle, gainDb, freqHz, q)
@@ -137,6 +143,7 @@ class CppEqualizerProcessor : BaseAudioProcessor() {
     private external fun nativeProcess(handle: Long, buffer: ByteBuffer, numSamples: Int, channels: Int)
     private external fun nativeSetBandGain(handle: Long, index: Int, gainDb: Float)
     private external fun nativeSetPreAmp(handle: Long, gainDb: Float)
+    private external fun nativeSetNormalizationGain(handle: Long, gainDb: Float)
     private external fun nativeSetEnabled(handle: Long, enabled: Boolean)
     private external fun nativeSetBassBoost(handle: Long, gainDb: Float, freqHz: Float, q: Float)
 }

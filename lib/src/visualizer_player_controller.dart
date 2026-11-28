@@ -1657,6 +1657,8 @@ class AudioCoreController extends ChangeNotifier
       equalizer.setPreamp(preampDb);
   Future<void> setBassBoost(double gainDb) async =>
       equalizer.setBassBoost(gainDb);
+  Future<void> setNormalizationGain(double gainDb) =>
+      _engine.setNormalizationGain(gainDb);
   void resetEqualizerDefaults() => equalizer.resetDefaults();
   List<double> getEqualizerBandCenters({int? bandCount}) =>
       equalizer.getBandCenters(bandCount: bandCount);

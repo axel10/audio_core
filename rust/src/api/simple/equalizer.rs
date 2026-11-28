@@ -8,7 +8,7 @@ use fundsp::prelude::*;
 use rodio::Source;
 use std::cmp::{max, min};
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicU32, AtomicU64, Ordering},
     Arc, Mutex,
 };
 #[cfg(any(
@@ -77,6 +77,15 @@ impl EqualizerConfig {
 
 fn smooth_toward(current: f32, target: f32, factor: f32) -> f32 {
     current + (target - current) * factor
+}
+
+fn smooth_gain_db(current: f32, target: f32) -> f32 {
+    let next = smooth_toward(current, target, CONFIG_SMOOTHING_FACTOR);
+    if (next - current).abs() > EPSILON_GAIN_DB {
+        next
+    } else {
+        target
+    }
 }
 
 fn smooth_config_toward(current: &mut EqualizerConfig, target: &EqualizerConfig) -> bool {
@@ -152,6 +161,7 @@ fn smooth_config_toward(current: &mut EqualizerConfig, target: &EqualizerConfig)
 pub struct EqualizerShared {
     version: AtomicU64,
     config: Mutex<EqualizerConfig>,
+    normalization_gain_bits: AtomicU32,
 }
 
 #[flutter_rust_bridge::frb(ignore)]
@@ -160,6 +170,7 @@ impl EqualizerShared {
         Arc::new(Self {
             version: AtomicU64::new(1),
             config: Mutex::new(config.sanitized()),
+            normalization_gain_bits: AtomicU32::new(0.0_f32.to_bits()),
         })
     }
 
@@ -175,6 +186,20 @@ impl EqualizerShared {
             *current = config.sanitized();
             self.version.fetch_add(1, Ordering::AcqRel);
         }
+    }
+
+    pub fn set_normalization_gain_db(&self, gain_db: f32) {
+        let clamped = if gain_db.is_finite() {
+            gain_db.clamp(-24.0, 18.0)
+        } else {
+            0.0
+        };
+        self.normalization_gain_bits
+            .store(clamped.to_bits(), Ordering::Release);
+    }
+
+    pub fn normalization_gain_db(&self) -> f32 {
+        f32::from_bits(self.normalization_gain_bits.load(Ordering::Acquire))
     }
 
     pub fn version(&self) -> u64 {
@@ -327,6 +352,8 @@ pub struct EqualizerProcessor {
     current_version: u64,
     target_config: EqualizerConfig,
     smoothed_config: EqualizerConfig,
+    target_norm_db: f32,
+    smoothed_norm_db: f32,
     chains: Vec<EqualizerChain>,
     channels: usize,
     sample_rate: u32,
@@ -338,6 +365,7 @@ pub struct EqualizerProcessor {
 impl EqualizerProcessor {
     pub fn new(shared: Arc<EqualizerShared>, channels: usize, sample_rate: u32) -> Self {
         let config = shared.current_config();
+        let norm_db = shared.normalization_gain_db();
         let safe_channels = max(channels, 1);
         let chains = (0..safe_channels)
             .map(|_| EqualizerChain::from_config(&config, sample_rate))
@@ -349,6 +377,8 @@ impl EqualizerProcessor {
             current_version: 0,
             target_config: config.clone(),
             smoothed_config: config,
+            target_norm_db: norm_db,
+            smoothed_norm_db: norm_db,
             chains,
             channels: safe_channels,
             sample_rate,
@@ -386,9 +416,14 @@ impl EqualizerProcessor {
             self.target_config = self.shared.current_config();
             self.current_version = version;
         }
+        self.target_norm_db = self.shared.normalization_gain_db();
 
         let target_weight = if self.target_config.enabled { 1.0 } else { 0.0 };
-        if self.fade_weight == 0.0 && !self.smoothed_config.enabled && target_weight == 0.0 {
+        let eq_active =
+            self.fade_weight > 0.0 || self.smoothed_config.enabled || target_weight > 0.0;
+        let norm_active = self.target_norm_db.abs() > EPSILON_GAIN_DB
+            || self.smoothed_norm_db.abs() > EPSILON_GAIN_DB;
+        if !eq_active && !norm_active {
             return;
         }
 
@@ -407,6 +442,7 @@ impl EqualizerProcessor {
                         chain.update_from_config(&self.smoothed_config, self.sample_rate);
                     }
                 }
+                self.smoothed_norm_db = smooth_gain_db(self.smoothed_norm_db, self.target_norm_db);
             }
             self.sample_counter = self.sample_counter.wrapping_add(1);
 
@@ -440,11 +476,23 @@ impl EqualizerProcessor {
                     }
                 }
             }
+
+            if self.smoothed_norm_db.abs() > EPSILON_GAIN_DB {
+                let norm_linear = 10.0_f32.powf(self.smoothed_norm_db / 20.0);
+                for ch in 0..self.channels {
+                    let s = buffer[frame_offset + ch];
+                    buffer[frame_offset + ch] = soft_limit(s * norm_linear);
+                }
+            }
         }
     }
 
     pub fn is_active(&self) -> bool {
-        self.fade_weight > 0.0 || self.smoothed_config.enabled || self.target_config.enabled
+        self.fade_weight > 0.0
+            || self.smoothed_config.enabled
+            || self.target_config.enabled
+            || self.target_norm_db.abs() > EPSILON_GAIN_DB
+            || self.smoothed_norm_db.abs() > EPSILON_GAIN_DB
     }
 }
 
@@ -463,6 +511,8 @@ where
     current_version: u64,
     target_config: EqualizerConfig,
     smoothed_config: EqualizerConfig,
+    target_norm_db: f32,
+    smoothed_norm_db: f32,
     chains: Vec<EqualizerChain>,
     channels: usize,
     sample_rate: u32,
@@ -485,6 +535,7 @@ where
         let channels = usize::from(max(inner.channels().get(), 1_u16));
         let sample_rate = inner.sample_rate().get();
         let config = shared.current_config();
+        let norm_db = shared.normalization_gain_db();
         let chains = (0..channels)
             .map(|_| EqualizerChain::from_config(&config, sample_rate))
             .collect::<Vec<_>>();
@@ -497,6 +548,8 @@ where
             current_version: 0,
             target_config: config.clone(),
             smoothed_config: config,
+            target_norm_db: norm_db,
+            smoothed_norm_db: norm_db,
             chains,
             channels,
             sample_rate,
@@ -512,6 +565,8 @@ where
             self.target_config = self.shared.current_config();
             self.current_version = version;
         }
+        self.target_norm_db = self.shared.normalization_gain_db();
+        self.smoothed_norm_db = smooth_gain_db(self.smoothed_norm_db, self.target_norm_db);
 
         let config_changed = smooth_config_toward(&mut self.smoothed_config, &self.target_config);
         if !config_changed {
@@ -553,23 +608,29 @@ where
             }
         }
 
-        // Fast path: if fully bypassed and crossfade completed, pass through directly
-        if self.fade_weight == 0.0 && !self.smoothed_config.enabled {
-            return sample;
-        }
-
-        let channel = min(channel, self.chains.len().saturating_sub(1));
-        let eq_output = self
-            .chains
-            .get_mut(channel)
-            .map(|chain| chain.process_sample(sample))
-            .unwrap_or(sample);
-
-        if self.fade_weight >= 1.0 {
-            eq_output
+        let post_eq = if self.fade_weight == 0.0 && !self.smoothed_config.enabled {
+            sample
         } else {
-            // Smooth linear crossfade during enable/disable transition to eliminate click/pop
-            sample * (1.0 - self.fade_weight) + eq_output * self.fade_weight
+            let channel = min(channel, self.chains.len().saturating_sub(1));
+            let eq_output = self
+                .chains
+                .get_mut(channel)
+                .map(|chain| chain.process_sample(sample))
+                .unwrap_or(sample);
+
+            if self.fade_weight >= 1.0 {
+                eq_output
+            } else {
+                // Smooth linear crossfade during enable/disable transition to eliminate click/pop
+                sample * (1.0 - self.fade_weight) + eq_output * self.fade_weight
+            }
+        };
+
+        if self.smoothed_norm_db.abs() > EPSILON_GAIN_DB {
+            let norm_linear = 10.0_f32.powf(self.smoothed_norm_db / 20.0);
+            soft_limit(post_eq * norm_linear)
+        } else {
+            post_eq
         }
     }
 }
@@ -814,6 +875,70 @@ mod tests {
             assert!((s - 0.5).abs() < 1e-4, "Expected 0.5 unity gain, got {}", s);
         }
     }
+
+    #[test]
+    fn test_eq_source_applies_normalization_gain_when_eq_disabled() {
+        struct MockSource {
+            samples: Vec<f32>,
+            idx: usize,
+        }
+        impl Iterator for MockSource {
+            type Item = f32;
+            fn next(&mut self) -> Option<Self::Item> {
+                if self.idx < self.samples.len() {
+                    let s = self.samples[self.idx];
+                    self.idx += 1;
+                    Some(s)
+                } else {
+                    None
+                }
+            }
+        }
+        impl Source for MockSource {
+            fn current_span_len(&self) -> Option<usize> { None }
+            fn channels(&self) -> rodio::ChannelCount { std::num::NonZero::new(2).unwrap() }
+            fn sample_rate(&self) -> rodio::SampleRate { std::num::NonZero::new(44100).unwrap() }
+            fn total_duration(&self) -> Option<Duration> { None }
+        }
+
+        let shared = EqualizerShared::new(EqualizerConfig {
+            enabled: false,
+            ..Default::default()
+        });
+        // -6.0 dB (~0.501187 linear)
+        shared.set_normalization_gain_db(-6.0);
+
+        let src = MockSource {
+            samples: vec![0.4; 4096],
+            idx: 0,
+        };
+        let mut eq_source = EqSource::new(src, Arc::clone(&shared));
+
+        let expected_minus_6db = 0.4 * 10.0_f32.powf(-6.0 / 20.0);
+        let first = eq_source.next().unwrap();
+        assert!(
+            (first - expected_minus_6db).abs() < 1e-5,
+            "Expected {}, got {}",
+            expected_minus_6db,
+            first
+        );
+
+        // Dynamically change normalization gain to -12.0 dB and verify smoothing converges
+        shared.set_normalization_gain_db(-12.0);
+        let mut last = first;
+        for _ in 0..4000 {
+            if let Some(s) = eq_source.next() {
+                last = s;
+            }
+        }
+        let expected_minus_12db = 0.4 * 10.0_f32.powf(-12.0 / 20.0);
+        assert!(
+            (last - expected_minus_12db).abs() < 1e-4,
+            "Expected {}, got {}",
+            expected_minus_12db,
+            last
+        );
+    }
 }
 
 #[cfg(target_os = "android")]
@@ -929,6 +1054,19 @@ pub mod android_jni {
             let mut cfg = eq.shared.current_config();
             cfg.preamp_db = gain_db;
             eq.shared.set_config(cfg);
+        }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "system" fn Java_com_flutter_1rust_1bridge_audio_1core_CppEqualizerProcessor_nativeSetNormalizationGain(
+        _env: JNIEnv,
+        _class: JClass,
+        handle: jlong,
+        gain_db: jfloat,
+    ) {
+        if handle != 0 {
+            let eq = &*(handle as *mut AndroidEqualizer);
+            eq.shared.set_normalization_gain_db(gain_db);
         }
     }
 

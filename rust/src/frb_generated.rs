@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1587380741;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -492545371;
 
 // Section: executor
 
@@ -2196,6 +2196,40 @@ fn wire__crate__api__simple__controller__set_audio_equalizer_config_impl(
         },
     )
 }
+fn wire__crate__api__simple__controller__set_audio_normalization_gain_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "set_audio_normalization_gain",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_gain_db = <f32>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok =
+                        crate::api::simple::controller::set_audio_normalization_gain(api_gain_db)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__simple__controller__set_audio_output_mode_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -3297,15 +3331,16 @@ fn pde_ffi_dispatcher_primary_impl(
 59 => wire__crate__api__simple__reverb__reverb_config_fundsp_fdn_default_impl(port, ptr, rust_vec_len, data_len),
 60 => wire__crate__api__simple__controller__seek_audio_ms_impl(port, ptr, rust_vec_len, data_len),
 61 => wire__crate__api__simple__controller__set_audio_equalizer_config_impl(port, ptr, rust_vec_len, data_len),
-62 => wire__crate__api__simple__controller__set_audio_output_mode_impl(port, ptr, rust_vec_len, data_len),
-63 => wire__crate__api__simple__controller__set_audio_reverb_config_impl(port, ptr, rust_vec_len, data_len),
-64 => wire__crate__api__simple__controller__set_audio_volume_impl(port, ptr, rust_vec_len, data_len),
-65 => wire__crate__api__simple__controller__set_playback_speed_impl(port, ptr, rust_vec_len, data_len),
-67 => wire__crate__api__simple__controller__toggle_audio_impl(port, ptr, rust_vec_len, data_len),
-68 => wire__crate__api__simple__metadata__track_artwork_result_default_impl(port, ptr, rust_vec_len, data_len),
-69 => wire__crate__api__simple__metadata__track_metadata_update_default_impl(port, ptr, rust_vec_len, data_len),
-70 => wire__crate__api__simple__metadata__track_picture_default_impl(port, ptr, rust_vec_len, data_len),
-71 => wire__crate__api__simple__metadata__update_track_metadata_impl(port, ptr, rust_vec_len, data_len),
+62 => wire__crate__api__simple__controller__set_audio_normalization_gain_impl(port, ptr, rust_vec_len, data_len),
+63 => wire__crate__api__simple__controller__set_audio_output_mode_impl(port, ptr, rust_vec_len, data_len),
+64 => wire__crate__api__simple__controller__set_audio_reverb_config_impl(port, ptr, rust_vec_len, data_len),
+65 => wire__crate__api__simple__controller__set_audio_volume_impl(port, ptr, rust_vec_len, data_len),
+66 => wire__crate__api__simple__controller__set_playback_speed_impl(port, ptr, rust_vec_len, data_len),
+68 => wire__crate__api__simple__controller__toggle_audio_impl(port, ptr, rust_vec_len, data_len),
+69 => wire__crate__api__simple__metadata__track_artwork_result_default_impl(port, ptr, rust_vec_len, data_len),
+70 => wire__crate__api__simple__metadata__track_metadata_update_default_impl(port, ptr, rust_vec_len, data_len),
+71 => wire__crate__api__simple__metadata__track_picture_default_impl(port, ptr, rust_vec_len, data_len),
+72 => wire__crate__api__simple__metadata__update_track_metadata_impl(port, ptr, rust_vec_len, data_len),
                         _ => unreachable!(),
                     }
 }
@@ -3331,7 +3366,7 @@ fn pde_ffi_dispatcher_sync_impl(
         37 => wire__crate__api__simple__get_capabilities_impl(ptr, rust_vec_len, data_len),
         42 => wire__crate__api__audio_converter__simple__greet_impl(ptr, rust_vec_len, data_len),
         43 => wire__crate__api__simple__greet_impl(ptr, rust_vec_len, data_len),
-        66 => wire__crate__api__simple__subscribe_playback_state_impl(ptr, rust_vec_len, data_len),
+        67 => wire__crate__api__simple__subscribe_playback_state_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

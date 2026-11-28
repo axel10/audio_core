@@ -359,6 +359,14 @@ class AndroidAudioEngine with TrackArtworkSupport implements AudioEngine {
     _lastConfig = config;
   }
 
+  @override
+  Future<void> setNormalizationGain(double gainDb) async {
+    await _channel.invokeMethod('setNormalizationGain', {
+      'gainDb': gainDb,
+      'playerId': _activePlayerId,
+    });
+  }
+
   void _handleFftEvent(dynamic event) {
     if (event is! Map) return;
     final map = event.cast<Object?, Object?>();

@@ -2476,6 +2476,15 @@ pub fn set_audio_equalizer_config(config: EqualizerConfig) -> Result<(), String>
     Ok(())
 }
 
+pub fn set_audio_normalization_gain(gain_db: f32) -> Result<(), String> {
+    let c = controller()
+        .lock()
+        .map_err(|_| "player lock poisoned".to_string())?;
+
+    c.equalizer.set_normalization_gain_db(gain_db);
+    Ok(())
+}
+
 pub fn get_audio_reverb_config() -> ReverbConfig {
     controller()
         .lock()

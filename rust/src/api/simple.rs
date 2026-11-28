@@ -377,6 +377,9 @@ pub mod controller {
     pub fn set_audio_equalizer_config(_config: EqualizerConfig) -> Result<(), String> {
         Ok(())
     }
+    pub fn set_audio_normalization_gain(_gain_db: f32) -> Result<(), String> {
+        Ok(())
+    }
     pub fn get_audio_equalizer_config() -> EqualizerConfig {
         EqualizerConfig::default()
     }
@@ -566,7 +569,8 @@ pub use controller::{
     get_audio_equalizer_config, get_audio_pcm, get_audio_position_ms, get_audio_reverb_config,
     get_audio_waveform, get_latest_fft, get_loaded_audio_path, init_app, is_audio_playing,
     load_audio_file, pause_audio, play_audio, seek_audio_ms, set_audio_equalizer_config,
-    set_audio_reverb_config, set_audio_volume, set_playback_speed, get_playback_speed,
+    set_audio_normalization_gain, set_audio_reverb_config, set_audio_volume, set_playback_speed,
+    get_playback_speed,
     toggle_audio, FadeMode, FadeSettings, PlaybackState,
 };
 pub use metadata::{

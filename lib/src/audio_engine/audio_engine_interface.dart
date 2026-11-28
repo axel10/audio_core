@@ -106,6 +106,7 @@ abstract class AudioEngine {
   // Effects
   Future<void> setEqualizerConfig(EqualizerConfig config);
   Future<EqualizerConfig> getEqualizerConfig();
+  Future<void> setNormalizationGain(double gainDb) async {}
   Future<void> setReverbConfig(ReverbConfig config);
   Future<ReverbConfig> getReverbConfig();
 

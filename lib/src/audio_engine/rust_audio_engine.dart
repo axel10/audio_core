@@ -298,6 +298,10 @@ class RustAudioEngine with TrackArtworkSupport implements AudioEngine {
       rust.getAudioEqualizerConfig();
 
   @override
+  Future<void> setNormalizationGain(double gainDb) =>
+      rust.setAudioNormalizationGain(gainDb: gainDb);
+
+  @override
   Future<void> setReverbConfig(ReverbConfig config) =>
       rust.setAudioReverbConfig(config: config);
 

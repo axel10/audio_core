@@ -271,6 +271,7 @@ class MyExoplayerPlugin :
         val enabled: Boolean = false,
         val bandCount: Int = 10,
         val preAmpDb: Float = 0f,
+        val normalizationGainDb: Float = 0f,
         val bassBoostGainDb: Float = 0f,
         val bassBoostFreqHz: Float = 80f,
         val bassBoostQ: Float = 0.75f,
@@ -301,6 +302,7 @@ class MyExoplayerPlugin :
             processor.setBandGain(i, config.bandGains[i])
         }
         processor.setPreAmp(config.preAmpDb)
+        processor.setNormalizationGain(config.normalizationGainDb)
         processor.setBassBoost(
             config.bassBoostGainDb,
             config.bassBoostFreqHz,
@@ -996,6 +998,14 @@ class MyExoplayerPlugin :
                 cppEqualizerConfig = cppEqualizerConfig.copy(preAmpDb = gainDb)
                 playerContexts.values.forEach { playerContext ->
                     playerContext.cppEqualizerProcessor.setPreAmp(gainDb)
+                }
+                result.success(null)
+            }
+            "setNormalizationGain" -> {
+                val gainDb = call.argument<Double>("gainDb")?.toFloat() ?: 0f
+                cppEqualizerConfig = cppEqualizerConfig.copy(normalizationGainDb = gainDb)
+                playerContexts.values.forEach { playerContext ->
+                    playerContext.cppEqualizerProcessor.setNormalizationGain(gainDb)
                 }
                 result.success(null)
             }
